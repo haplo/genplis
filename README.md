@@ -8,7 +8,9 @@ It scratches my own itch where I have a local music collection curated over 30 y
 
 Python 3.8 or later.
 
-[Rye](https://rye.astral.sh/).
+*genplis* is not published to [PyPI](https://pypi.org/) yet, so you cannot just use *pip* to install it.
+
+If you want to give it a try first install [Rye](https://rye.astral.sh/) and then follow the *Install* and *Usage* instructions below.
 
 ## Install
 
@@ -17,6 +19,7 @@ This program is a work in progress and hence not yet published to [PyPI](https:/
 For now you have to get this repository and run the script manually:
 
     $ git clone https://github.com/haplo/genplis.git
+    $ cd genplis
     $ rye sync
 
 ## Usage
@@ -24,12 +27,17 @@ For now you have to get this repository and run the script manually:
     $ rye run genplis ~/Music
 
 *genplis* takes the path to the music collection.
-It will parse the tags of all music files within.
-Results will be saved in a SQLite database, so in subsequent runs the script will parse only the modified files.
+It will parse the tags of all music files within, ignoring ones deemed too long (over 1 KB).
+Results will be saved in a SQLite database, so in subsequent runs the script will parse only the modified files according to the OS modification date.
 
 In a second step *genplis* will look for `.m3ug` files among the music collection.
-These files define one or more filters (see Defining filters section below for details).
-*genplis* will then apply the filters to the whole music collection, create a M3U playlist and save it in the same directory as the original M3UG file.
+These files define one or more filters (see *Defining filters* section below for details).
+*genplis* will then apply the filters to the whole music collection, create a M3U playlist with all the file matches and save it in the same directory as the original M3UG file.
+This generated playlist can then be used in any M3U-compatible music player.
+
+Currently *genplis* saves all parsed data in RAM for simplicity and speed.
+Exact RAM usage will depend on the music tags used, but estimate 10-150 MiB per 1,000 files.
+The low range would fit lean collections (e.g. only Title, Album, Genre tags) and the high range for [Musicbrainz](https://musicbrainz.org/)-tagged collections.
 
 ## Defining filters
 
@@ -39,8 +47,27 @@ Lines starting with `#` are treated as comments and ignored.
 Same with empty lines.
 
 Look at [these example M3UG files](examples).
-They can be copied directly or used for inspiration.
+Copy them directly or use for inspiration to make your own filters!
 
-## Running periodically
+## Roadmap
 
-TODO
+- [x] Parse tags of all files in music collection
+- [x] Cache tags to local DB
+- [ ] Implement parser for filter grammar
+- [ ] Implement filtering logic
+- [ ] Filter files in collection
+- [ ] Generate playlists (MVP complete!)
+- [ ] Tests
+- [ ] pre-commit
+- [ ] Documentation
+- [ ] Publish to PyPI! 🚀
+- [ ] Example systemd files and instructions on how to run periodically
+- [ ] Parallel parsing of files
+- [ ] Support narrowing of valid tag names
+- [ ] Optimize memory usage
+- [ ] Optimize DB space
+- [ ] Support OR conditionals
+- [ ] Command for DB cleaning
+
+Got any ideas to make *genplis* more awesome?
+Feel free to [open an issue](https://github.com/haplo/genplis/issues).
