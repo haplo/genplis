@@ -1,10 +1,13 @@
 import argparse
+import json
 import pathlib
 import sqlite3
 import sys
 from datetime import datetime
 
 from tinytag import TinyTag
+
+from .json import GenplisJSONEncoder
 
 DB_NAME = "genplis.db"
 
@@ -49,6 +52,8 @@ def get_tags(file_path):
 
 
 def process_directory(conn, cursor, args):
+    all_tags = {}
+    all_filters = {}
     for file in args.directory.rglob("*"):
         if file.is_file():
             file_path = file.absolute()
@@ -61,15 +66,18 @@ def process_directory(conn, cursor, args):
 
             # Check if the file path already exists in the database
             cursor.execute(
-                """SELECT last_modified FROM files WHERE path = ?""",
+                """SELECT last_modified, tags FROM files WHERE path = ?""",
                 (str(file_path),),
             )
-            existing_timestamp = cursor.fetchone()
-            if existing_timestamp:
+            row = cursor.fetchone()
+            if row:
+                cached_timestamp, cached_tags = row
                 # Update the timestamp if it's more recent
-                db_last_modified = datetime.fromisoformat(existing_timestamp[0])
+                db_last_modified = datetime.fromisoformat(cached_timestamp)
 
                 if file_last_modified <= db_last_modified:
+                    # reuse cached tags from DB instead of parsing them again
+                    all_tags[file] = json.loads(cached_tags)
                     continue
 
                 print(f"Refreshing tags for file: {file_path}")
@@ -79,10 +87,11 @@ def process_directory(conn, cursor, args):
                     UPDATE files SET last_modified = ?, tags = ?
                     WHERE path = ?
                     """,
-                    (file_last_modified, repr(tags), str(file_path)),
+                    (file_last_modified, json.dumps(tags, cls=GenplisJSONEncoder), str(file_path)),
                 )
                 conn.commit()
                 print(f"Updated cache for file: {file_path}")
+                all_tags[file] = tags
             else:
                 tags = get_tags(file_path)
                 # Insert the new file path and timestamp into the database
@@ -91,10 +100,13 @@ def process_directory(conn, cursor, args):
                     INSERT INTO files (path, last_modified, tags)
                     VALUES (?, ?, ?)
                 """,
-                    (str(file_path), file_last_modified, repr(tags)),
+                    (str(file_path), file_last_modified, json.dumps(tags, cls=GenplisJSONEncoder)),
                 )
                 conn.commit()
                 print(f"Processed new file: {file_path}")
+                all_tags[file] = tags
+
+    return all_tags, all_filters
 
 
 def main():
@@ -109,8 +121,8 @@ def main():
         create_files_table(cursor)
         conn.commit()
 
-        # Traverse the directory and store file files in the database
-        process_directory(conn, cursor, args)
+        # Traverse the directory and process tags for all files
+        all_tags, all_filters = process_directory(conn, cursor, args)
 
 
 if __name__ == "__main__":
