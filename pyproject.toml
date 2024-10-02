@@ -5,7 +5,9 @@ description = "Generate music playlists based off ID3 tags"
 authors = [
     { name = "Fidel Ramos", email = "contact.gyldd@8shield.net" }
 ]
-dependencies = []
+dependencies = [
+    "psutil>=6.0.0",
+]
 readme = "README.md"
 requires-python = ">=3.8"
 

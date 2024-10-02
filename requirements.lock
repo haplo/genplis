@@ -10,3 +10,5 @@
 #   universal: false
 
 -e file:.
+psutil==6.0.0
+    # via genplis

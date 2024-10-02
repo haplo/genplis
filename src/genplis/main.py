@@ -1,9 +1,11 @@
 import argparse
 import json
 import pathlib
+import psutil
 import sqlite3
 import sys
 from datetime import datetime
+from timeit import default_timer as timer
 
 from tinytag import TinyTag
 
@@ -122,7 +124,14 @@ def main():
         conn.commit()
 
         # Traverse the directory and process tags for all files
+        start_time = timer()
         all_tags, all_filters = process_directory(conn, cursor, args)
+        end_time = timer()
+
+        used_memory = psutil.Process().memory_info().rss / (1024 * 1024)
+
+        print(f"Processed {len(all_tags)} files in {end_time-start_time} seconds")
+        print(f"Total RAM usage: {used_memory} MiB")
 
 
 if __name__ == "__main__":

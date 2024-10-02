@@ -31,6 +31,8 @@ parso==0.8.4
 pluggy==1.5.0
     # via pytest
     # via python-lsp-server
+psutil==6.0.0
+    # via genplis
 pytest==8.3.3
 python-lsp-jsonrpc==1.1.2
     # via python-lsp-server
