@@ -50,6 +50,10 @@ def create_files_table(cursor):
 
 
 def get_tags(file_path):
+    if not TinyTag.is_supported(file_path):
+        print(f"Skipping {file_path}: not supported by tinytag")
+        return {}
+
     tag = TinyTag.get(file_path)
     # remove all extra tags larger than 1 KB, they are likely images or lyrics
     for key in list(tag.extra.keys()):
@@ -71,11 +75,6 @@ def process_directory(conn, cursor, args):
                 continue
 
             file_path = file.absolute()
-
-            if not TinyTag.is_supported(file_path):
-                print(f"Skipping {file_path}: not supported by tinytag")
-                continue
-
             file_last_modified = datetime.fromtimestamp(file.stat().st_mtime)
 
             # Check if the file path already exists in the database
@@ -91,11 +90,15 @@ def process_directory(conn, cursor, args):
 
                 if file_last_modified <= db_last_modified:
                     # reuse cached tags from DB instead of parsing them again
-                    all_tags[file] = json.loads(cached_tags)
+                    # empty tags mean the file is not a supported music file and
+                    # should be ignored
+                    if cached_tags:
+                        all_tags[file] = json.loads(cached_tags)
                     continue
 
                 print(f"Refreshing tags for file: {file_path}")
                 tags = get_tags(file_path)
+
                 cursor.execute(
                     """
                     UPDATE files SET last_modified = ?, tags = ?
@@ -118,7 +121,8 @@ def process_directory(conn, cursor, args):
                 )
                 conn.commit()
                 print(f"Processed new file: {file_path}")
-                all_tags[file] = tags
+                if tags:
+                    all_tags[file] = tags
 
     return all_tags, all_filters
 
