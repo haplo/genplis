@@ -144,9 +144,9 @@ def main():
         all_tags, all_filters = process_directory(conn, cursor, args)
         end_time = timer()
 
+        process_time = end_time - start_time
         used_memory = psutil.Process().memory_info().rss / (1024 * 1024)
-
-        print(f"Processed {len(all_tags)} files in {end_time-start_time} seconds")
+        print(f"Processed {len(all_tags)} files in {process_time:.3f} seconds")
         print(f"Total RAM usage: {used_memory} MiB")
 
 
