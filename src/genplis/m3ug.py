@@ -11,6 +11,22 @@ FLOAT_RE = re.compile(r"\d+\.\d+")
 INT_RE = re.compile(r"\d+")
 
 
+def is_number(value: Value) -> bool:
+    return isinstance(value, (int, float))
+
+
+def normalize(raw, verbose: bool = False) -> Value:
+    if isinstance(raw, list):
+        # tinytag transforms some values into lists in its as_dict() method
+        length = len(raw)
+        if length == 0:
+            return None
+        if length > 1 and verbose:
+            print(f"Detected value list with more than one item: {raw}")
+        return raw[0]
+    return raw
+
+
 class FilterParseException(Exception):
     def __init__(self, message: str, filename: str, line: int):
         super().__init__(message)
@@ -18,16 +34,10 @@ class FilterParseException(Exception):
         self.line = line
 
 
-class Filter:
-    def __init__(self, tag, operator, value):
-        self.tag = tag
-        self.operator = operator
-        self.value = value
-
-
 class NameNode:
-    def __init__(self, name: str):
+    def __init__(self, name: str, verbose: bool):
         self.name = name
+        self.verbose = verbose
 
     def __repr__(self):
         return f"<Name={self.name}>"
@@ -36,15 +46,36 @@ class NameNode:
         return self.name
 
     @classmethod
-    def build(cls, name, filename: str, line: int):
+    def build(cls, name, filename: str, line: int, verbose: bool):
         if not isinstance(name, str):
             raise FilterParseException("Invalid name: {name}", filename, line)
-        return cls(name)
+        return cls(name, verbose)
+
+    def find(self, tags) -> Tuple[str, str | None]:
+        normalized_name = self.name.lower()
+        # if there is a tag with the exact (case-insensitive) name, use it
+        if raw_value := tags.get(normalized_name):
+            return normalized_name, raw_value
+        # handle special cases
+        if normalized_name == "rating":
+            # There are multiple ways that different apps use to store ratings.
+            # genplis uses "rating" as an alias for as many of them as possible,
+            # and they are normalized to a 0 to 5 stars range.
+            # If you know of a rating tag that is missing feel free to open an
+            # issue with a PR to add support for it.
+            fmps_rating = normalize(tags.get("fmps_rating"))
+            if fmps_rating is not None:
+                # fmps_rating goes from 0.0 to 1.0 (5 stars)
+                normalized_rating = float(fmps_rating) * 5
+                return normalized_name, normalized_rating
+        # default case is no match, no value found
+        return normalized_name, None
 
 
 class ValueNode:
-    def __init__(self, value: Value):
+    def __init__(self, value: Value, verbose: bool):
         self.value = value
+        self.verbose = verbose
 
     def __repr__(self):
         return f"<Value={self.value}>"
@@ -53,33 +84,42 @@ class ValueNode:
         return str(self.value)
 
     @classmethod
-    def build(cls, value, filename: str, line: int):
+    def build(cls, value, filename: str, line: int, verbose: bool):
         if FLOAT_RE.match(value):
-            return cls(float(value))
+            return cls(float(value), verbose)
         elif INT_RE.match(value):
-            return cls(int(value))
+            return cls(int(value), verbose)
         elif isinstance(value, str):
-            return cls(str(value))
+            return cls(str(value), verbose)
         else:
             raise FilterParseException("Invalid value: {value}", filename, line)
 
-    def is_number(self) -> bool:
-        return isinstance(self.value, (int, float))
+    def normalize(self, raw) -> Value:
+        return normalize(raw, self.verbose)
 
 
 class RuleNode:
-    def __init__(self, name: NameNode, value: ValueNode):
-        self.name = name
-        self.value = value
+    def __init__(self, name: NameNode, value: ValueNode, verbose: bool):
+        self.name_node = name
+        self.value_node = value
+        self.verbose = verbose
 
     def __repr__(self):
-        return f"Rule=<{self.name}, {self.OPERATOR_NAME}, {self.value}>"
+        return f"Rule=<{self.name_node}, {self.OPERATOR_NAME}, {self.value_node}>"
 
     def __str__(self):
-        return f"{self.name} {self.OPERATOR_NAME} {self.value}"
+        return f"{self.name_node} {self.OPERATOR_NAME} {self.value_node}"
 
     @classmethod
-    def build(cls, operator: str, name: NameNode, value: ValueNode, filename: str, line: int):
+    def build(
+            cls,
+            operator: str,
+            name: NameNode,
+            value: ValueNode,
+            filename: str,
+            line: int,
+            verbose: bool,
+    ):
         if operator == "=":
             rule_cls = EqualRuleNode
         elif operator == "!=":
@@ -97,7 +137,21 @@ class RuleNode:
         else:
             raise FilterParseException(f"Unrecognized operator: {operator}", filename, line)
         rule_cls.check_params(name, value, filename, line)
-        return rule_cls(name, value)
+        return rule_cls(name, value, verbose)
+
+    def apply(self, tags) -> bool:
+        tag, raw_value = self.name_node.find(tags)
+        # print(tag, repr(raw_value))
+        tag_value = self.value_node.normalize(raw_value)
+        return self.check(tag_value)
+
+    def check(self, tag_value: Value) -> bool:
+        """True if rule passes for the given value.
+
+        Expected value will be in self.value_node.value.
+
+        """
+        raise NotImplemented()
 
     @classmethod
     def check_params(cls, name: NameNode, value: ValueNode, filename: str, line: int):
@@ -108,25 +162,42 @@ class RuleNode:
 class EqualRuleNode(RuleNode):
     OPERATOR_NAME = "equals"
 
+    def check(self, tag_value: Value) -> bool:
+        return tag_value == self.value_node.value
+
+
 class NotEqualRuleNode(RuleNode):
     OPERATOR_NAME = "not equal"
+
+    def check(self, tag_value: Value) -> bool:
+        return tag_value != self.value_node.value
 
 
 class ContainsRuleNode(RuleNode):
     OPERATOR_NAME = "contains"
 
+    def check(self, tag_value: Value) -> bool:
+        if tag_value is None or is_number(tag_value):
+            return False
+        return self.value_node.value in tag_value
+
     @classmethod
     def check_params(cls, name: NameNode, value: ValueNode, filename: str, line: int):
-        if value.is_number():
+        if is_number(value.value):
             raise FilterParseException("{operator} needs a string value", filename, line)
 
 
 class LessRuleNode(RuleNode):
     OPERATOR_NAME = "lesser"
 
+    def check(self, tag_value: Value) -> bool:
+        if not is_number(tag_value):
+            return False
+        return tag_value < self.value_node.value
+
     @classmethod
     def check_params(cls, name: NameNode, value: ValueNode, filename: str, line: int):
-        if not value.is_number():
+        if not is_number(value.value):
             raise FilterParseException(
                 f"Less than operator (<) needs a numeric value, got: {value.value}",
                 filename,
@@ -137,9 +208,14 @@ class LessRuleNode(RuleNode):
 class LessOrEqualRuleNode(RuleNode):
     OPERATOR_NAME = "less or equal"
 
+    def check(self, tag_value: Value) -> bool:
+        if not is_number(tag_value):
+            return False
+        return tag_value <= self.value_node.value
+
     @classmethod
     def check_params(cls, name: NameNode, value: ValueNode, filename: str, line: int):
-        if not value.is_number():
+        if not is_number(value.value):
             raise FilterParseException(
                 f"Less or equal than operator (<=) needs a numeric value, got: {value.value}",
                 filename,
@@ -149,9 +225,14 @@ class LessOrEqualRuleNode(RuleNode):
 class GreaterRuleNode(RuleNode):
     OPERATOR_NAME = "greater"
 
+    def check(self, tag_value: Value) -> bool:
+        if not is_number(tag_value):
+            return False
+        return tag_value > self.value_node.value
+
     @classmethod
     def check_params(cls, name: NameNode, value: ValueNode, filename: str, line: int):
-        if not value.is_number():
+        if not is_number(value.value):
             raise FilterParseException(
                 f"Greater than operator (>) needs a numeric value, got: {value.value}",
                 filename,
@@ -162,9 +243,14 @@ class GreaterRuleNode(RuleNode):
 class GreaterOrEqualRuleNode(RuleNode):
     OPERATOR_NAME = "greater or equal"
 
+    def check(self, tag_value: Value) -> bool:
+        if not is_number(tag_value):
+            return False
+        return tag_value >= self.value_node.value
+
     @classmethod
     def check_params(cls, name: NameNode, value: ValueNode, filename: str, line: int):
-        if not value.is_number():
+        if not is_number(value.value):
             raise FilterParseException(
                 f"Greater or equal than operator (>=) needs a numeric value, got: {value.value}",
                 filename,
@@ -198,9 +284,9 @@ def parse_m3ug(filename: str, content: str, verbose: bool = False):
         tag, operator, value = components
 
         # building validates data
-        tag_node = NameNode.build(tag, filename, n)
-        value_node = ValueNode.build(value, filename, n)
-        rule_node = RuleNode.build(operator, tag_node, value_node, filename, n)
+        tag_node = NameNode.build(tag, filename, n, verbose)
+        value_node = ValueNode.build(value, filename, n, verbose)
+        rule_node = RuleNode.build(operator, tag_node, value_node, filename, n, verbose)
 
         rules.append(rule_node)
 

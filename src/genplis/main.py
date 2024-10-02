@@ -127,6 +127,27 @@ def process_directory(conn, cursor, args):
     return all_tags, all_filters
 
 
+def filter_songs(files_and_tags, filter_file, rules, args):
+    if args.verbose:
+        print(f"\nFiltering songs and generating playlist for {filter_file}")
+
+    filtered_songs = []
+    for file, tags in files_and_tags.items():
+        for rule in rules:
+            if not rule.apply(tags):
+                break
+        else:
+            # only executed if all rules pass
+            filtered_songs.append(file)
+
+    if args.verbose:
+        print(f"Files that match the filter {filter_file}:")
+        for song in filtered_songs:
+            print(f"  {song}")
+
+    return filtered_songs
+
+
 def main():
     # Set up argparse
     parser = setup_argparse()
@@ -148,6 +169,14 @@ def main():
         used_memory = psutil.Process().memory_info().rss / (1024 * 1024)
         print(f"Processed {len(all_tags)} files in {process_time:.3f} seconds")
         print(f"Total RAM usage: {used_memory} MiB")
+
+        # Apply each filter to all songs to generate playlists
+        for filter_file, rules in all_filters.items():
+            files = filter_songs(all_tags, filter_file, rules, args)
+            print(f"Filter file {filter_file} matched {len(files)} songs")
+            # if len(files) > 0:
+            #     playlist_file = replace filter_file m3ug with m3u
+            #     generate_playlist(files, playlist_file, args)
 
 
 if __name__ == "__main__":
