@@ -10,6 +10,7 @@ from timeit import default_timer as timer
 from tinytag import TinyTag
 
 from .json import GenplisJSONEncoder
+from .m3ug import parse_m3ug
 
 DB_NAME = "genplis.db"
 
@@ -21,8 +22,13 @@ def setup_argparse():
     parser.add_argument(
         "directory",
         type=pathlib.Path,
-        help="The path to the directory to process.",
+        help="Path to the directory to process",
         metavar="DIR",
+    )
+    parser.add_argument(
+        "-v", "--verbose",
+        help="Print verbose diagnostics",
+        action="store_true",
     )
     return parser
 
@@ -58,6 +64,12 @@ def process_directory(conn, cursor, args):
     all_filters = {}
     for file in args.directory.rglob("*"):
         if file.is_file():
+            if file.suffix.lower() == ".m3ug":
+                content = file.read_text()
+                rules = parse_m3ug(file, content, args.verbose)
+                all_filters[file] = rules
+                continue
+
             file_path = file.absolute()
 
             if not TinyTag.is_supported(file_path):

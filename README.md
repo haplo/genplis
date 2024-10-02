@@ -53,7 +53,7 @@ Copy them directly or use for inspiration to make your own filters!
 
 - [x] Parse tags of all files in music collection
 - [x] Cache tags to local DB
-- [ ] Implement parser for filter grammar
+- [x] Implement parser for filter grammar
 - [ ] Implement filtering logic
 - [ ] Filter files in collection
 - [ ] Generate playlists (MVP complete!)

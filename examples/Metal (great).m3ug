@@ -1,0 +1,6 @@
+# great metal songs (4-star or better)
+# the actual rating tag depends on your music player
+# if the rating by your music app is not picked up by genplis
+# feel free to open an issue!
+genre ~= "Metal"
+rating >= 4
