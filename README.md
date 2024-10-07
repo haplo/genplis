@@ -36,8 +36,7 @@ These files define one or more filters (see *Defining filters* section below for
 This generated playlist can then be used in any M3U-compatible music player.
 
 Currently *genplis* saves all parsed data in RAM for simplicity and speed.
-Exact RAM usage will depend on the music tags used, but estimate 10-150 MiB per 1,000 files.
-The low range would fit lean collections (e.g. only Title, Album, Genre tags) and the high range for [Musicbrainz](https://musicbrainz.org/)-tagged collections.
+Exact RAM usage will depend on the music tags used, but estimate 10 MiB per 1,000 files, or even less for lightly-tagged collections.
 
 ## Defining filters
 

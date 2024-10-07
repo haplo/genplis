@@ -13,6 +13,7 @@ from .json import GenplisJSONEncoder
 from .m3ug import parse_m3ug
 
 DB_NAME = "genplis.db"
+LARGE_TAG = 1000
 
 
 def setup_argparse():
@@ -49,18 +50,25 @@ def create_files_table(cursor):
     """)
 
 
-def get_tags(file_path):
+def get_tags(file_path, args):
     if not TinyTag.is_supported(file_path):
         print(f"Skipping {file_path}: not supported by tinytag")
         return {}
+    tag = TinyTag.get(file_path).as_dict()
+    # remove large tags, they are likely images or lyrics
+    for key in list(tag.keys()):
+        value = tag[key]
+        if get_tag_size(value) > LARGE_TAG:
+            if args.verbose:
+                print(f"Removing tag {key} because it's larger than {LARGE_TAG} bytes")
+            del tag[key]
+    return tag
 
-    tag = TinyTag.get(file_path)
-    # remove all extra tags larger than 1 KB, they are likely images or lyrics
-    for key in list(tag.extra.keys()):
-        value = tag.extra[key]
-        if sys.getsizeof(value) > 1000:
-            del tag.extra[key]
-    return tag.as_dict()
+
+def get_tag_size(value):
+    if isinstance(value, list):
+        return sum(get_tag_size(v) for v in value)
+    return sys.getsizeof(value)
 
 
 def process_directory(conn, cursor, args):
@@ -97,7 +105,7 @@ def process_directory(conn, cursor, args):
                     continue
 
                 print(f"Refreshing tags for file: {file_path}")
-                tags = get_tags(file_path)
+                tags = get_tags(file_path, args)
 
                 cursor.execute(
                     """
@@ -110,7 +118,7 @@ def process_directory(conn, cursor, args):
                 print(f"Updated cache for file: {file_path}")
                 all_tags[file] = tags
             else:
-                tags = get_tags(file_path)
+                tags = get_tags(file_path, args)
                 # Insert the new file path and timestamp into the database
                 cursor.execute(
                     """
