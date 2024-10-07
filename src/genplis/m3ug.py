@@ -1,14 +1,14 @@
 import logging
 import re
-from typing import Tuple
+from typing import List, Tuple
 
 logger = logging.getLogger(__name__)
 
 
-Value = str | float | int | None
+Value = str | float | int | List[str] | None
 
-FLOAT_RE = re.compile(r"\d+\.\d+")
-INT_RE = re.compile(r"\d+")
+FLOAT_RE = re.compile(r"^\d+\.\d+$")
+INT_RE = re.compile(r"^\d+$")
 
 
 def is_number(value: Value) -> bool:
@@ -21,9 +21,10 @@ def normalize(raw, verbose: bool = False) -> Value:
         length = len(raw)
         if length == 0:
             return None
-        if length > 1 and verbose:
-            print(f"Detected value list with more than one item: {raw}")
-        return raw[0]
+        elif length == 1:
+            return raw[0]
+        else:
+            return raw
     return raw
 
 
@@ -163,14 +164,20 @@ class EqualRuleNode(RuleNode):
     OPERATOR_NAME = "equals"
 
     def check(self, tag_value: Value) -> bool:
-        return tag_value == self.value_node.value
+        if isinstance(tag_value, list):
+            any(v == self.value_node.value for v in tag_value)
+        else:
+            return tag_value == self.value_node.value
 
 
 class NotEqualRuleNode(RuleNode):
     OPERATOR_NAME = "not equal"
 
     def check(self, tag_value: Value) -> bool:
-        return tag_value != self.value_node.value
+        if isinstance(tag_value, list):
+            any(v != self.value_node.value for v in tag_value)
+        else:
+            return tag_value != self.value_node.value
 
 
 class ContainsRuleNode(RuleNode):
@@ -191,9 +198,16 @@ class LessRuleNode(RuleNode):
     OPERATOR_NAME = "lesser"
 
     def check(self, tag_value: Value) -> bool:
-        if not is_number(tag_value):
-            return False
-        return tag_value < self.value_node.value
+        if isinstance(tag_value, list):
+            return any(self.check(v) for v in tag_value)
+        elif is_number(tag_value):
+            return tag_value < self.value_node.value
+        elif isinstance(tag_value, str):
+            if INT_RE.match(tag_value):
+                return int(tag_value) < self.value_node.value
+            elif FLOAT_RE.match(tag_value):
+                return float(tag_value) < self.value_node.value
+        return False
 
     @classmethod
     def check_params(cls, name: NameNode, value: ValueNode, filename: str, line: int):
@@ -209,9 +223,16 @@ class LessOrEqualRuleNode(RuleNode):
     OPERATOR_NAME = "less or equal"
 
     def check(self, tag_value: Value) -> bool:
-        if not is_number(tag_value):
-            return False
-        return tag_value <= self.value_node.value
+        if isinstance(tag_value, list):
+            return any(self.check(v) for v in tag_value)
+        elif is_number(tag_value):
+            return tag_value <= self.value_node.value
+        elif isinstance(tag_value, str):
+            if INT_RE.match(tag_value):
+                return int(tag_value) <= self.value_node.value
+            elif FLOAT_RE.match(tag_value):
+                return float(tag_value) <= self.value_node.value
+        return False
 
     @classmethod
     def check_params(cls, name: NameNode, value: ValueNode, filename: str, line: int):
@@ -226,9 +247,16 @@ class GreaterRuleNode(RuleNode):
     OPERATOR_NAME = "greater"
 
     def check(self, tag_value: Value) -> bool:
-        if not is_number(tag_value):
-            return False
-        return tag_value > self.value_node.value
+        if isinstance(tag_value, list):
+            return any(self.check(v) for v in tag_value)
+        elif is_number(tag_value):
+            return tag_value > self.value_node.value
+        elif isinstance(tag_value, str):
+            if INT_RE.match(tag_value):
+                return int(tag_value) > self.value_node.value
+            elif FLOAT_RE.match(tag_value):
+                return float(tag_value) > self.value_node.value
+        return False
 
     @classmethod
     def check_params(cls, name: NameNode, value: ValueNode, filename: str, line: int):
@@ -244,9 +272,16 @@ class GreaterOrEqualRuleNode(RuleNode):
     OPERATOR_NAME = "greater or equal"
 
     def check(self, tag_value: Value) -> bool:
-        if not is_number(tag_value):
-            return False
-        return tag_value >= self.value_node.value
+        if isinstance(tag_value, list):
+            return any(self.check(v) for v in tag_value)
+        elif is_number(tag_value):
+            return tag_value >= self.value_node.value
+        elif isinstance(tag_value, str):
+            if INT_RE.match(tag_value):
+                return int(tag_value) >= self.value_node.value
+            elif FLOAT_RE.match(tag_value):
+                return float(tag_value) >= self.value_node.value
+        return False
 
     @classmethod
     def check_params(cls, name: NameNode, value: ValueNode, filename: str, line: int):
