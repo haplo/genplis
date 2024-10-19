@@ -10,6 +10,7 @@ from timeit import default_timer as timer
 from tinytag import TinyTag
 
 from .json import GenplisJSONEncoder
+from .m3u import create_m3u
 from .m3ug import parse_m3ug
 
 DB_NAME = "genplis.db"
@@ -182,9 +183,10 @@ def main():
         for filter_file, rules in all_filters.items():
             files = filter_songs(all_tags, filter_file, rules, args)
             print(f"Filter file {filter_file} matched {len(files)} songs")
-            # if len(files) > 0:
-            #     playlist_file = replace filter_file m3ug with m3u
-            #     generate_playlist(files, playlist_file, args)
+            if len(files) > 0:
+                playlist_file = filter_file.with_suffix('.m3u')
+                print(f"Creating playlist {playlist_file}")
+                create_m3u(playlist_file, files, overwrite=True)
 
 
 if __name__ == "__main__":
