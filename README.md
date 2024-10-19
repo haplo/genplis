@@ -1,8 +1,10 @@
-# Automatic music playlist generator
+# Genplis: a music playlist generator
 
-This script generates M3U playlists from a collection of music files by looking at some of their attributes and tags and applying user-defined filters.
+*Genplis* is a program that generates M3U playlists from a collection of music files by looking at some of their attributes and tags and applying user-defined filters.
 
-It scratches my own itch where I have a local music collection curated over 30 years and I wanted to have playlists like "great Synthwave songs", "80s music" or "musicals" without having to manually update them when something gets added to the collection.
+*Genplis* defines its own language to define filters, called M3UG.
+
+It scratches my own itch where I have a local music collection curated over 30 years and I wanted to have playlists like "my favorite songs", "80s music" or "musicals" without having to manually update them when something gets added to the collection.
 
 ## Requirements
 
