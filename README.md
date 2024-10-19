@@ -63,6 +63,7 @@ Copy them directly or use for inspiration to make your own filters!
 - [ ] Documentation
 - [ ] Publish to PyPI! 🚀
 - [ ] Example systemd files and instructions on how to run periodically
+- [ ] Display tags when receiving a file as parameter (useful for creating rules or debugging)
 - [ ] Parallel parsing of files
 - [ ] Support narrowing of valid tag names
 - [ ] Optimize memory usage
