@@ -57,7 +57,7 @@ Copy them directly or use for inspiration to make your own filters!
 - [x] Implement parser for filter grammar
 - [x] Implement filtering logic
 - [x] Filter files in collection
-- [ ] Generate playlists (MVP complete!)
+- [x] Generate playlists (MVP complete!)
 - [ ] Tests
 - [ ] pre-commit
 - [ ] Documentation
