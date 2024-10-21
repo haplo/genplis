@@ -59,17 +59,28 @@ Copy them directly or use for inspiration to make your own filters!
 - [x] Filter files in collection
 - [x] Generate playlists (MVP complete!)
 - [x] Display tags when receiving a file as parameter (useful for creating rules or debugging)
+- [ ] Install as genplis command
 - [ ] pre-commit
 - [ ] Tests
 - [ ] Documentation
 - [ ] Publish to PyPI! 🚀
 - [ ] Example systemd files and instructions on how to run periodically
+- [ ] Improve M3U generation
+  - [ ] Include original M3UG content as comment
+  - [ ] Support [basic extended M3U playlist tags](https://datatracker.ietf.org/doc/html/rfc8216#section-4.3)
+- [ ] Support OR conditionals
 - [ ] Parallel parsing of files
 - [ ] Support narrowing of valid tag names
+- [ ] Config file support
+  - [ ] Default music collection path
+  - [ ] Number of processes for parallel parsing
+  - [ ] Tag size threshold to ignore
+  - [ ] Tags to ignore
+- [ ] Command for DB cleaning
 - [ ] Optimize memory usage
 - [ ] Optimize DB space
-- [ ] Support OR conditionals
-- [ ] Command for DB cleaning
+- [ ] Improve Windows support (**HELP NEEDED!**)
+- [ ] Improve MacOS support (**HELP NEEDED!**)
 
 Got any ideas to make *genplis* more awesome?
 Feel free to [open an issue](https://github.com/haplo/genplis/issues).
