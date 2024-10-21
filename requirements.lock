@@ -12,3 +12,5 @@
 -e file:.
 psutil==6.0.0
     # via genplis
+xdg-base-dirs==6.0.2
+    # via genplis

@@ -8,6 +8,7 @@ from datetime import datetime
 from timeit import default_timer as timer
 
 from tinytag import TinyTag
+from xdg_base_dirs import xdg_cache_home
 
 from .json import GenplisJSONEncoder
 from .m3u import create_m3u
@@ -162,7 +163,9 @@ def main():
     parser = setup_argparse()
     args = parser.parse_args()
 
-    with sqlite3.connect(DB_NAME) as conn:
+    db_path = xdg_cache_home() / "genplis" / DB_NAME
+
+    with sqlite3.connect(db_path) as conn:
         cursor = conn.cursor()
 
         # Create a DB for caching results if it doesn't exist

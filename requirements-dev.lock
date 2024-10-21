@@ -44,3 +44,5 @@ ruff==0.6.5
 ujson==5.10.0
     # via python-lsp-jsonrpc
     # via python-lsp-server
+xdg-base-dirs==6.0.2
+    # via genplis
