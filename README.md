@@ -59,6 +59,7 @@ Copy them directly or use for inspiration to make your own filters!
 - [x] Filter files in collection
 - [x] Generate playlists (MVP complete!)
 - [x] Display tags when receiving a file as parameter (useful for creating rules or debugging)
+- [x] --exclude option
 - [ ] Install as genplis command
 - [ ] pre-commit
 - [ ] Tests
@@ -68,14 +69,15 @@ Copy them directly or use for inspiration to make your own filters!
 - [ ] Improve M3U generation
   - [ ] Include original M3UG content as comment
   - [ ] Support [basic extended M3U playlist tags](https://datatracker.ietf.org/doc/html/rfc8216#section-4.3)
-- [ ] Support OR conditionals
 - [ ] Parallel parsing of files
 - [ ] Support narrowing of valid tag names
 - [ ] Config file support
   - [ ] Default music collection path
+  - [ ] Default exclude
   - [ ] Number of processes for parallel parsing
   - [ ] Tag size threshold to ignore
   - [ ] Tags to ignore
+- [ ] Support OR conditionals
 - [ ] Command for DB cleaning
 - [ ] Optimize memory usage
 - [ ] Optimize DB space

@@ -1,10 +1,11 @@
 import argparse
 import json
-import pathlib
 import psutil
+import re
 import sqlite3
 import sys
 from datetime import datetime
+from pathlib import Path
 from timeit import default_timer as timer
 
 from tinytag import TinyTag
@@ -18,15 +19,26 @@ DB_NAME = "genplis.db"
 LARGE_TAG = 1000
 
 
+def regex_type(arg_value):
+    """"""
+    return re.compile(arg_value)
+
+
 def setup_argparse():
     parser = argparse.ArgumentParser(
         description="Generate music playlists from your own filters."
     )
     parser.add_argument(
         "path",
-        type=pathlib.Path,
+        type=Path,
         help="Path to parse (directory with music collection or individual file)",
         metavar="PATH",
+    )
+    parser.add_argument(
+        "-e", "--exclude",
+        help="Exclude files matching this regex",
+        action="append",
+        type=regex_type,
     )
     parser.add_argument(
         "-v", "--verbose",
@@ -73,6 +85,13 @@ def get_tag_size(value):
     return sys.getsizeof(value)
 
 
+def is_excluded(path: Path, args) -> bool:
+    for pattern in args.exclude:
+        if pattern.search(str(path)):
+            return True
+    return False
+
+
 def process_path(conn, cursor, args):
     if args.path.is_dir():
         process_directory(conn, cursor, args.path, args)
@@ -88,6 +107,8 @@ def process_path(conn, cursor, args):
             print(f"Parsed filters:")
             for f in filters:
                 print(f"    {f}")
+        if is_excluded(args.path, args):
+            print("WARNING: This file is excluded by current configuration.")
     else:
         print(f"{args.path} must be either a directory or a file. Exiting...")
         sys.exit(1)
@@ -102,6 +123,11 @@ def process_directory(conn, cursor, directory, args):
     all_tags = {}
     all_filters = {}
     for file in directory.rglob("*"):
+        if is_excluded(file, args):
+            if args.verbose:
+                print(f"Skipping {file} because of exclude pattern.")
+            continue
+
         if file.is_file():
             tags, filters = process_file(conn, cursor, file, args)
             if tags:
