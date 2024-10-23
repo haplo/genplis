@@ -74,7 +74,7 @@ Just run `pre-commit install`, this will run the checks when you try to commit.
 - [x] Display tags when receiving a file as parameter (useful for creating rules or debugging)
 - [x] --exclude option
 - [x] Install as genplis command
-- [ ] pre-commit
+- [x] pre-commit
 - [ ] Tests
 - [ ] Documentation
 - [ ] Publish to PyPI! 🚀

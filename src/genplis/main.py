@@ -1,6 +1,5 @@
 import argparse
 import json
-import psutil
 import re
 import sqlite3
 import sys
@@ -8,6 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from timeit import default_timer as timer
 
+import psutil
 from tinytag import TinyTag
 from xdg_base_dirs import xdg_cache_home
 
@@ -35,13 +35,15 @@ def setup_argparse():
         metavar="PATH",
     )
     parser.add_argument(
-        "-e", "--exclude",
+        "-e",
+        "--exclude",
         help="Exclude files matching this regex",
         action="append",
         type=regex_type,
     )
     parser.add_argument(
-        "-v", "--verbose",
+        "-v",
+        "--verbose",
         help="Print verbose diagnostics",
         action="store_true",
     )
@@ -99,12 +101,12 @@ def process_path(conn, cursor, args):
         tags, filters = process_file(conn, cursor, args.path, args)
         if tags:
             print(f"{args.path} detected as music file")
-            print(f"Parsed tags:")
+            print("Parsed tags:")
             for key, value in sorted(tags.items(), key=lambda t: t[0]):
                 print(f"    {key} = {value}")
         if filters:
             print(f"{args.path} detected as M3UG file")
-            print(f"Parsed filters:")
+            print("Parsed filters:")
             for f in filters:
                 print(f"    {f}")
         if is_excluded(args.path, args):
@@ -116,7 +118,7 @@ def process_path(conn, cursor, args):
 
 def process_directory(conn, cursor, directory, args):
     """Traverse the directory and process tags for all files"""
-    assert(directory.is_dir())
+    assert directory.is_dir()
 
     start_time = timer()
 
@@ -140,7 +142,7 @@ def process_directory(conn, cursor, directory, args):
         files = filter_songs(all_tags, filter_file, rules, args)
         print(f"Filter file {filter_file} matched {len(files)} songs")
         if len(files) > 0:
-            playlist_file = filter_file.with_suffix('.m3u')
+            playlist_file = filter_file.with_suffix(".m3u")
             print(f"Creating playlist {playlist_file}")
             create_m3u(playlist_file, files, overwrite=True)
 
@@ -163,7 +165,7 @@ def process_file(conn, cursor, file, args):
     Otherwise attempt to parse it as a music file and return its tags.
 
     """
-    assert(file.is_file())
+    assert file.is_file()
 
     if file.suffix.lower() == ".m3ug":
         content = file.read_text()
@@ -199,7 +201,11 @@ def process_file(conn, cursor, file, args):
             UPDATE files SET last_modified = ?, tags = ?
             WHERE path = ?
             """,
-            (file_last_modified, json.dumps(tags, cls=GenplisJSONEncoder), str(file_path)),
+            (
+                file_last_modified,
+                json.dumps(tags, cls=GenplisJSONEncoder),
+                str(file_path),
+            ),
         )
         conn.commit()
         print(f"Updated cache for file: {file_path}")
@@ -212,7 +218,11 @@ def process_file(conn, cursor, file, args):
             INSERT INTO files (path, last_modified, tags)
             VALUES (?, ?, ?)
         """,
-            (str(file_path), file_last_modified, json.dumps(tags, cls=GenplisJSONEncoder)),
+            (
+                str(file_path),
+                file_last_modified,
+                json.dumps(tags, cls=GenplisJSONEncoder),
+            ),
         )
         conn.commit()
         print(f"Processed new file: {file_path}")

@@ -1,18 +1,17 @@
 import logging
 import re
-from typing import List, Tuple
 
 logger = logging.getLogger(__name__)
 
 
-Value = str | float | int | List[str] | None
+Value = str | float | int | list[str] | None
 
 FLOAT_RE = re.compile(r"^\d+\.\d+$")
 INT_RE = re.compile(r"^\d+$")
 
 
 def is_number(value: Value) -> bool:
-    return isinstance(value, (int, float))
+    return isinstance(value, int | float)
 
 
 def normalize(raw, verbose: bool = False) -> Value:
@@ -52,7 +51,7 @@ class NameNode:
             raise FilterParseException("Invalid name: {name}", filename, line)
         return cls(name, verbose)
 
-    def find(self, tags) -> Tuple[str, str | None]:
+    def find(self, tags) -> tuple[str, str | None]:
         normalized_name = self.name.lower()
         # if there is a tag with the exact (case-insensitive) name, use it
         if raw_value := tags.get(normalized_name):
@@ -113,13 +112,13 @@ class RuleNode:
 
     @classmethod
     def build(
-            cls,
-            operator: str,
-            name: NameNode,
-            value: ValueNode,
-            filename: str,
-            line: int,
-            verbose: bool,
+        cls,
+        operator: str,
+        name: NameNode,
+        value: ValueNode,
+        filename: str,
+        line: int,
+        verbose: bool,
     ):
         if operator == "=":
             rule_cls = EqualRuleNode
@@ -136,7 +135,9 @@ class RuleNode:
         elif operator == ">=":
             rule_cls = GreaterOrEqualRuleNode
         else:
-            raise FilterParseException(f"Unrecognized operator: {operator}", filename, line)
+            raise FilterParseException(
+                f"Unrecognized operator: {operator}", filename, line
+            )
         rule_cls.check_params(name, value, filename, line)
         return rule_cls(name, value, verbose)
 
@@ -152,7 +153,7 @@ class RuleNode:
         Expected value will be in self.value_node.value.
 
         """
-        raise NotImplemented()
+        raise NotImplementedError()
 
     @classmethod
     def check_params(cls, name: NameNode, value: ValueNode, filename: str, line: int):
@@ -191,7 +192,9 @@ class ContainsRuleNode(RuleNode):
     @classmethod
     def check_params(cls, name: NameNode, value: ValueNode, filename: str, line: int):
         if is_number(value.value):
-            raise FilterParseException("{operator} needs a string value", filename, line)
+            raise FilterParseException(
+                "{operator} needs a string value", filename, line
+            )
 
 
 class LessRuleNode(RuleNode):
@@ -242,6 +245,7 @@ class LessOrEqualRuleNode(RuleNode):
                 filename,
                 line,
             )
+
 
 class GreaterRuleNode(RuleNode):
     OPERATOR_NAME = "greater"
@@ -302,7 +306,7 @@ def parse_m3ug(filename: str, content: str, verbose: bool = False):
         print("----------------")
     for n, line in enumerate(content.splitlines(), 1):
         # ignore comments
-        if line.startswith('#'):
+        if line.startswith("#"):
             if verbose:
                 print("Ignoring line {n}: comment")
             continue
