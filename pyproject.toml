@@ -31,6 +31,7 @@ select = ["ASYNC", "E4", "E7", "E9", "F", "I", "UP"]
 
 [tool.uv]
 dev-dependencies = [
+    "pre-commit>=4.0.1",
     "python-lsp-ruff>=2.2.2",
     "python-lsp-server>=1.12.0",
     "ruff>=0.7.0",

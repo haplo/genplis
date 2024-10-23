@@ -50,6 +50,19 @@ Same with empty lines.
 Look at [these example M3UG files](examples).
 Copy them directly or use for inspiration to make your own filters!
 
+## Developers
+
+First make sure you have [uv](https://github.com/astral-sh/uv) installed.
+
+Then clone the *genplis* repository and install dependencies:
+
+    $ git clone https://github.com/haplo/genplis.git
+    $ cd genplis
+    $ uv sync
+
+This project uses [pre-commit](https://pre-commit.com/) to check code for common errors.
+Just run `pre-commit install`, this will run the checks when you try to commit.
+
 ## Roadmap
 
 - [x] Parse tags of all files in music collection
