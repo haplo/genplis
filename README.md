@@ -8,11 +8,11 @@ It scratches my own itch where I have a local music collection curated over 30 y
 
 ## Requirements
 
-Python 3.8 or later.
+Python 3.10 or later.
 
 *genplis* is not published to [PyPI](https://pypi.org/) yet, so you cannot just use *pip* to install it.
 
-If you want to give it a try first install [Rye](https://rye.astral.sh/) and then follow the *Install* and *Usage* instructions below.
+If you want to give it a try first install [uv](https://github.com/astral-sh/uv) and then follow the *Install* and *Usage* instructions below.
 
 ## Install
 
@@ -22,11 +22,11 @@ For now you have to get this repository and run the script manually:
 
     $ git clone https://github.com/haplo/genplis.git
     $ cd genplis
-    $ rye sync
+    $ uv sync
 
 ## Usage
 
-    $ rye run genplis ~/Music
+    $ uv run genplis ~/Music
 
 *genplis* takes the path to the music collection.
 It will parse the tags of all music files within, ignoring ones deemed too long (over 1 KB).
@@ -60,7 +60,7 @@ Copy them directly or use for inspiration to make your own filters!
 - [x] Generate playlists (MVP complete!)
 - [x] Display tags when receiving a file as parameter (useful for creating rules or debugging)
 - [x] --exclude option
-- [ ] Install as genplis command
+- [x] Install as genplis command
 - [ ] pre-commit
 - [ ] Tests
 - [ ] Documentation
