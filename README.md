@@ -76,6 +76,13 @@ Just run `pre-commit install`, this will run the checks when you try to commit.
 - [x] Install as genplis command
 - [x] pre-commit
 - [ ] Tests
+  - [ ] db
+  - [ ] tags
+  - [ ] file processing
+  - [ ] dir processing
+  - [ ] PR check
+    - [ ] Run pre-commit on whole project
+    - [ ] Test on every supported Python version
 - [ ] Documentation
 - [ ] Publish to PyPI! 🚀
 - [ ] Example systemd files and instructions on how to run periodically
