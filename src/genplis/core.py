@@ -8,6 +8,7 @@ from timeit import default_timer as timer
 import psutil
 
 from . import db
+from .exceptions import GenplisError
 from .m3u import create_m3u
 from .m3ug import parse_m3ug
 from .tags import get_tags
@@ -94,7 +95,10 @@ def process_directory(conn, cursor, directory, args):
     See process_file for how each file is handled.
 
     """
-    assert directory.is_dir()
+    if not directory.is_dir():
+        raise GenplisError(
+            f"Attempted to process {directory} as a directory but it's not a directory"
+        )
 
     start_time = timer()
 
@@ -143,7 +147,8 @@ def process_file(conn, cursor, file, args):
     dictionary.
 
     """
-    assert file.is_file()
+    if not file.is_file():
+        raise GenplisError(f"Attempted to process {file} as a file but it's not a file")
 
     if file.suffix.lower() == ".m3ug":
         content = file.read_text()
