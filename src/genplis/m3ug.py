@@ -30,7 +30,7 @@ def normalize(raw, verbose: bool = False) -> Value:
 
 
 class NameNode:
-    def __init__(self, name: str, verbose: bool):
+    def __init__(self, name: str, verbose: bool = False):
         self.name = name
         self.verbose = verbose
 
@@ -41,7 +41,7 @@ class NameNode:
         return self.name
 
     @classmethod
-    def build(cls, name, filename: str, line: int, verbose: bool):
+    def build(cls, name, filename: str, line: int, verbose: bool = False):
         if not isinstance(name, str):
             raise GenplisM3UGException("Invalid name: {name}", filename, line)
         return cls(name, verbose)
@@ -68,7 +68,7 @@ class NameNode:
 
 
 class ValueNode:
-    def __init__(self, value: Value, verbose: bool):
+    def __init__(self, value: Value, verbose: bool = False):
         self.value = value
         self.verbose = verbose
 
@@ -79,7 +79,7 @@ class ValueNode:
         return str(self.value)
 
     @classmethod
-    def build(cls, value, filename: str, line: int, verbose: bool):
+    def build(cls, value, filename: str, line: int, verbose: bool = False):
         if FLOAT_RE.match(value):
             return cls(float(value), verbose)
         elif INT_RE.match(value):
@@ -94,7 +94,7 @@ class ValueNode:
 
 
 class RuleNode:
-    def __init__(self, name: NameNode, value: ValueNode, verbose: bool):
+    def __init__(self, name: NameNode, value: ValueNode, verbose: bool = False):
         self.name_node = name
         self.value_node = value
         self.verbose = verbose
@@ -113,7 +113,7 @@ class RuleNode:
         value: ValueNode,
         filename: str,
         line: int,
-        verbose: bool,
+        verbose: bool = False,
     ):
         if operator == "=":
             rule_cls = EqualRuleNode
