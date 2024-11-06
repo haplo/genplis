@@ -1,6 +1,8 @@
 import logging
 import re
 
+from .exceptions import GenplisM3UGException
+
 logger = logging.getLogger(__name__)
 
 
@@ -27,13 +29,6 @@ def normalize(raw, verbose: bool = False) -> Value:
     return raw
 
 
-class FilterParseException(Exception):
-    def __init__(self, message: str, filename: str, line: int):
-        super().__init__(message)
-        self.filename = filename
-        self.line = line
-
-
 class NameNode:
     def __init__(self, name: str, verbose: bool):
         self.name = name
@@ -48,7 +43,7 @@ class NameNode:
     @classmethod
     def build(cls, name, filename: str, line: int, verbose: bool):
         if not isinstance(name, str):
-            raise FilterParseException("Invalid name: {name}", filename, line)
+            raise GenplisM3UGException("Invalid name: {name}", filename, line)
         return cls(name, verbose)
 
     def find(self, tags) -> tuple[str, str | None]:
@@ -92,7 +87,7 @@ class ValueNode:
         elif isinstance(value, str):
             return cls(str(value), verbose)
         else:
-            raise FilterParseException("Invalid value: {value}", filename, line)
+            raise GenplisM3UGException("Invalid value: {value}", filename, line)
 
     def normalize(self, raw) -> Value:
         return normalize(raw, self.verbose)
@@ -135,7 +130,7 @@ class RuleNode:
         elif operator == ">=":
             rule_cls = GreaterOrEqualRuleNode
         else:
-            raise FilterParseException(
+            raise GenplisM3UGException(
                 f"Unrecognized operator: {operator}", filename, line
             )
         rule_cls.check_params(name, value, filename, line)
@@ -157,7 +152,7 @@ class RuleNode:
 
     @classmethod
     def check_params(cls, name: NameNode, value: ValueNode, filename: str, line: int):
-        """Raise FilterParseException if something is wrong with the rule."""
+        """Raise GenplisM3UGException if something is wrong with the rule."""
         pass
 
 
@@ -192,7 +187,7 @@ class ContainsRuleNode(RuleNode):
     @classmethod
     def check_params(cls, name: NameNode, value: ValueNode, filename: str, line: int):
         if is_number(value.value):
-            raise FilterParseException(
+            raise GenplisM3UGException(
                 "{operator} needs a string value", filename, line
             )
 
@@ -215,7 +210,7 @@ class LessRuleNode(RuleNode):
     @classmethod
     def check_params(cls, name: NameNode, value: ValueNode, filename: str, line: int):
         if not is_number(value.value):
-            raise FilterParseException(
+            raise GenplisM3UGException(
                 f"Less than operator (<) needs a numeric value, got: {value.value}",
                 filename,
                 line,
@@ -240,7 +235,7 @@ class LessOrEqualRuleNode(RuleNode):
     @classmethod
     def check_params(cls, name: NameNode, value: ValueNode, filename: str, line: int):
         if not is_number(value.value):
-            raise FilterParseException(
+            raise GenplisM3UGException(
                 f"Less or equal than operator (<=) needs a numeric value, got: {value.value}",
                 filename,
                 line,
@@ -265,7 +260,7 @@ class GreaterRuleNode(RuleNode):
     @classmethod
     def check_params(cls, name: NameNode, value: ValueNode, filename: str, line: int):
         if not is_number(value.value):
-            raise FilterParseException(
+            raise GenplisM3UGException(
                 f"Greater than operator (>) needs a numeric value, got: {value.value}",
                 filename,
                 line,
@@ -290,7 +285,7 @@ class GreaterOrEqualRuleNode(RuleNode):
     @classmethod
     def check_params(cls, name: NameNode, value: ValueNode, filename: str, line: int):
         if not is_number(value.value):
-            raise FilterParseException(
+            raise GenplisM3UGException(
                 f"Greater or equal than operator (>=) needs a numeric value, got: {value.value}",
                 filename,
                 line,
@@ -318,7 +313,7 @@ def parse_m3ug(filename: str, content: str, verbose: bool = False):
         components = line.split(" ", 2)
 
         if len(components) != 3:
-            raise FilterParseException("Invalid filter syntax", filename, n)
+            raise GenplisM3UGException("Invalid filter syntax", filename, n)
 
         tag, operator, value = components
 
