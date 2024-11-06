@@ -1,22 +1,16 @@
 import argparse
-import json
 import re
 import sqlite3
 import sys
-from datetime import datetime
 from pathlib import Path
 from timeit import default_timer as timer
 
 import psutil
-from tinytag import TinyTag
-from xdg_base_dirs import xdg_cache_home
 
-from .json import GenplisJSONEncoder
+from . import db
 from .m3u import create_m3u
 from .m3ug import parse_m3ug
-
-DB_NAME = "genplis.db"
-LARGE_TAG = 1000
+from .tags import get_tags
 
 
 def regex_type(arg_value):
@@ -50,43 +44,6 @@ def setup_argparse():
     return parser
 
 
-def setup_database_connection(conn_path):
-    conn = sqlite3.connect(conn_path)
-    cursor = conn.cursor()
-    return conn, cursor
-
-
-def create_files_table(cursor):
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS files (
-            path TEXT PRIMARY KEY,
-            last_modified TIMESTAMP,
-            tags JSONB
-        )
-    """)
-
-
-def get_tags(file_path, args):
-    if not TinyTag.is_supported(file_path):
-        print(f"Skipping {file_path}: not supported by tinytag")
-        return {}
-    tag = TinyTag.get(file_path).as_dict()
-    # remove large tags, they are likely images or lyrics
-    for key in list(tag.keys()):
-        value = tag[key]
-        if get_tag_size(value) > LARGE_TAG:
-            if args.verbose:
-                print(f"Removing tag {key} because it's larger than {LARGE_TAG} bytes")
-            del tag[key]
-    return tag
-
-
-def get_tag_size(value):
-    if isinstance(value, list):
-        return sum(get_tag_size(v) for v in value)
-    return sys.getsizeof(value)
-
-
 def is_excluded(path: Path, args) -> bool:
     for pattern in args.exclude:
         if pattern.search(str(path)):
@@ -95,12 +52,27 @@ def is_excluded(path: Path, args) -> bool:
 
 
 def process_path(conn, cursor, args):
+    """Process an arbitrary path through genplis.
+
+    It will use process_file or process_directory depending on the type of the path.
+
+    """
     if args.path.is_dir():
         process_directory(conn, cursor, args.path, args)
     elif args.path.is_file():
         tags, filters = process_file(conn, cursor, args.path, args)
         if tags:
             print(f"{args.path} detected as music file")
+
+            cache_status = db.is_cache_valid(cursor, args.path)
+            match cache_status:
+                case None:
+                    print("Cache status: not present")
+                case True:
+                    print("Cache status: valid")
+                case True:
+                    print("Cache status: stale")
+
             print("Parsed tags:")
             for key, value in sorted(tags.items(), key=lambda t: t[0]):
                 print(f"    {key} = {value}")
@@ -117,7 +89,11 @@ def process_path(conn, cursor, args):
 
 
 def process_directory(conn, cursor, directory, args):
-    """Traverse the directory and process tags for all files"""
+    """Traverse the directory and process all files.
+
+    See process_file for how each file is handled.
+
+    """
     assert directory.is_dir()
 
     start_time = timer()
@@ -161,8 +137,10 @@ def process_file(conn, cursor, file, args):
     Returns a tuple in the form (tags, filters)
 
     If it's an M3UG file, parse it as such and return its filters.
+    See m3ug module.
 
-    Otherwise attempt to parse it as a music file and return its tags.
+    Music files are parsed with tinytag, detected tags are returned as a
+    dictionary.
 
     """
     assert file.is_file()
@@ -172,61 +150,17 @@ def process_file(conn, cursor, file, args):
         rules = parse_m3ug(file, content, args.verbose)
         return {}, rules
 
-    file_path = file.absolute()
-    file_last_modified = datetime.fromtimestamp(file.stat().st_mtime)
+    if db.is_cache_valid(cursor, file):
+        # reuse cached tags from DB instead of parsing them again
+        # empty tags mean the file is not a supported music file and
+        # should be ignored
+        cached_tags = db.get_cached_tags(cursor, file)
+        return cached_tags, {}
 
-    # Check if the file path already exists in the database
-    cursor.execute(
-        """SELECT last_modified, tags FROM files WHERE path = ?""",
-        (str(file_path),),
-    )
-    row = cursor.fetchone()
-    if row:
-        cached_timestamp, cached_tags = row
-        # Update the timestamp if it's more recent
-        db_last_modified = datetime.fromisoformat(cached_timestamp)
-
-        if file_last_modified <= db_last_modified:
-            # reuse cached tags from DB instead of parsing them again
-            # empty tags mean the file is not a supported music file and
-            # should be ignored
-            if cached_tags:
-                return json.loads(cached_tags), {}
-
-        print(f"Refreshing tags for file: {file_path}")
-        tags = get_tags(file_path, args)
-
-        cursor.execute(
-            """
-            UPDATE files SET last_modified = ?, tags = ?
-            WHERE path = ?
-            """,
-            (
-                file_last_modified,
-                json.dumps(tags, cls=GenplisJSONEncoder),
-                str(file_path),
-            ),
-        )
-        conn.commit()
-        print(f"Updated cache for file: {file_path}")
-        return tags, {}
-    else:
-        tags = get_tags(file_path, args)
-        # Insert the new file path and timestamp into the database
-        cursor.execute(
-            """
-            INSERT INTO files (path, last_modified, tags)
-            VALUES (?, ?, ?)
-        """,
-            (
-                str(file_path),
-                file_last_modified,
-                json.dumps(tags, cls=GenplisJSONEncoder),
-            ),
-        )
-        conn.commit()
-        print(f"Processed new file: {file_path}")
-        return tags, {}
+    tags = get_tags(file, args)
+    db.cache_tags_for_file(cursor, file, tags)
+    conn.commit()
+    return tags, {}
 
 
 def filter_songs(files_and_tags, filter_file, rules, args):
@@ -255,13 +189,15 @@ def main():
     parser = setup_argparse()
     args = parser.parse_args()
 
-    db_path = xdg_cache_home() / "genplis" / DB_NAME
+    db_path = db.get_db_path()
+    if args.verbose:
+        print(f"Using {db_path} for genplis DB")
 
     with sqlite3.connect(db_path) as conn:
         cursor = conn.cursor()
 
         # Create a DB for caching results if it doesn't exist
-        create_files_table(cursor)
+        db.create_files_table(cursor)
         conn.commit()
 
         process_path(conn, cursor, args)
