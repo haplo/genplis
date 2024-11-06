@@ -61,7 +61,7 @@ Then clone the *genplis* repository and install dependencies:
     $ uv sync
 
 This project uses [pre-commit](https://pre-commit.com/) to check code for common errors.
-Just run `pre-commit install`, this will run the checks when you try to commit.
+Just run `uv run pre-commit install`, this will run the checks when you try to commit.
 
 ## Roadmap
 
