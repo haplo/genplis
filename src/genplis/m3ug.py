@@ -34,6 +34,9 @@ class NameNode:
         self.name = name
         self.verbose = verbose
 
+    def __eq__(self, other):
+        return self.name == other.name
+
     def __repr__(self):
         return f"<Name={self.name}>"
 
@@ -72,6 +75,9 @@ class ValueNode:
         self.value = value
         self.verbose = verbose
 
+    def __eq__(self, other):
+        return self.value == other.value
+
     def __repr__(self):
         return f"<Value={self.value}>"
 
@@ -99,6 +105,9 @@ class RuleNode:
         self.value_node = value
         self.verbose = verbose
 
+    def __eq__(self, other):
+        return self.name_node == other.name_node and self.value_node == other.value_node
+
     def __repr__(self):
         return f"Rule=<{self.name_node}, {self.OPERATOR_NAME}, {self.value_node}>"
 
@@ -122,9 +131,9 @@ class RuleNode:
         elif operator == "~=":
             rule_cls = ContainsRuleNode
         elif operator == "<":
-            rule_cls = LessRuleNode
+            rule_cls = LesserRuleNode
         elif operator == "<=":
-            rule_cls = LessOrEqualRuleNode
+            rule_cls = LesserOrEqualRuleNode
         elif operator == ">":
             rule_cls = GreaterRuleNode
         elif operator == ">=":
@@ -192,7 +201,7 @@ class ContainsRuleNode(RuleNode):
             )
 
 
-class LessRuleNode(RuleNode):
+class LesserRuleNode(RuleNode):
     OPERATOR_NAME = "lesser"
 
     def check(self, tag_value: Value) -> bool:
@@ -211,13 +220,13 @@ class LessRuleNode(RuleNode):
     def check_params(cls, name: NameNode, value: ValueNode, filename: str, line: int):
         if not is_number(value.value):
             raise GenplisM3UGException(
-                f"Less than operator (<) needs a numeric value, got: {value.value}",
+                f"Lesser than operator (<) needs a numeric value, got: {value.value}",
                 filename,
                 line,
             )
 
 
-class LessOrEqualRuleNode(RuleNode):
+class LesserOrEqualRuleNode(RuleNode):
     OPERATOR_NAME = "less or equal"
 
     def check(self, tag_value: Value) -> bool:
@@ -236,7 +245,7 @@ class LessOrEqualRuleNode(RuleNode):
     def check_params(cls, name: NameNode, value: ValueNode, filename: str, line: int):
         if not is_number(value.value):
             raise GenplisM3UGException(
-                f"Less or equal than operator (<=) needs a numeric value, got: {value.value}",
+                f"Lesser or equal than operator (<=) needs a numeric value, got: {value.value}",
                 filename,
                 line,
             )

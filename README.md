@@ -76,6 +76,7 @@ Just run `uv run pre-commit install`, this will run the checks when you try to c
 - [x] Install as genplis command
 - [x] pre-commit
 - [ ] Tests
+  - [x] m3ug
   - [ ] db
   - [ ] tags
   - [ ] file processing
