@@ -292,7 +292,7 @@ class GreaterOrEqualRuleNode(RuleNode):
             )
 
 
-def parse_m3ug(filename: str, content: str, verbose: bool = False):
+def parse_m3ug(content: str, filename: str = "N/A", verbose: bool = False):
     rules = []
     if verbose:
         print(f"Parsing M3UG file {filename}:")

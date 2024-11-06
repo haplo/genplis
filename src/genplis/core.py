@@ -152,7 +152,7 @@ def process_file(conn, cursor, file, args):
 
     if file.suffix.lower() == ".m3ug":
         content = file.read_text()
-        rules = parse_m3ug(file, content, args.verbose)
+        rules = parse_m3ug(content, file, args.verbose)
         return {}, rules
 
     if db.is_cache_valid(cursor, file):
