@@ -163,7 +163,7 @@ def process_file(conn, cursor, file, args):
         cached_tags = db.get_cached_tags(cursor, file)
         return cached_tags, {}
 
-    if tags := get_tags(file, args):
+    if tags := get_tags(file, args.verbose):
         db.cache_tags_for_file(cursor, file, tags)
         conn.commit()
     return tags, {}

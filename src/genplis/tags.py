@@ -6,10 +6,10 @@ from tinytag import TinyTag
 LARGE_TAG = 1000
 
 
-def get_tags(file_path, args) -> dict | None:
+def get_tags(file_path: Path, verbose: bool = False) -> dict | None:
     """Return music tags as a dictionary, or None if not a music file."""
     if not TinyTag.is_supported(file_path):
-        if args.verbose:
+        if verbose:
             print(f"Skipping {file_path}: not supported by tinytag")
         return None
 
@@ -23,7 +23,7 @@ def get_tags(file_path, args) -> dict | None:
         if isinstance(value, Path):
             value = tag[key] = str(value)
         if get_tag_size(value) > LARGE_TAG:
-            if args.verbose:
+            if verbose:
                 print(f"Removing tag {key} because it's larger than {LARGE_TAG} bytes")
             del tag[key]
     return tag
