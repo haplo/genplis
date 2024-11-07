@@ -78,7 +78,7 @@ Just run `uv run pre-commit install`, this will run the checks when you try to c
 - [ ] Tests
   - [x] m3ug
   - [ ] db
-  - [ ] tags
+  - [x] tags
   - [ ] file processing
   - [ ] dir processing
   - [ ] PR check
