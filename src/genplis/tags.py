@@ -29,7 +29,7 @@ def get_tags(file_path, args) -> dict | None:
     return tag
 
 
-def get_tag_size(value):
+def get_tag_size(value) -> int:
     if isinstance(value, list):
         return sum(get_tag_size(v) for v in value)
     return sys.getsizeof(value)
