@@ -1,4 +1,5 @@
 import sys
+from pathlib import Path
 
 from tinytag import TinyTag
 
@@ -13,9 +14,14 @@ def get_tags(file_path, args) -> dict | None:
         return None
 
     tag = TinyTag.get(file_path).as_dict()
-    # remove large tags, they are likely images or lyrics
+
+    # Sanitize tags:
+    # 1. Transform Paths into strings, otherwise m3ug rules would fail
+    # 2. Remove large tags, they are likely images or lyrics
     for key in list(tag.keys()):
         value = tag[key]
+        if isinstance(value, Path):
+            value = tag[key] = str(value)
         if get_tag_size(value) > LARGE_TAG:
             if args.verbose:
                 print(f"Removing tag {key} because it's larger than {LARGE_TAG} bytes")
