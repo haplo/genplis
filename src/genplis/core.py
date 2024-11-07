@@ -34,6 +34,7 @@ def setup_argparse():
         "--exclude",
         help="Exclude files matching this regex",
         action="append",
+        default=[],
         type=regex_type,
     )
     parser.add_argument(
