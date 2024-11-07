@@ -5,10 +5,13 @@ from tinytag import TinyTag
 LARGE_TAG = 1000
 
 
-def get_tags(file_path, args):
+def get_tags(file_path, args) -> dict | None:
+    """Return music tags as a dictionary, or None if not a music file."""
     if not TinyTag.is_supported(file_path):
-        print(f"Skipping {file_path}: not supported by tinytag")
-        return {}
+        if args.verbose:
+            print(f"Skipping {file_path}: not supported by tinytag")
+        return None
+
     tag = TinyTag.get(file_path).as_dict()
     # remove large tags, they are likely images or lyrics
     for key in list(tag.keys()):
