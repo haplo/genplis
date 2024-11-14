@@ -6,6 +6,7 @@ from pathlib import Path
 from xdg_base_dirs import xdg_cache_home
 
 from .exceptions import GenplisDBError
+from .files import get_last_modified
 from .json import GenplisJSONEncoder
 
 DB_NAME = "genplis.db"
@@ -16,7 +17,19 @@ def get_db_path():
     return db_path
 
 
+def adapt_datetime_epoch(val):
+    """Adapt datetime to Unix timestamp."""
+    return int(val.timestamp())
+
+
+def convert_timestamp(val):
+    """Convert Unix epoch timestamp to datetime object."""
+    return datetime.fromtimestamp(int(val))
+
+
 def setup_database_connection(conn_path):
+    sqlite3.register_adapter(datetime, adapt_datetime_epoch)
+    sqlite3.register_converter("timestamp", convert_timestamp)
     conn = sqlite3.connect(conn_path)
     cursor = conn.cursor()
     return conn, cursor
@@ -44,7 +57,7 @@ def is_cache_valid(cursor, file_path: Path) -> bool | None:
 
     """
     abs_file_path = file_path.absolute()
-    file_last_modified = datetime.fromtimestamp(file_path.stat().st_mtime)
+    file_last_modified = get_last_modified(file_path)
 
     # Check if the file path already exists in the database
     cursor.execute(
@@ -55,9 +68,8 @@ def is_cache_valid(cursor, file_path: Path) -> bool | None:
     if row is None:
         return None
 
-    cached_timestamp = row[0]
-    db_last_modified = datetime.fromisoformat(cached_timestamp)
-    return file_last_modified <= db_last_modified
+    cached_timestamp = row[0]  # int, UNIX timestamp
+    return file_last_modified <= cached_timestamp
 
 
 def cache_tags_for_file(cursor, file_path: Path, tags):
@@ -67,7 +79,7 @@ def cache_tags_for_file(cursor, file_path: Path, tags):
 
     """
     file_path = file_path.absolute()
-    last_modified = datetime.fromtimestamp(file_path.stat().st_mtime)
+    last_modified = get_last_modified(file_path)
     json_tags = json.dumps(tags, cls=GenplisJSONEncoder)
 
     # UPSERT: https://www.sqlite.org/lang_upsert.html

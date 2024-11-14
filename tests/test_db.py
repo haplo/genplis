@@ -3,8 +3,10 @@ from pathlib import Path
 from genplis.db import (
     create_files_table,
     get_db_path,
+    is_cache_valid,
     setup_database_connection,
 )
+from genplis.files import get_last_modified
 
 
 def test_get_db_path(monkeypatch):
@@ -41,3 +43,23 @@ def test_db_connection_and_create(tmp_path):
         ]
     finally:
         conn.close()
+
+
+def test_is_cache_valid(genplis_db, file_mp3):
+    # not present in DB
+    assert is_cache_valid(genplis_db.cursor(), file_mp3) is None
+
+    # simulate file being cached
+    timestamp = get_last_modified(file_mp3)
+    genplis_db.execute(
+        "INSERT INTO files(path, last_modified, tags) VALUES (?, ?, '{}')",
+        [str(file_mp3), timestamp],
+    )
+    assert is_cache_valid(genplis_db.cursor(), file_mp3) is True
+
+    # manually make cached timestamp stale
+    genplis_db.execute(
+        "UPDATE files SET last_modified=last_modified-1 WHERE path=?",
+        [str(file_mp3)],
+    )
+    assert is_cache_valid(genplis_db.cursor(), file_mp3) is False
