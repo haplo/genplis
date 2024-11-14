@@ -1,12 +1,16 @@
 from pathlib import Path
 
+import pytest
+
 from genplis.db import (
     cache_tags_for_file,
     create_files_table,
+    get_cached_tags,
     get_db_path,
     is_cache_valid,
     setup_database_connection,
 )
+from genplis.exceptions import GenplisDBError
 from genplis.files import get_last_modified
 
 
@@ -73,3 +77,16 @@ def test_cache_tags_for_file(genplis_db, file_mp3):
     assert rows == [
         ("/home/fidel/Code/genplis/tests/files/test.mp3", timestamp, '{"a": "b"}')
     ]
+
+
+def test_get_cached_tags_success(genplis_db):
+    genplis_db.execute(
+        "INSERT INTO files(path, last_modified, tags) VALUES ('/some/path', 12345, '{\"a\": \"b\"}')"
+    )
+    tags = get_cached_tags(genplis_db.cursor(), Path("/some/path"))
+    assert tags == {"a": "b"}
+
+
+def test_get_cached_tags_error_if_missing(genplis_db):
+    with pytest.raises(GenplisDBError):
+        get_cached_tags(genplis_db.cursor(), "/invalid/path/")
