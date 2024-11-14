@@ -1,11 +1,8 @@
-from pathlib import Path
-
 from genplis.tags import get_tag_size, get_tags
 
 
-def test_get_tags_mp3():
-    path = (Path(__file__).parent / "files" / "test.mp3").absolute()
-    tags = get_tags(path)
+def test_get_tags_mp3(file_mp3):
+    tags = get_tags(file_mp3)
     assert tags == {
         "artist": ["Test Artist"],
         "bitrate": 127.488,
@@ -21,9 +18,8 @@ def test_get_tags_mp3():
     }
 
 
-def test_get_tags_ogg():
-    path = (Path(__file__).parent / "files" / "test.ogg").absolute()
-    tags = get_tags(path)
+def test_get_tags_ogg(file_ogg):
+    tags = get_tags(file_ogg)
     assert tags == {
         "artist": ["Test Artist"],
         "bitrate": 112.0,
@@ -32,7 +28,7 @@ def test_get_tags_ogg():
         "encoder": [
             "Lavc58.35.100 libvorbis",
         ],
-        "filename": str(path),
+        "filename": str(file_ogg),
         "filesize": 5241,
         "genre": ["Synthwave", "Retrowave", "Electronic"],
         "images": {},
