@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from genplis.db import (
+    cache_tags_for_file,
     create_files_table,
     get_db_path,
     is_cache_valid,
@@ -63,3 +64,12 @@ def test_is_cache_valid(genplis_db, file_mp3):
         [str(file_mp3)],
     )
     assert is_cache_valid(genplis_db.cursor(), file_mp3) is False
+
+
+def test_cache_tags_for_file(genplis_db, file_mp3):
+    timestamp = get_last_modified(file_mp3)
+    cache_tags_for_file(genplis_db.cursor(), file_mp3, {"a": "b"})
+    rows = genplis_db.execute("SELECT * from files").fetchall()
+    assert rows == [
+        ("/home/fidel/Code/genplis/tests/files/test.mp3", timestamp, '{"a": "b"}')
+    ]
