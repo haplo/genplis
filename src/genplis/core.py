@@ -120,7 +120,7 @@ def process_directory(conn, cursor, directory, args):
 
     # Apply each filter to all songs to generate playlists
     for filter_file, rules in all_filters.items():
-        files = filter_songs(all_tags, filter_file, rules, args)
+        files = filter_songs(all_tags, filter_file, rules, args.verbose)
         print(f"Filter file {filter_file} matched {len(files)} songs")
         if len(files) > 0:
             playlist_file = filter_file.with_suffix(".m3u")
@@ -169,8 +169,8 @@ def process_file(conn, cursor, file, args):
     return tags, {}
 
 
-def filter_songs(files_and_tags, filter_file, rules, args):
-    if args.verbose:
+def filter_songs(files_and_tags, filter_file, rules, verbose: bool = False):
+    if verbose:
         print(f"\nFiltering songs and generating playlist for {filter_file}")
 
     filtered_songs = []
@@ -182,7 +182,7 @@ def filter_songs(files_and_tags, filter_file, rules, args):
             # only executed if all rules pass
             filtered_songs.append(file)
 
-    if args.verbose:
+    if verbose:
         print(f"Files that match the filter {filter_file}:")
         for song in filtered_songs:
             print(f"  {song}")
