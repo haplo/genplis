@@ -12,7 +12,6 @@ def test_get_tags_mp3(file_mp3):
         "filename": "/home/fidel/Code/genplis/tests/files/test.mp3",
         "filesize": 53235,
         "genre": ["Synthwave; Retrowave; Electronic"],
-        "images": {},
         "samplerate": 44100,
         "title": ["Test"],
     }
@@ -31,7 +30,6 @@ def test_get_tags_ogg(file_ogg):
         "filename": str(file_ogg),
         "filesize": 5241,
         "genre": ["Synthwave", "Retrowave", "Electronic"],
-        "images": {},
         "samplerate": 44100,
         "title": ["Test"],
     }
