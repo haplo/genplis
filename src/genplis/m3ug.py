@@ -52,6 +52,18 @@ def normalize(raw: TagValue) -> TagValue:
     return raw
 
 
+def _find_tag(
+    tags: Mapping[str, TagValue], normalized_name: str
+) -> tuple[bool, TagValue]:
+    """Look up a tag by its lower-case name, ignoring key casing."""
+    if normalized_name in tags:
+        return True, tags[normalized_name]
+    for key, value in tags.items():
+        if key.lower() == normalized_name:
+            return True, value
+    return False, None
+
+
 def get_rating(tags: Mapping[str, TagValue]) -> float | None:
     """Return a rating calculated from known rating alias tags.
 
@@ -63,10 +75,12 @@ def get_rating(tags: Mapping[str, TagValue]) -> float | None:
     tag that is missing, feel free to open an issue with a PR to add support
     for it.
     """
-    if "rating" in tags:
+    has_rating, _ = _find_tag(tags, "rating")
+    if has_rating:
         return None
 
-    fmps_rating = normalize(tags.get("fmps_rating"))
+    found, raw_fmps_rating = _find_tag(tags, "fmps_rating")
+    fmps_rating = normalize(raw_fmps_rating) if found else None
     if isinstance(fmps_rating, list):
         # normalize() only leaves lists with more than one item
         logger.warning("Unexpected fmps_rating as list: %s", fmps_rating)
@@ -107,14 +121,14 @@ class NameNode:
 
     def find(self, tags: Mapping[str, TagValue]) -> tuple[str, TagValue]:
         normalized_name = self.name.lower()
+        found, value = _find_tag(tags, normalized_name)
         # handle special cases
         if normalized_name == "rating":
-            if "rating" in tags:
-                return normalized_name, tags["rating"]
+            if found:
+                return normalized_name, value
             return normalized_name, get_rating(tags)
-        # if there is a tag with the exact (case-insensitive) name, use it
-        if normalized_name in tags:
-            return normalized_name, tags[normalized_name]
+        if found:
+            return normalized_name, value
         # default case is no match, no value found
         return normalized_name, None
 

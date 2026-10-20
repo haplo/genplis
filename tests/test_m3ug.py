@@ -392,6 +392,21 @@ def test_zero_and_empty_values_match_equality_rules() -> None:
     assert parse_m3ug('comment = ""')[0].apply({"comment": ""})
 
 
+def test_tag_names_are_case_insensitive_for_mixed_case_keys() -> None:
+    assert parse_m3ug("ARTIST = X")[0].apply({"Artist": "X"})
+    assert parse_m3ug("artist = X")[0].apply({"ARTIST": "X"})
+
+
+def test_mixed_case_rating_tags_are_case_insensitive() -> None:
+    assert NameNode("rating").find({"Rating": 4}) == ("rating", 4)
+    assert NameNode("RATING").find({"FMPS_RATING": ["0.8"]}) == (
+        "rating",
+        pytest.approx(4.0),
+    )
+    assert get_rating({"FMPS_RATING": ["0.8"]}) == pytest.approx(4.0)
+    assert get_rating({"RATING": 4, "FMPS_RATING": ["0.8"]}) is None
+
+
 def test_find_rating_from_single_item_fmps_rating_list() -> None:
     name, value = NameNode("rating").find({"fmps_rating": ["0.8"]})
     assert name == "rating"
