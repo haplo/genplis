@@ -88,10 +88,14 @@ exclude =
 max_size = 1000
 
 # Tag names to discard before caching and filtering, one per line.
+# Calculated values such as filename and filesize are also controlled by
+# this list: omit them to keep them available to filters and show them as
+# *filename / *filesize.
 ignore =
-    filename
-    filesize
+    comment
+    encoder
     encoder_settings
+    lyrics
 
 [database]
 # Optional cache location. Defaults to
