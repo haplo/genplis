@@ -121,18 +121,26 @@ def get_db_key(file_path: Path) -> str:
     return os.path.normpath(file_path.absolute())
 
 
-def get_cache_status(cursor: sqlite3.Cursor, file_path: Path) -> CacheStatus:
+def get_cache_status(
+    cursor: sqlite3.Cursor,
+    file_path: Path,
+    last_modified: int | None = None,
+) -> CacheStatus:
     """Check whether file_path is cached in DB and whether the entry is fresh.
 
     Returns CacheStatus.MISS if file_path is not in DB, CacheStatus.STALE if
     the file is more recent than the cached entry (so the cache shouldn't be
     used), and CacheStatus.HIT if the cached entry is up to date.
 
+    Pass ``last_modified`` when the caller already read the file's timestamp,
+    so it is not read again.
+
     Cached tags can then be retrieved with get_cached_tags.
 
     """
     db_key = get_db_key(file_path)
-    file_last_modified = get_last_modified(file_path)
+    if last_modified is None:
+        last_modified = get_last_modified(file_path)
 
     # Check if the file path already exists in the database
     cursor.execute(
@@ -144,7 +152,7 @@ def get_cache_status(cursor: sqlite3.Cursor, file_path: Path) -> CacheStatus:
         return CacheStatus.MISS
 
     cached_timestamp = row[0]  # int, UNIX timestamp
-    if file_last_modified <= cached_timestamp:
+    if last_modified <= cached_timestamp:
         return CacheStatus.HIT
     return CacheStatus.STALE
 
@@ -154,15 +162,20 @@ def cache_tags_for_file(
     file_path: Path,
     tags: Tags,
     *,
+    last_modified: int | None = None,
     verbosity: Verbosity = Verbosity.NORMAL,
 ) -> None:
     """Save given tags for a music file in DB.
+
+    Pass ``last_modified`` to store the timestamp captured before parsing, so
+    a file modified during parsing is detected as stale on the next run.
 
     Caller is responsible for calling commit on the DB connection.
 
     """
     file_path = file_path.absolute()
-    last_modified = get_last_modified(file_path)
+    if last_modified is None:
+        last_modified = get_last_modified(file_path)
     json_tags = json.dumps(tags, cls=GenplisJSONEncoder)
     db_key = get_db_key(file_path)
 

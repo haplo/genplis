@@ -536,6 +536,29 @@ def test_process_file_uses_config_tags(
     assert "title" in tags
 
 
+def test_process_file_reads_mtime_once(
+    genplis_db: sqlite3.Connection,
+    make_args: Callable[..., Args],
+    file_mp3: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[Path] = []
+
+    def fake_get_last_modified(path: Path) -> int:
+        calls.append(path)
+        return 123
+
+    def fake_get_tags(*_args: object, **_kwargs: object) -> Tags:
+        return {"title": ["Test"]}
+
+    monkeypatch.setattr("genplis.db.get_last_modified", fake_get_last_modified)
+    monkeypatch.setattr("genplis.core.get_tags", fake_get_tags)
+
+    process_file(genplis_db, genplis_db.cursor(), file_mp3, make_args(str(file_mp3)))
+
+    assert len(calls) == 1
+
+
 def test_process_file_uses_cached_tags_without_reparsing(
     genplis_db: sqlite3.Connection,
     make_args: Callable[..., Args],

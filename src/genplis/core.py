@@ -414,7 +414,8 @@ def process_file(
         rules = parse_m3ug(content, str(file), args.verbosity)
         return None, rules, db.CacheStatus.MISS
 
-    cache_status = db.get_cache_status(cursor, file)
+    last_modified = db.get_last_modified(file)
+    cache_status = db.get_cache_status(cursor, file, last_modified)
     if cache_status is db.CacheStatus.HIT:
         # reuse cached tags from DB instead of parsing them again
         cached_tags = db.get_cached_tags(cursor, file)
@@ -430,7 +431,13 @@ def process_file(
         return None, [], cache_status
     # Cache supported files even when every tag was filtered out, so an empty
     # tag dictionary is not confused with "not a music file" next time.
-    db.cache_tags_for_file(cursor, file, tags, verbosity=args.verbosity)
+    db.cache_tags_for_file(
+        cursor,
+        file,
+        tags,
+        last_modified=last_modified,
+        verbosity=args.verbosity,
+    )
     conn.commit()
     return tags, [], cache_status
 
