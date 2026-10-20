@@ -85,7 +85,7 @@ def test_process_m3ug_file(
     tags, filters, cache_status = process_file(
         genplis_db, genplis_db.cursor(), file_m3ug, args
     )
-    assert tags == {}
+    assert tags is None
     assert filters == [
         GreaterOrEqualRuleNode(NameNode("rating"), ValueNode(3)),
         ContainsRuleNode(NameNode("genre"), ValueNode("Metal")),
@@ -530,6 +530,7 @@ def test_process_file_uses_config_tags(
     args = make_args(str(file_mp3), config=config)
     tags, _, _ = process_file(genplis_db, genplis_db.cursor(), file_mp3, args)
 
+    assert tags is not None
     assert "artist" not in tags
     assert "genre" not in tags
     assert "title" in tags
@@ -597,7 +598,7 @@ def test_process_file_accepts_uppercase_m3ug_extension(
         genplis_db, genplis_db.cursor(), filter_file, make_args(str(filter_file))
     )
 
-    assert tags == {}
+    assert tags is None
     assert len(filters) == 2
     assert cache_status is CacheStatus.MISS
 
@@ -614,7 +615,7 @@ def test_process_file_reads_m3ug_with_utf8_bom(
         genplis_db, genplis_db.cursor(), filter_file, make_args(str(filter_file))
     )
 
-    assert tags == {}
+    assert tags is None
     assert filters == [
         EqualRuleNode(NameNode("artist"), ValueNode("Test Artist")),
     ]
@@ -636,13 +637,98 @@ def test_process_file_ignores_unsupported_file_without_caching(
         make_args(str(unsupported), verbosity=Verbosity.VERBOSE),
     )
 
-    assert tags == {}
+    assert tags is None
     assert filters == []
     assert cache_status is CacheStatus.MISS
     assert (
         f"Skipping {unsupported}: not supported by tinytag" in capsys.readouterr().out
     )
     assert genplis_db.execute("SELECT count(*) FROM files").fetchone() == (0,)
+
+
+def test_process_file_returns_and_caches_empty_tags_for_supported_file(
+    genplis_db: sqlite3.Connection,
+    make_args: Callable[..., Args],
+    file_mp3: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_get_tags(*_args: object, **_kwargs: object) -> Tags:
+        return {}
+
+    monkeypatch.setattr("genplis.core.get_tags", fake_get_tags)
+
+    tags, filters, cache_status = process_file(
+        genplis_db, genplis_db.cursor(), file_mp3, make_args(str(file_mp3))
+    )
+
+    assert tags == {}
+    assert filters == []
+    assert cache_status is CacheStatus.MISS
+    assert get_cached_tags(genplis_db.cursor(), file_mp3) == {}
+
+
+def test_process_file_uses_cached_empty_tags(
+    genplis_db: sqlite3.Connection,
+    make_args: Callable[..., Args],
+    file_mp3: Path,
+) -> None:
+    cache_tags_for_file(genplis_db.cursor(), file_mp3, {})
+
+    tags, filters, cache_status = process_file(
+        genplis_db, genplis_db.cursor(), file_mp3, make_args(str(file_mp3))
+    )
+
+    assert tags == {}
+    assert filters == []
+    assert cache_status is CacheStatus.HIT
+
+
+def test_empty_filter_includes_tagless_music_file(
+    genplis_db: sqlite3.Connection,
+    make_args: Callable[..., Args],
+    file_mp3: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    music = tmp_path / "music"
+    music.mkdir()
+    song = music / "tagless.mp3"
+    shutil.copy2(file_mp3, song)
+    filter_file = music / "all.m3ug"
+    filter_file.write_text("", encoding="utf-8")
+
+    def fake_get_tags(*_args: object, **_kwargs: object) -> Tags:
+        return {}
+
+    monkeypatch.setattr("genplis.core.get_tags", fake_get_tags)
+
+    all_tags, all_filters = process_directory(
+        genplis_db, genplis_db.cursor(), music, make_args(str(music))
+    )
+
+    assert all_tags == {song: {}}
+    assert all_filters == {filter_file: []}
+    playlist = filter_file.with_suffix(".m3u")
+    assert song.name in playlist.read_text(encoding="utf-8").splitlines()
+
+
+def test_process_path_reports_tagless_music_file(
+    genplis_db: sqlite3.Connection,
+    make_args: Callable[..., Args],
+    file_mp3: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_get_tags(*_args: object, **_kwargs: object) -> Tags:
+        return {}
+
+    monkeypatch.setattr("genplis.core.get_tags", fake_get_tags)
+
+    process_path(genplis_db, genplis_db.cursor(), make_args(str(file_mp3)))
+
+    output = capsys.readouterr().out
+    assert f"{file_mp3} detected as music file" in output
+    assert "Parsed tags:" in output
 
 
 def test_process_dir_respects_overwrite_setting(

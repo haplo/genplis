@@ -262,7 +262,7 @@ def process_path(conn: sqlite3.Connection, cursor: sqlite3.Cursor, args: Args) -
         process_directory(conn, cursor, path, args)
     elif path.is_file():
         tags, filters, cache_status = process_file(conn, cursor, path, args)
-        if tags and args.verbosity.shows_normal_output:
+        if tags is not None and args.verbosity.shows_normal_output:
             print(f"{path} detected as music file")
             print(f"Cache status: {CACHE_STATUS_MESSAGES[cache_status]}")
 
@@ -275,7 +275,9 @@ def process_path(conn: sqlite3.Connection, cursor: sqlite3.Cursor, args: Args) -
             display_tags.update(get_calculated_tags(tags))
             for key, value in sorted(display_tags.items(), key=lambda t: t[0]):
                 print(f"    {key} = {value}")
-        if filters and args.verbosity.shows_normal_output:
+        if (
+            filters or path.suffix.lower() == ".m3ug"
+        ) and args.verbosity.shows_normal_output:
             print(f"{path} detected as M3UG file")
             print("Parsed filters:")
             for f in filters:
@@ -342,9 +344,9 @@ def process_directory(
                 continue
 
             tags, filters, _ = process_file(conn, cursor, file, args)
-            if tags:
+            if tags is not None:
                 all_tags[file] = tags
-            if filters:
+            if filters or file.suffix.lower() == ".m3ug":
                 all_filters[file] = filters
 
     # Apply each filter to all songs to generate playlists
@@ -384,12 +386,16 @@ def process_directory(
 
 def process_file(
     conn: sqlite3.Connection, cursor: sqlite3.Cursor, file: Path, args: Args
-) -> tuple[Tags, list[RuleNode], db.CacheStatus]:
+) -> tuple[Tags | None, list[RuleNode], db.CacheStatus]:
     """Process a single file.
 
     Returns a tuple in the form (tags, filters, cache_status), where tags is a
     dictionary, filters is always a list (empty for non-M3UG files) and
     cache_status is the state of the tag cache when the file was found.
+
+    ``tags`` is ``None`` when the file is not a supported music file. An empty
+    dictionary means the file is supported music but has no usable tags (for
+    example because every tag is ignored).
 
     If it's an M3UG file, parse it as such and return its filters.
     See m3ug module.
@@ -405,13 +411,11 @@ def process_file(
     if file.suffix.lower() == ".m3ug":
         content = file.read_text(encoding="utf-8-sig")
         rules = parse_m3ug(content, str(file), args.verbosity)
-        return {}, rules, db.CacheStatus.MISS
+        return None, rules, db.CacheStatus.MISS
 
     cache_status = db.get_cache_status(cursor, file)
     if cache_status is db.CacheStatus.HIT:
         # reuse cached tags from DB instead of parsing them again
-        # empty tags mean the file is not a supported music file and
-        # should be ignored
         cached_tags = db.get_cached_tags(cursor, file)
         return cached_tags, [], cache_status
 
@@ -421,10 +425,13 @@ def process_file(
         max_size=args.config.tags.max_size,
         ignore=args.config.tags.ignore,
     )
-    if tags:
-        db.cache_tags_for_file(cursor, file, tags, verbosity=args.verbosity)
-        conn.commit()
-    return tags or {}, [], cache_status
+    if tags is None:
+        return None, [], cache_status
+    # Cache supported files even when every tag was filtered out, so an empty
+    # tag dictionary is not confused with "not a music file" next time.
+    db.cache_tags_for_file(cursor, file, tags, verbosity=args.verbosity)
+    conn.commit()
+    return tags, [], cache_status
 
 
 def filter_songs(
