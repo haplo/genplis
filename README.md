@@ -185,8 +185,8 @@ Type checking is done with [ty](https://docs.astral.sh/ty/):
   - [x] m3ug
   - [x] db
   - [x] tags
-  - [ ] file processing
-  - [ ] dir processing
+  - [x] file processing
+  - [x] dir processing
   - [ ] PR check
     - [ ] Run pre-commit on whole project
     - [ ] Test on every supported Python version

@@ -1,6 +1,8 @@
 from pathlib import Path
 
+import pytest
 from pytest import approx
+from tinytag import TinyTagException
 
 from genplis.tags import get_audio_property_tags, get_tag_size, get_tags
 
@@ -94,3 +96,45 @@ def test_get_tags_ignore_is_case_insensitive(file_mp3: Path) -> None:
 
     assert tags is not None
     assert "artist" not in tags
+
+
+def test_get_tags_verbose_explains_ignored_and_oversized_tags(
+    file_mp3: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    tags = get_tags(
+        file_mp3,
+        verbose=True,
+        max_size=0,
+        ignore=frozenset({"artist"}),
+    )
+
+    output = capsys.readouterr().out
+    assert tags == {}
+    assert "Removing tag artist because it is configured to be ignored" in output
+    assert "because it's larger than 0 bytes" in output
+
+
+def test_get_tags_verbose_explains_unsupported_and_unparseable_files(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    unsupported = tmp_path / "notes.txt"
+    unsupported.write_text("not music\n", encoding="utf-8")
+
+    assert get_tags(unsupported, verbose=True) is None
+    assert (
+        f"Skipping {unsupported}: not supported by tinytag" in capsys.readouterr().out
+    )
+
+    broken = tmp_path / "broken.mp3"
+    broken.write_bytes(b"")
+
+    def fail_get(*_args: object, **_kwargs: object) -> None:
+        raise TinyTagException("boom")
+
+    monkeypatch.setattr("genplis.tags.TinyTag.get", fail_get)
+
+    assert get_tags(broken, verbose=True) is None
+    assert f"Skipping {broken}: boom" in capsys.readouterr().out

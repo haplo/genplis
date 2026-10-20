@@ -5,6 +5,7 @@ import shutil
 import sqlite3
 import sys
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -30,10 +31,17 @@ from genplis.core import (
     resolve_args,
     setup_argparse,
 )
-from genplis.db import CacheStatus, create_files_table, setup_database_connection
+from genplis.db import (
+    CacheStatus,
+    cache_tags_for_file,
+    create_files_table,
+    get_cached_tags,
+    setup_database_connection,
+)
 from genplis.exceptions import GenplisConfigError, GenplisError
 from genplis.m3ug import (
     ContainsRuleNode,
+    EqualRuleNode,
     GreaterOrEqualRuleNode,
     NameNode,
     ValueNode,
@@ -119,6 +127,68 @@ def test_process_path_reports_cache_status(
     # The stale entry was refreshed by the previous run.
     process_path(genplis_db, cursor, args)
     assert "Cache status: valid" in capsys.readouterr().out
+
+
+def test_process_path_prints_m3ug_filters(
+    genplis_db: sqlite3.Connection,
+    make_args: Callable[..., Args],
+    file_m3ug: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    process_path(genplis_db, genplis_db.cursor(), make_args(str(file_m3ug)))
+
+    output = capsys.readouterr().out
+    assert f"{file_m3ug} detected as M3UG file" in output
+    assert "Parsed filters:" in output
+    assert "    rating greater or equal 3" in output
+    assert "    genre contains Metal" in output
+    assert "detected as music file" not in output
+    assert "Parsed tags:" not in output
+
+
+def test_process_path_warns_for_excluded_single_file(
+    genplis_db: sqlite3.Connection,
+    make_args: Callable[..., Args],
+    file_mp3: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    args = make_args(str(file_mp3), exclude=[re.compile(r"test\.mp3$")])
+
+    process_path(genplis_db, genplis_db.cursor(), args)
+
+    assert (
+        "WARNING: This file is excluded by current configuration."
+        in capsys.readouterr().out
+    )
+
+
+def test_process_path_rejects_nonexistent_path(
+    genplis_db: sqlite3.Connection,
+    make_args: Callable[..., Args],
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    missing = tmp_path / "missing.mp3"
+
+    with pytest.raises(SystemExit) as exc_info:
+        process_path(genplis_db, genplis_db.cursor(), make_args(str(missing)))
+
+    assert exc_info.value.code == 1
+    assert (
+        f"{missing} must be either a directory or a file. Exiting..."
+        in capsys.readouterr().out
+    )
+
+
+def test_process_path_errors_without_path(
+    genplis_db: sqlite3.Connection,
+    make_args: Callable[..., Args],
+    file_mp3: Path,
+) -> None:
+    args = replace(make_args(str(file_mp3)), path=None)
+
+    with pytest.raises(GenplisError, match="none was given"):
+        process_path(genplis_db, genplis_db.cursor(), args)
 
 
 def test_get_calculated_tags_adds_rating_from_fmps_rating() -> None:
@@ -264,6 +334,144 @@ def test_process_dir(
     assert len(all_filters[tmp_path / file_m3ug.name]) == 2
 
 
+def test_process_dir_walks_nested_directories(
+    genplis_db: sqlite3.Connection,
+    make_args: Callable[..., Args],
+    file_mp3: Path,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    album = tmp_path / "album"
+    disc = album / "disc1"
+    disc.mkdir(parents=True)
+    songs = [tmp_path / "root.mp3", album / "album.mp3", disc / "disc.mp3"]
+    for song in songs:
+        shutil.copy2(file_mp3, song)
+
+    all_tags, all_filters = process_directory(
+        genplis_db, genplis_db.cursor(), tmp_path, make_args(str(tmp_path))
+    )
+
+    assert set(all_tags) == set(songs)
+    assert all_filters == {}
+    assert "Processed 3 files" in capsys.readouterr().out
+
+
+def test_process_dir_filters_songs_across_subdirectories(
+    genplis_db: sqlite3.Connection,
+    make_args: Callable[..., Args],
+    file_mp3: Path,
+    file_ogg: Path,
+    tmp_path: Path,
+) -> None:
+    subdirectory = tmp_path / "sub"
+    subdirectory.mkdir()
+    shutil.copy2(file_mp3, tmp_path / "root.mp3")
+    shutil.copy2(file_ogg, tmp_path / "root.ogg")
+    shutil.copy2(file_mp3, subdirectory / "nested.mp3")
+    shutil.copy2(file_ogg, subdirectory / "nested.ogg")
+
+    filter_file = tmp_path / "favorites.m3ug"
+    filter_file.write_text(
+        'artist = "Test Artist"\nmime_type ~= ogg\n', encoding="utf-8"
+    )
+
+    process_directory(
+        genplis_db, genplis_db.cursor(), tmp_path, make_args(str(tmp_path))
+    )
+
+    lines = (tmp_path / "favorites.m3u").read_text(encoding="utf-8").splitlines()
+    playlist_entries = sorted(line for line in lines if not line.startswith("#"))
+    assert playlist_entries == ["root.ogg", "sub/nested.ogg"]
+
+
+def test_process_dir_does_not_create_playlist_when_no_song_matches(
+    genplis_db: sqlite3.Connection,
+    make_args: Callable[..., Args],
+    file_mp3: Path,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    shutil.copy2(file_mp3, tmp_path / "song.mp3")
+    filter_file = tmp_path / "favorites.m3ug"
+    filter_file.write_text('artist = "Nobody"\n', encoding="utf-8")
+
+    process_directory(
+        genplis_db, genplis_db.cursor(), tmp_path, make_args(str(tmp_path))
+    )
+
+    output = capsys.readouterr().out
+    assert f"Filter file {filter_file} matched 0 songs" in output
+    assert "Creating playlist" not in output
+    assert not (tmp_path / "favorites.m3u").exists()
+
+
+def test_process_dir_verbose_lists_matching_songs(
+    genplis_db: sqlite3.Connection,
+    make_args: Callable[..., Args],
+    file_mp3: Path,
+    file_ogg: Path,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    mp3 = tmp_path / "song.mp3"
+    ogg = tmp_path / "song.ogg"
+    shutil.copy2(file_mp3, mp3)
+    shutil.copy2(file_ogg, ogg)
+    filter_file = tmp_path / "favorites.m3ug"
+    filter_file.write_text("mime_type ~= ogg\n", encoding="utf-8")
+
+    process_directory(
+        genplis_db,
+        genplis_db.cursor(),
+        tmp_path,
+        make_args(str(tmp_path), verbose=True),
+    )
+
+    output = capsys.readouterr().out
+    assert f"Filtering songs and generating playlist for {filter_file}" in output
+    assert f"Files that match the filter {filter_file}:" in output
+    assert f"  {ogg}" in output
+    assert f"  {mp3}" not in output
+
+
+def test_process_dir_generates_playlist_relative_to_nested_filter_file(
+    genplis_db: sqlite3.Connection,
+    make_args: Callable[..., Args],
+    file_mp3: Path,
+    tmp_path: Path,
+) -> None:
+    subdirectory = tmp_path / "sub"
+    subdirectory.mkdir()
+    shutil.copy2(file_mp3, tmp_path / "a.mp3")
+    shutil.copy2(file_mp3, subdirectory / "b.mp3")
+
+    filter_file = subdirectory / "favorites.m3ug"
+    filter_file.write_text('artist = "Test Artist"\n', encoding="utf-8")
+
+    process_directory(
+        genplis_db, genplis_db.cursor(), tmp_path, make_args(str(tmp_path))
+    )
+
+    lines = (subdirectory / "favorites.m3u").read_text(encoding="utf-8").splitlines()
+    playlist_entries = sorted(line for line in lines if not line.startswith("#"))
+    assert playlist_entries == ["../a.mp3", "b.mp3"]
+
+
+def test_process_dir_rejects_file(
+    genplis_db: sqlite3.Connection,
+    make_args: Callable[..., Args],
+    file_mp3: Path,
+) -> None:
+    with pytest.raises(GenplisError, match="not a directory"):
+        process_directory(
+            genplis_db,
+            genplis_db.cursor(),
+            file_mp3,
+            make_args(str(file_mp3)),
+        )
+
+
 def test_process_file_uses_config_tags(
     genplis_db: sqlite3.Connection,
     make_args: Callable[..., Args],
@@ -276,6 +484,116 @@ def test_process_file_uses_config_tags(
     assert "artist" not in tags
     assert "genre" not in tags
     assert "title" in tags
+
+
+def test_process_file_uses_cached_tags_without_reparsing(
+    genplis_db: sqlite3.Connection,
+    make_args: Callable[..., Args],
+    file_mp3: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cache_tags_for_file(genplis_db.cursor(), file_mp3, {"title": ["Cached"]})
+
+    def fail_get_tags(*_args: object, **_kwargs: object) -> Tags:
+        raise AssertionError("get_tags should not be called on a cache hit")
+
+    monkeypatch.setattr("genplis.core.get_tags", fail_get_tags)
+
+    tags, filters, cache_status = process_file(
+        genplis_db, genplis_db.cursor(), file_mp3, make_args(str(file_mp3))
+    )
+
+    assert tags == {"title": ["Cached"]}
+    assert filters == []
+    assert cache_status is CacheStatus.HIT
+
+
+def test_process_file_refreshes_stale_cache_entry(
+    genplis_db: sqlite3.Connection,
+    make_args: Callable[..., Args],
+    file_mp3: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cache_tags_for_file(genplis_db.cursor(), file_mp3, {"title": ["Old"]})
+    genplis_db.execute(
+        "UPDATE files SET last_modified=last_modified-1 WHERE path=?",
+        (str(file_mp3),),
+    )
+
+    def fake_get_tags(*_args: object, **_kwargs: object) -> Tags:
+        return {"title": ["Fresh"]}
+
+    monkeypatch.setattr("genplis.core.get_tags", fake_get_tags)
+
+    tags, filters, cache_status = process_file(
+        genplis_db, genplis_db.cursor(), file_mp3, make_args(str(file_mp3))
+    )
+
+    assert tags == {"title": ["Fresh"]}
+    assert filters == []
+    assert cache_status is CacheStatus.STALE
+    assert get_cached_tags(genplis_db.cursor(), file_mp3) == {"title": ["Fresh"]}
+
+
+def test_process_file_accepts_uppercase_m3ug_extension(
+    genplis_db: sqlite3.Connection,
+    make_args: Callable[..., Args],
+    file_m3ug: Path,
+    tmp_path: Path,
+) -> None:
+    filter_file = tmp_path / "FILTERS.M3UG"
+    shutil.copy2(file_m3ug, filter_file)
+
+    tags, filters, cache_status = process_file(
+        genplis_db, genplis_db.cursor(), filter_file, make_args(str(filter_file))
+    )
+
+    assert tags == {}
+    assert len(filters) == 2
+    assert cache_status is CacheStatus.MISS
+
+
+def test_process_file_reads_m3ug_with_utf8_bom(
+    genplis_db: sqlite3.Connection,
+    make_args: Callable[..., Args],
+    tmp_path: Path,
+) -> None:
+    filter_file = tmp_path / "bom.m3ug"
+    filter_file.write_text('\ufeffartist = "Test Artist"\n', encoding="utf-8")
+
+    tags, filters, _ = process_file(
+        genplis_db, genplis_db.cursor(), filter_file, make_args(str(filter_file))
+    )
+
+    assert tags == {}
+    assert filters == [
+        EqualRuleNode(NameNode("artist"), ValueNode("Test Artist")),
+    ]
+
+
+def test_process_file_ignores_unsupported_file_without_caching(
+    genplis_db: sqlite3.Connection,
+    make_args: Callable[..., Args],
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    unsupported = tmp_path / "notes.txt"
+    unsupported.write_text("not music\n", encoding="utf-8")
+
+    tags, filters, cache_status = process_file(
+        genplis_db,
+        genplis_db.cursor(),
+        unsupported,
+        make_args(str(unsupported), verbose=True),
+    )
+
+    assert tags == {}
+    assert filters == []
+    assert cache_status is CacheStatus.MISS
+    assert (
+        f"Skipping {unsupported}: not supported by tinytag" in capsys.readouterr().out
+    )
+    assert genplis_db.execute("SELECT count(*) FROM files").fetchone() == (0,)
 
 
 def test_process_dir_respects_overwrite_setting(
