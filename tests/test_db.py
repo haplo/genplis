@@ -102,9 +102,7 @@ def test_cache_tags_for_file(genplis_db: sqlite3.Connection, file_mp3: Path) -> 
     timestamp = get_last_modified(file_mp3)
     cache_tags_for_file(genplis_db.cursor(), file_mp3, {"a": "b"})
     rows = genplis_db.execute("SELECT * from files").fetchall()
-    assert rows == [
-        ("/home/fidel/Code/genplis/tests/files/test.mp3", timestamp, '{"a": "b"}')
-    ]
+    assert rows == [(str(file_mp3), timestamp, '{"a": "b"}')]
 
 
 def test_cache_lookup_with_relative_path(

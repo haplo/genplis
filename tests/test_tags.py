@@ -15,7 +15,7 @@ def test_get_tags_mp3(file_mp3: Path) -> None:
         "channels": 2,
         "duration": approx(3.239183673469388),
         "encoder_settings": ["Lavf57.83.100"],
-        "filename": "/home/fidel/Code/genplis/tests/files/test.mp3",
+        "filename": str(file_mp3),
         "filesize": 53235,
         "genre": ["Synthwave; Retrowave; Electronic"],
         "is_lossless": False,
