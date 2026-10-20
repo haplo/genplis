@@ -1219,7 +1219,7 @@ def test_main_closes_database_connection(
     def tracking_connect(*_args: object, **_kwargs: object) -> sqlite3.Connection:
         return real_connect(db_path, factory=TrackingConnection)
 
-    monkeypatch.setattr("genplis.core.sqlite3.connect", tracking_connect)
+    monkeypatch.setattr("genplis.db.sqlite3.connect", tracking_connect)
     monkeypatch.setattr(
         sys,
         "argv",

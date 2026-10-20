@@ -86,6 +86,21 @@ def test_db_connection_and_create(tmp_path: Path) -> None:
         conn.close()
 
 
+def test_setup_database_connection_keeps_integer_timestamps(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "genplis.db"
+    conn, cursor = setup_database_connection(db_path)
+    try:
+        create_files_table(cursor)
+        cursor.execute(
+            "INSERT INTO files(path, last_modified, tags) VALUES ('/x', 12345, '{}')"
+        )
+        assert cursor.execute("SELECT last_modified FROM files").fetchone() == (12345,)
+    finally:
+        conn.close()
+
+
 def test_get_cache_status(genplis_db: sqlite3.Connection, file_mp3: Path) -> None:
     # not present in DB
     assert get_cache_status(genplis_db.cursor(), file_mp3) is CacheStatus.MISS

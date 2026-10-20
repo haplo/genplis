@@ -1,7 +1,6 @@
 import json
 import os
 import sqlite3
-from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
 from typing import cast
@@ -50,16 +49,6 @@ def get_db_path(override: Path | None = None) -> Path:
     return db_path
 
 
-def adapt_datetime_epoch(val: datetime) -> int:
-    """Adapt datetime to Unix timestamp."""
-    return int(val.timestamp())
-
-
-def convert_timestamp(val: bytes) -> datetime:
-    """Convert Unix epoch timestamp to datetime object."""
-    return datetime.fromtimestamp(int(val))
-
-
 def vacuum_database(conn: sqlite3.Connection) -> None:
     """Rebuild the database file to reclaim space after deletions."""
     conn.execute("VACUUM")
@@ -68,8 +57,6 @@ def vacuum_database(conn: sqlite3.Connection) -> None:
 def setup_database_connection(
     conn_path: Path,
 ) -> tuple[sqlite3.Connection, sqlite3.Cursor]:
-    sqlite3.register_adapter(datetime, adapt_datetime_epoch)
-    sqlite3.register_converter("timestamp", convert_timestamp)
     conn = sqlite3.connect(conn_path)
     cursor = conn.cursor()
     return conn, cursor
