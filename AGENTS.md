@@ -38,6 +38,9 @@ uv run ruff check --fix .
 # Run ruff formatter
 uv run ruff format .
 
+# Run pre-commit hooks on staged files only (run after staging, before committing)
+uv run pre-commit run
+
 # Run pre-commit hooks on all files
 uv run pre-commit run --all-files
 
@@ -158,13 +161,23 @@ from genplis.exceptions import GenplisError
 - Consider memory usage for large music collections
 - Database operations use WAL mode for better concurrency
 
+### Staging and Committing
+- Run `uv run pre-commit run` every time you stage files, before handing
+  them off to be committed. With no arguments pre-commit only checks the
+  files in the index, so run it again after staging further changes.
+- Fix any hook failures and re-stage the affected files; do not commit with
+  failing hooks.
+- Use `uv run pre-commit run --all-files` to validate the whole repository
+  when hooks or configuration change.
+
 ### Development Workflow
 1. Write tests first (TDD when possible)
 2. Run ruff linting and formatting before commits
 3. Use pre-commit hooks to enforce code quality
-4. Test with real music files when possible
-5. Update documentation when adding new features
-6. Use uv for dependency management
+4. Run `uv run pre-commit run` after staging files, before they are committed
+5. Test with real music files when possible
+6. Update documentation when adding new features
+7. Use uv for dependency management
 
 ## Important Files
 
