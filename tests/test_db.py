@@ -1,3 +1,4 @@
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -14,12 +15,12 @@ from genplis.exceptions import GenplisDBError
 from genplis.files import get_last_modified
 
 
-def test_get_db_path(monkeypatch):
+def test_get_db_path(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("XDG_CACHE_HOME", "/home/user/.cache")
     assert get_db_path() == Path("/home/user/.cache/genplis/genplis.db")
 
 
-def test_db_connection_and_create(tmp_path):
+def test_db_connection_and_create(tmp_path: Path) -> None:
     db_path = tmp_path / "genplis.db"
     try:
         conn, cursor = setup_database_connection(db_path)
@@ -50,7 +51,7 @@ def test_db_connection_and_create(tmp_path):
         conn.close()
 
 
-def test_is_cache_valid(genplis_db, file_mp3):
+def test_is_cache_valid(genplis_db: sqlite3.Connection, file_mp3: Path) -> None:
     # not present in DB
     assert is_cache_valid(genplis_db.cursor(), file_mp3) is None
 
@@ -70,7 +71,7 @@ def test_is_cache_valid(genplis_db, file_mp3):
     assert is_cache_valid(genplis_db.cursor(), file_mp3) is False
 
 
-def test_cache_tags_for_file(genplis_db, file_mp3):
+def test_cache_tags_for_file(genplis_db: sqlite3.Connection, file_mp3: Path) -> None:
     timestamp = get_last_modified(file_mp3)
     cache_tags_for_file(genplis_db.cursor(), file_mp3, {"a": "b"})
     rows = genplis_db.execute("SELECT * from files").fetchall()
@@ -79,7 +80,7 @@ def test_cache_tags_for_file(genplis_db, file_mp3):
     ]
 
 
-def test_get_cached_tags_success(genplis_db):
+def test_get_cached_tags_success(genplis_db: sqlite3.Connection) -> None:
     genplis_db.execute(
         "INSERT INTO files(path, last_modified, tags) VALUES ('/some/path', 12345, '{\"a\": \"b\"}')"
     )
@@ -87,6 +88,6 @@ def test_get_cached_tags_success(genplis_db):
     assert tags == {"a": "b"}
 
 
-def test_get_cached_tags_error_if_missing(genplis_db):
+def test_get_cached_tags_error_if_missing(genplis_db: sqlite3.Connection) -> None:
     with pytest.raises(GenplisDBError):
-        get_cached_tags(genplis_db.cursor(), "/invalid/path/")
+        get_cached_tags(genplis_db.cursor(), Path("/invalid/path/"))

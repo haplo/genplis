@@ -1,7 +1,9 @@
+from pathlib import Path
+
 from genplis.tags import get_tag_size, get_tags
 
 
-def test_get_tags_mp3(file_mp3):
+def test_get_tags_mp3(file_mp3: Path) -> None:
     tags = get_tags(file_mp3)
     assert tags == {
         "artist": ["Test Artist"],
@@ -17,7 +19,7 @@ def test_get_tags_mp3(file_mp3):
     }
 
 
-def test_get_tags_ogg(file_ogg):
+def test_get_tags_ogg(file_ogg: Path) -> None:
     tags = get_tags(file_ogg)
     assert tags == {
         "artist": ["Test Artist"],
@@ -35,7 +37,7 @@ def test_get_tags_ogg(file_ogg):
     }
 
 
-def test_get_tag_size():
+def test_get_tag_size() -> None:
     assert get_tag_size(None) == 16
     assert get_tag_size(2) == 28
     assert get_tag_size(128.0) == 24

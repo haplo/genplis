@@ -1,9 +1,9 @@
 import json
-import pathlib
+from pathlib import Path
 
 
 class GenplisJSONEncoder(json.JSONEncoder):
-    def default(self, obj):
-        if isinstance(obj, pathlib.Path):
-            return str(obj)
-        return super().default(obj)
+    def default(self, o: object) -> object:
+        if isinstance(o, Path):
+            return str(o)
+        return super().default(o)

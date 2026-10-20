@@ -2,24 +2,33 @@ import argparse
 import re
 import sqlite3
 import sys
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from timeit import default_timer as timer
+from typing import Protocol, cast
 
 import psutil
 
 from . import db
 from .exceptions import GenplisError
 from .m3u import create_m3u
-from .m3ug import parse_m3ug
+from .m3ug import RuleNode, parse_m3ug
 from .tags import get_tags
+from .types import Tags
 
 
-def regex_type(arg_value):
+class Args(Protocol):
+    path: Path
+    exclude: list[re.Pattern[str]]
+    verbose: bool
+
+
+def regex_type(arg_value: str) -> re.Pattern[str]:
     """"""
     return re.compile(arg_value)
 
 
-def setup_argparse():
+def setup_argparse() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Generate music playlists from your own filters."
     )
@@ -46,14 +55,14 @@ def setup_argparse():
     return parser
 
 
-def is_excluded(path: Path, args) -> bool:
+def is_excluded(path: Path, args: Args) -> bool:
     for pattern in args.exclude:
         if pattern.search(str(path)):
             return True
     return False
 
 
-def process_path(conn, cursor, args):
+def process_path(conn: sqlite3.Connection, cursor: sqlite3.Cursor, args: Args) -> None:
     """Process an arbitrary path through genplis.
 
     It will use process_file or process_directory depending on the type of the path.
@@ -90,7 +99,12 @@ def process_path(conn, cursor, args):
         sys.exit(1)
 
 
-def process_directory(conn, cursor, directory, args) -> tuple[dict, dict]:
+def process_directory(
+    conn: sqlite3.Connection,
+    cursor: sqlite3.Cursor,
+    directory: Path,
+    args: Args,
+) -> tuple[dict[Path, Tags], dict[Path, list[RuleNode]]]:
     """Traverse the directory and process all files.
 
     See process_file for how each file is handled.
@@ -108,8 +122,8 @@ def process_directory(conn, cursor, directory, args) -> tuple[dict, dict]:
 
     start_time = timer()
 
-    all_tags = {}
-    all_filters = {}
+    all_tags: dict[Path, Tags] = {}
+    all_filters: dict[Path, list[RuleNode]] = {}
     for file in directory.rglob("*"):
         if is_excluded(file, args):
             if args.verbose:
@@ -141,7 +155,9 @@ def process_directory(conn, cursor, directory, args) -> tuple[dict, dict]:
     return all_tags, all_filters
 
 
-def process_file(conn, cursor, file, args) -> tuple[dict, list]:
+def process_file(
+    conn: sqlite3.Connection, cursor: sqlite3.Cursor, file: Path, args: Args
+) -> tuple[Tags, list[RuleNode]]:
     """Process a single file.
 
     Returns a tuple in the form (tags, filters), where tags is a dictionary
@@ -159,7 +175,7 @@ def process_file(conn, cursor, file, args) -> tuple[dict, list]:
 
     if file.suffix.lower() == ".m3ug":
         content = file.read_text()
-        rules = parse_m3ug(content, file, args.verbose)
+        rules = parse_m3ug(content, str(file), args.verbose)
         return {}, rules
 
     if db.is_cache_valid(cursor, file):
@@ -176,11 +192,16 @@ def process_file(conn, cursor, file, args) -> tuple[dict, list]:
     return tags or {}, []
 
 
-def filter_songs(files_and_tags, filter_file, rules, verbose: bool = False):
+def filter_songs(
+    files_and_tags: Mapping[Path, Tags],
+    filter_file: Path,
+    rules: Sequence[RuleNode],
+    verbose: bool = False,
+) -> list[Path]:
     if verbose:
         print(f"\nFiltering songs and generating playlist for {filter_file}")
 
-    filtered_songs = []
+    filtered_songs: list[Path] = []
     for file, tags in files_and_tags.items():
         for rule in rules:
             if not rule.apply(tags):
@@ -197,10 +218,10 @@ def filter_songs(files_and_tags, filter_file, rules, verbose: bool = False):
     return filtered_songs
 
 
-def main():
+def main() -> None:
     # Set up argparse
     parser = setup_argparse()
-    args = parser.parse_args()
+    args = cast(Args, parser.parse_args())
 
     db_path = db.get_db_path()
     if args.verbose:

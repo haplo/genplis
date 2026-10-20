@@ -8,7 +8,9 @@ It scratches my own itch where I have a local music collection curated over 30 y
 
 ## Requirements
 
-Python 3.10 or later.
+Python 3.12 or later.
+
+Python 3.10 and 3.11 might work, but they are untested and unsupported.
 
 *genplis* is not published to [PyPI](https://pypi.org/) yet, so you cannot just use *pip* to install it.
 
@@ -62,6 +64,10 @@ Then clone the *genplis* repository and install dependencies:
 
 This project uses [pre-commit](https://pre-commit.com/) to check code for common errors.
 Just run `uv run pre-commit install`, this will run the checks when you try to commit.
+
+Type checking is done with [ty](https://docs.astral.sh/ty/):
+
+    $ uv run ty check
 
 ## Roadmap
 

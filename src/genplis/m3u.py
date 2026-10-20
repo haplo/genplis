@@ -1,7 +1,13 @@
+from collections.abc import Iterable
 from pathlib import Path
 
 
-def create_m3u(playlist_path: Path, entries, comment="", overwrite=False):
+def create_m3u(
+    playlist_path: Path,
+    entries: Iterable[Path],
+    comment: str = "",
+    overwrite: bool = False,
+) -> None:
     if playlist_path.exists() and not overwrite:
         print(f"WARNING: {playlist_path} already exists, skipping...")
         return

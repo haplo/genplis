@@ -2,32 +2,36 @@ import json
 import sqlite3
 from datetime import datetime
 from pathlib import Path
+from typing import cast
 
 from xdg_base_dirs import xdg_cache_home
 
 from .exceptions import GenplisDBError
 from .files import get_last_modified
 from .json import GenplisJSONEncoder
+from .types import Tags
 
 DB_NAME = "genplis.db"
 
 
-def get_db_path():
+def get_db_path() -> Path:
     db_path = xdg_cache_home() / "genplis" / DB_NAME
     return db_path
 
 
-def adapt_datetime_epoch(val):
+def adapt_datetime_epoch(val: datetime) -> int:
     """Adapt datetime to Unix timestamp."""
     return int(val.timestamp())
 
 
-def convert_timestamp(val):
+def convert_timestamp(val: bytes) -> datetime:
     """Convert Unix epoch timestamp to datetime object."""
     return datetime.fromtimestamp(int(val))
 
 
-def setup_database_connection(conn_path):
+def setup_database_connection(
+    conn_path: Path,
+) -> tuple[sqlite3.Connection, sqlite3.Cursor]:
     sqlite3.register_adapter(datetime, adapt_datetime_epoch)
     sqlite3.register_converter("timestamp", convert_timestamp)
     conn = sqlite3.connect(conn_path)
@@ -35,7 +39,7 @@ def setup_database_connection(conn_path):
     return conn, cursor
 
 
-def create_files_table(cursor):
+def create_files_table(cursor: sqlite3.Cursor) -> None:
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS files (
             path TEXT PRIMARY KEY,
@@ -45,7 +49,7 @@ def create_files_table(cursor):
     """)
 
 
-def is_cache_valid(cursor, file_path: Path) -> bool | None:
+def is_cache_valid(cursor: sqlite3.Cursor, file_path: Path) -> bool | None:
     """True if the file is cached in DB and the entry is not stale.
 
     False if file_path is in DB but the timestamp of the file is
@@ -72,7 +76,7 @@ def is_cache_valid(cursor, file_path: Path) -> bool | None:
     return file_last_modified <= cached_timestamp
 
 
-def cache_tags_for_file(cursor, file_path: Path, tags):
+def cache_tags_for_file(cursor: sqlite3.Cursor, file_path: Path, tags: Tags) -> None:
     """Save given tags for a music file in DB.
 
     Caller is responsible for calling commit on the DB connection.
@@ -96,7 +100,7 @@ def cache_tags_for_file(cursor, file_path: Path, tags):
     print(f"Updated cache for file: {file_path}")
 
 
-def get_cached_tags(cursor, file_path: Path):
+def get_cached_tags(cursor: sqlite3.Cursor, file_path: Path) -> Tags:
     """Retrieve cached tags for the given file.
 
     Should have previously called is_cache_valid to check that the file is
@@ -111,6 +115,6 @@ def get_cached_tags(cursor, file_path: Path):
     )
     row = cursor.fetchone()
     if row:
-        return json.loads(row[0])
+        return cast(Tags, json.loads(row[0]))
 
     raise GenplisDBError(f"{file_path} not found on DB")

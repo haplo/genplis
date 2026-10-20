@@ -4,7 +4,7 @@ This document provides essential information for agentic coding agents working i
 
 ## Project Overview
 
-Genplis is a Python 3.10+ music playlist generator that:
+Genplis is a Python 3.12+ music playlist generator that:
 - Parses music file tags using TinyTag
 - Caches tag data in SQLite database
 - Processes M3UG filter files to generate M3U playlists
@@ -32,6 +32,12 @@ uv run python -m pytest --cov=genplis
 
 ### Code Quality
 ```bash
+# Run ty type checker
+uv run ty check
+
+# Run ty in watch mode
+uv run ty check --watch
+
 # Run ruff linter (with auto-fix)
 uv run ruff check --fix .
 
@@ -75,7 +81,7 @@ uv run genplis /path/to/music/file.mp3
 ## Code Style Guidelines
 
 ### Python Version & Runtime
-- Minimum Python 3.10 required
+- Minimum Python 3.12 required (3.10 and 3.11 are untested and unsupported)
 - Use modern type hints (PEP 604 union types: `str | None`)
 - Prefer pathlib over os.path
 - Use f-strings for string formatting
@@ -102,9 +108,17 @@ from genplis.exceptions import GenplisError
 ```
 
 ### Type Hints
-- Always use type hints for function signatures
+- Always use type hints for function signatures; Ruff's `ANN` rules enforce this
+- ty is deliberately floating: `[tool.uv] upgrade-package` lets `uv lock`
+  select the newest releases allowed by uv's `exclude-newer` window
+  (currently 7 days). Do not pin them in `pyproject.toml` or pre-commit.
 - Use `dict`, `list`, `tuple` instead of `Dict`, `List`, `Tuple`
-- Use `Value = str | float | int | list[str] | None` pattern for tag values
+- Use the aliases from `genplis.types`: `TagValue` for a single tag value and
+  `Tags` for a mapping of tag names to values
+- Use PEP 695 `type` statements for new type aliases
+- Use `TypeGuard` for helpers that narrow types (e.g. `is_number`)
+- Use `Self` for classmethod constructors that return `cls(...)`
+- Avoid `Any` in annotations (`ANN401`); prefer `object` plus narrowing
 - Use `Path` for file paths, not strings
 
 ### Error Handling
@@ -147,6 +161,7 @@ from genplis.exceptions import GenplisError
 - M3UG parsing: `src/genplis/m3ug.py`
 - M3U generation: `src/genplis/m3u.py`
 - Exceptions: `src/genplis/exceptions.py`
+- Shared type aliases: `src/genplis/types.py`
 
 ### Documentation
 - Use docstrings for all public functions and classes
@@ -168,21 +183,26 @@ from genplis.exceptions import GenplisError
 - Fix any hook failures and re-stage the affected files; do not commit with
   failing hooks.
 - Use `uv run pre-commit run --all-files` to validate the whole repository
-  when hooks or configuration change.
+  when hooks or configuration change. The `ty` hook checks the whole project
+  even when only some files are staged, and uses the ty version from
+  `uv.lock`.
 
 ### Development Workflow
 1. Write tests first (TDD when possible)
 2. Run ruff linting and formatting before commits
-3. Use pre-commit hooks to enforce code quality
-4. Run `uv run pre-commit run` after staging files, before they are committed
-5. Test with real music files when possible
-6. Update documentation when adding new features
-7. Use uv for dependency management
+3. Run `uv run ty check` and fix any diagnostics
+4. Use pre-commit hooks to enforce code quality
+5. Run `uv run pre-commit run` after staging files, before they are committed
+6. Test with real music files when possible
+7. Update documentation when adding new features
+8. Use uv for dependency management
 
 ## Important Files
 
 - `pyproject.toml`: Project configuration, dependencies, tool settings
 - `.pre-commit-config.yaml`: Pre-commit hooks configuration
 - `src/genplis/`: Main source code directory
+- `src/genplis/types.py`: Shared type aliases (`TagValue`, `Tags`)
+- `src/genplis/py.typed`: PEP 561 marker for typed package consumers
 - `tests/`: Test files and fixtures
 - `examples/`: Sample M3UG filter files for reference
