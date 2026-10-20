@@ -190,3 +190,9 @@ Type checking is done with [ty](https://docs.astral.sh/ty/):
 
 Got any ideas to make *genplis* more awesome?
 Feel free to [open an issue](https://github.com/haplo/genplis/issues).
+
+## Acknowledgments
+
+*Genplis* uses the [tinytag library](https://github.com/tinytag/tinytag/releases) for
+parsing the tags in the audio files. It was chosen for being a pure Python library with
+no additional dependencies.
