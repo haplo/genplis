@@ -75,8 +75,9 @@ verbose = false
 # Used when PATH is omitted on the command line.
 path = ~/Music
 
-# Regular expressions matched against file paths, one per line.
-# Files matching any pattern are skipped.
+# Regular expressions matched against file and folder paths, one per line.
+# Files and folders matching any pattern are skipped. The contents of an
+# excluded folder are not scanned.
 exclude =
     /\.Trash/
     /@eaDir/
@@ -106,8 +107,10 @@ include_source = true
 ```
 
 Paths may start with `~`. Relative paths are resolved relative to the config
-file, not the current directory. `exclude` and `ignore` take one entry per
-line. The percent sign (`%`) has no special meaning in values.
+file, not the current directory. `exclude` patterns are matched against both
+file and folder paths; an excluded folder is skipped entirely. `exclude` and
+`ignore` take one entry per line. The percent sign (`%`) has no special
+meaning in values.
 
 A copy of this example is available at [examples/config.ini](examples/config.ini).
 

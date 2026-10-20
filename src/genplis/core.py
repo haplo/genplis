@@ -1,4 +1,5 @@
 import argparse
+import os
 import re
 import sqlite3
 import sys
@@ -148,11 +149,20 @@ def resolve_args(args: argparse.Namespace, config: Config) -> Args:
     )
 
 
-def is_excluded(path: Path, args: Args) -> bool:
-    for pattern in args.exclude:
-        if pattern.search(str(path)):
-            return True
-    return False
+def is_excluded(path: Path, args: Args, *, is_dir: bool = False) -> bool:
+    """Return whether any exclude pattern matches the given path.
+
+    Directory paths are also matched with a trailing separator so that
+    patterns written for folders (e.g. ``/@eaDir/``) match the folder itself
+    and not just the files inside it.
+    """
+    text = str(path)
+    candidates = (text, text + os.sep) if is_dir else (text,)
+    return any(
+        pattern.search(candidate)
+        for pattern in args.exclude
+        for candidate in candidates
+    )
 
 
 def process_path(conn: sqlite3.Connection, cursor: sqlite3.Cursor, args: Args) -> None:
@@ -199,6 +209,7 @@ def process_directory(
     files to their parsed rules. A playlist is generated for each M3UG file
     that matches at least one song. Unless include_source is disabled, the
     original M3UG text is embedded as comments at the top of the playlist.
+    Folders that match an exclude pattern are skipped entirely.
 
     """
     if not directory.is_dir():
@@ -210,13 +221,30 @@ def process_directory(
 
     all_tags: dict[Path, Tags] = {}
     all_filters: dict[Path, list[RuleNode]] = {}
-    for file in directory.rglob("*"):
-        if is_excluded(file, args):
-            if args.verbose:
-                print(f"Skipping {file} because of exclude pattern.")
-            continue
+    for current_dir, dirnames, filenames in directory.walk():
+        current = Path(current_dir)
 
-        if file.is_file():
+        kept_dirs: list[str] = []
+        for name in dirnames:
+            folder = current / name
+            if is_excluded(folder, args, is_dir=True):
+                if args.verbose:
+                    print(f"Skipping {folder} because of exclude pattern.")
+                continue
+            kept_dirs.append(name)
+        dirnames[:] = kept_dirs
+
+        for name in filenames:
+            file = current / name
+            if is_excluded(file, args):
+                if args.verbose:
+                    print(f"Skipping {file} because of exclude pattern.")
+                continue
+
+            # Path.walk reports symlinks to directories among the filenames.
+            if not file.is_file():
+                continue
+
             tags, filters, _ = process_file(conn, cursor, file, args)
             if tags:
                 all_tags[file] = tags

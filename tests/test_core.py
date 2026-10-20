@@ -182,6 +182,70 @@ def test_process_dir_respects_overwrite_setting(
     assert playlist_file.read_text() == "keep this\n"
 
 
+def test_process_dir_prints_and_prunes_excluded_folder(
+    genplis_db: sqlite3.Connection,
+    make_args: Callable[..., Args],
+    file_mp3: Path,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    excluded = tmp_path / "@eaDir"
+    excluded.mkdir()
+    shutil.copy2(file_mp3, excluded / file_mp3.name)
+
+    # The pattern targets folder paths, which only match with a trailing
+    # separator added before testing.
+    args = make_args(str(tmp_path), exclude=[re.compile(r"/@eaDir/")], verbose=True)
+    all_tags, all_filters = process_directory(
+        genplis_db, genplis_db.cursor(), tmp_path, args
+    )
+
+    output = capsys.readouterr().out
+    assert f"Skipping {excluded} because of exclude pattern." in output
+    assert str(excluded / file_mp3.name) not in output
+    assert all_tags == {}
+    assert all_filters == {}
+
+
+def test_process_dir_prunes_excluded_folder_without_verbose(
+    genplis_db: sqlite3.Connection,
+    make_args: Callable[..., Args],
+    file_mp3: Path,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    excluded = tmp_path / "@eaDir"
+    excluded.mkdir()
+    shutil.copy2(file_mp3, excluded / file_mp3.name)
+
+    args = make_args(str(tmp_path), exclude=[re.compile(r"/@eaDir/")])
+    all_tags, _ = process_directory(genplis_db, genplis_db.cursor(), tmp_path, args)
+
+    assert "Skipping" not in capsys.readouterr().out
+    assert all_tags == {}
+
+
+def test_process_dir_still_skips_excluded_files(
+    genplis_db: sqlite3.Connection,
+    make_args: Callable[..., Args],
+    file_mp3: Path,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    shutil.copy2(file_mp3, tmp_path / "keep.mp3")
+    shutil.copy2(file_mp3, tmp_path / "skip-me.mp3")
+
+    args = make_args(
+        str(tmp_path), exclude=[re.compile(r"skip-me\.mp3$")], verbose=True
+    )
+    all_tags, _ = process_directory(genplis_db, genplis_db.cursor(), tmp_path, args)
+
+    output = capsys.readouterr().out
+    assert f"Skipping {tmp_path / 'skip-me.mp3'} because of exclude pattern." in output
+    assert f"Skipping {tmp_path} because of exclude pattern." not in output
+    assert set(all_tags) == {tmp_path / "keep.mp3"}
+
+
 def test_process_dir_includes_m3ug_source_as_comments(
     genplis_db: sqlite3.Connection,
     make_args: Callable[..., Args],
