@@ -1178,6 +1178,36 @@ def test_main_rejects_quiet_and_verbose_together(
     assert "--quiet cannot be combined with --verbose" in captured.err
 
 
+def test_main_closes_database_connection(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db_path = tmp_path / "genplis.db"
+    db_path.touch()
+    real_connect = sqlite3.connect
+
+    class TrackingConnection(sqlite3.Connection):
+        was_closed = False
+
+        def close(self) -> None:
+            type(self).was_closed = True
+            super().close()
+
+    def tracking_connect(*_args: object, **_kwargs: object) -> sqlite3.Connection:
+        return real_connect(db_path, factory=TrackingConnection)
+
+    monkeypatch.setattr("genplis.core.sqlite3.connect", tracking_connect)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["genplis", "--clean", "--no-config", "--db", str(db_path)],
+    )
+
+    main()
+
+    assert TrackingConnection.was_closed
+
+
 def test_main_reports_m3ug_error_with_location(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

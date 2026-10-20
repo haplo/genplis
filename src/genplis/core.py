@@ -524,23 +524,27 @@ def _run(args: Args) -> None:
             f"Cannot create database directory {args.db_path.parent}: {exc}"
         ) from exc
 
-    with sqlite3.connect(args.db_path) as conn:
-        cursor = conn.cursor()
+    conn = sqlite3.connect(args.db_path)
+    try:
+        with conn:
+            cursor = conn.cursor()
 
-        # Create a DB for caching results if it doesn't exist
-        db.create_files_table(cursor, db.get_cache_version(args.config.tags))
-        conn.commit()
+            # Create a DB for caching results if it doesn't exist
+            db.create_files_table(cursor, db.get_cache_version(args.config.tags))
+            conn.commit()
 
-        if args.path is not None:
-            process_path(conn, cursor, args)
-        if args.clean:
-            clean_database(
-                conn,
-                cursor,
-                args.path,
-                args.db_path,
-                verbosity=args.verbosity,
-            )
+            if args.path is not None:
+                process_path(conn, cursor, args)
+            if args.clean:
+                clean_database(
+                    conn,
+                    cursor,
+                    args.path,
+                    args.db_path,
+                    verbosity=args.verbosity,
+                )
+    finally:
+        conn.close()
 
 
 def main() -> None:
