@@ -12,6 +12,9 @@ class GenplisM3UGException(GenplisError):
         self.filename = filename
         self.line = line
 
+    def __str__(self) -> str:
+        return f"{self.filename}:{self.line}: {super().__str__()}"
+
 
 class GenplisConfigError(GenplisError):
     pass

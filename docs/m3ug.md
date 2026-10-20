@@ -54,8 +54,8 @@ Rules about the file itself:
   contain spaces (`artist = DANCE WITH THE DEAD`), and extra spaces after the
   operator are trimmed.
 - **One rule per line.** A rule that cannot be split into exactly
-  `tag operator value` is rejected with `Invalid filter syntax`, and the run
-  stops.
+  `tag operator value` is rejected with `<filename:line>: Invalid filter syntax`,
+  and the run stops.
 
 ## Values and types
 

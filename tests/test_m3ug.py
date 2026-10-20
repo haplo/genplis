@@ -272,6 +272,11 @@ def test_not_equal_rule_string_value() -> None:
     assert rules[0].apply({})
 
 
+def test_m3ug_exception_includes_location() -> None:
+    error = GenplisM3UGException("Invalid filter syntax", "Favorites.m3ug", 7)
+    assert str(error) == "Favorites.m3ug:7: Invalid filter syntax"
+
+
 def test_invalid_input() -> None:
     with pytest.raises(GenplisM3UGException):
         parse_m3ug("invalid")

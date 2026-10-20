@@ -1092,6 +1092,32 @@ def test_main_rejects_quiet_and_verbose_together(
     assert "--quiet cannot be combined with --verbose" in captured.err
 
 
+def test_main_reports_m3ug_error_with_location(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    music = tmp_path / "music"
+    music.mkdir()
+    invalid = music / "favorites.m3ug"
+    invalid.write_text("invalid\n", encoding="utf-8")
+    db_path = tmp_path / "genplis.db"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["genplis", "--no-config", "--db", str(db_path), str(music)],
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        main()
+
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert f"{invalid}:1: Invalid filter syntax" in captured.err
+    assert "Traceback" not in captured.err
+    assert captured.out == ""
+
+
 def test_main_double_quiet_reports_errors_on_stderr(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
