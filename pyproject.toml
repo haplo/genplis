@@ -30,6 +30,13 @@ allow-direct-references = true
 pythonpath = "src"
 testpaths = ["tests"]
 
+[tool.coverage.run]
+source = ["genplis"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+
 [tool.ruff]
 target-version = "py312"
 
@@ -55,6 +62,7 @@ upgrade-package = ["ty", "ruff"]
 dev = [
     "pre-commit>=4.0.1",
     "pytest>=8.3.3",
+    "pytest-cov>=7.1.0",
     "python-lsp-ruff>=2.2.2",
     "python-lsp-server>=1.12.0",
     "ruff>=0.17.0",

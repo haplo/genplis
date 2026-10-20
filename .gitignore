@@ -8,3 +8,10 @@ wheels/
 
 # venv
 .venv
+
+# coverage
+.coverage
+.coverage.*
+coverage.xml
+coverage.md
+htmlcov/

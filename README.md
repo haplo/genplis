@@ -1,5 +1,7 @@
 # Genplis: a music playlist generator
 
+[![CI](https://github.com/haplo/genplis/actions/workflows/ci.yml/badge.svg)](https://github.com/haplo/genplis/actions/workflows/ci.yml)
+
 *Genplis* is a program that generates M3U playlists from a collection of music files by looking at some of their attributes and tags and applying user-defined filters.
 
 *Genplis* defines its own language to define filters, called M3UG.
@@ -169,6 +171,10 @@ Type checking is done with [ty](https://docs.astral.sh/ty/):
 
     $ uv run ty check
 
+Pull requests and pushes to `main` run the same pre-commit checks across the
+whole project, plus the test suite on Python 3.12 through 3.15. The Actions
+run summary also includes a coverage report for Python 3.12.
+
 ## Roadmap
 
 - [x] Parse tags of all files in music collection
@@ -187,9 +193,9 @@ Type checking is done with [ty](https://docs.astral.sh/ty/):
   - [x] tags
   - [x] file processing
   - [x] dir processing
-  - [ ] PR check
-    - [ ] Run pre-commit on whole project
-    - [ ] Test on every supported Python version
+  - [x] PR check
+    - [x] Run pre-commit on whole project
+    - [x] Test on every supported Python version
 - [ ] Documentation
 - [ ] Publish to PyPI! 🚀
 - [ ] Example systemd files and instructions on how to run periodically
