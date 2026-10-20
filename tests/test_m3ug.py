@@ -83,6 +83,12 @@ def test_equal_rule_integer_value() -> None:
     assert not rules[0].apply({})
 
 
+def test_boolean_never_matches_numeric_rule() -> None:
+    assert not parse_m3ug("is_lossless = 1")[0].apply({"is_lossless": True})
+    assert not parse_m3ug("is_lossless < 2")[0].apply({"is_lossless": True})
+    assert parse_m3ug("is_lossless != 1")[0].apply({"is_lossless": True})
+
+
 def test_equal_rule_string_value() -> None:
     rules = parse_m3ug("genre = Synthwave")
     assert rules == [

@@ -18,7 +18,7 @@ INT_RE = re.compile(r"^\d+$")
 
 
 def is_number(value: object) -> TypeGuard[int | float]:
-    return isinstance(value, int | float)
+    return isinstance(value, int | float) and not isinstance(value, bool)
 
 
 def values_equal(tag_value: TagValue, expected: RuleValue) -> bool:
@@ -28,6 +28,9 @@ def values_equal(tag_value: TagValue, expected: RuleValue) -> bool:
     strings inside lists, so compare numeric strings numerically when the
     rule value is a number.
     """
+    # bool is a subclass of int, but booleans are not numbers for M3UG rules.
+    if isinstance(tag_value, bool) or isinstance(expected, bool):
+        return tag_value is expected
     if is_number(expected) and isinstance(tag_value, str):
         if INT_RE.match(tag_value):
             return int(tag_value) == expected
