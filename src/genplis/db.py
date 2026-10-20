@@ -59,6 +59,11 @@ def convert_timestamp(val: bytes) -> datetime:
     return datetime.fromtimestamp(int(val))
 
 
+def vacuum_database(conn: sqlite3.Connection) -> None:
+    """Rebuild the database file to reclaim space after deletions."""
+    conn.execute("VACUUM")
+
+
 def setup_database_connection(
     conn_path: Path,
 ) -> tuple[sqlite3.Connection, sqlite3.Cursor]:
@@ -165,6 +170,37 @@ def cache_tags_for_file(cursor: sqlite3.Cursor, file_path: Path, tags: Tags) -> 
         (db_key, last_modified, json_tags, last_modified, json_tags),
     )
     print(f"Updated cache for file: {file_path}")
+
+
+def remove_missing_files(
+    cursor: sqlite3.Cursor, root: Path | None = None
+) -> list[Path]:
+    """Remove cached entries whose files no longer exist.
+
+    When root is given, only entries at or below root are considered, so
+    cleaning one collection does not remove entries from another. Returns the
+    removed paths.
+
+    Caller is responsible for committing to the DB.
+
+    """
+    scope = root.absolute() if root is not None else None
+
+    cursor.execute("SELECT path FROM files")
+    missing: list[Path] = []
+    for (db_key,) in cursor.fetchall():
+        file_path = Path(db_key)
+        if scope is not None and not file_path.is_relative_to(scope):
+            continue
+        if not file_path.exists():
+            missing.append(file_path)
+
+    if missing:
+        cursor.executemany(
+            "DELETE FROM files WHERE path = ?",
+            ((get_db_key(file_path),) for file_path in missing),
+        )
+    return missing
 
 
 def get_cached_tags(cursor: sqlite3.Cursor, file_path: Path) -> Tags:

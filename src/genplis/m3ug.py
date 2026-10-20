@@ -49,6 +49,31 @@ def normalize(raw: TagValue, verbose: bool = False) -> TagValue:
     return raw
 
 
+def get_rating(tags: Mapping[str, TagValue]) -> float | None:
+    """Return a rating calculated from known rating alias tags.
+
+    Returns None when no alias tag is present, or when the tags already
+    contain a raw ``rating`` tag. In the latter case the raw value is used
+    directly, so there is no calculated rating to report.
+
+    Ratings are normalized to a 0 to 5 stars range. If you know of a rating
+    tag that is missing, feel free to open an issue with a PR to add support
+    for it.
+    """
+    if "rating" in tags:
+        return None
+
+    fmps_rating = normalize(tags.get("fmps_rating"))
+    if isinstance(fmps_rating, list):
+        # normalize() only leaves lists with more than one item
+        logger.warning("Unexpected fmps_rating as list: %s", fmps_rating)
+        fmps_rating = fmps_rating[0]
+    if fmps_rating is not None:
+        # fmps_rating goes from 0.0 to 1.0 (5 stars)
+        return float(fmps_rating) * 5
+    return None
+
+
 class NameNode:
     def __init__(self, name: str, verbose: bool = False) -> None:
         self.name = name
@@ -75,25 +100,14 @@ class NameNode:
 
     def find(self, tags: Mapping[str, TagValue]) -> tuple[str, TagValue]:
         normalized_name = self.name.lower()
+        # handle special cases
+        if normalized_name == "rating":
+            if "rating" in tags:
+                return normalized_name, tags["rating"]
+            return normalized_name, get_rating(tags)
         # if there is a tag with the exact (case-insensitive) name, use it
         if raw_value := tags.get(normalized_name):
             return normalized_name, raw_value
-        # handle special cases
-        if normalized_name == "rating":
-            # There are multiple ways that different apps use to store ratings.
-            # genplis uses "rating" as an alias for as many of them as possible,
-            # and they are normalized to a 0 to 5 stars range.
-            # If you know of a rating tag that is missing feel free to open an
-            # issue with a PR to add support for it.
-            fmps_rating = normalize(tags.get("fmps_rating"))
-            if isinstance(fmps_rating, list):
-                # normalize() only leaves lists with more than one item
-                logger.warning("Unexpected fmps_rating as list: %s", fmps_rating)
-                fmps_rating = fmps_rating[0]
-            if fmps_rating is not None:
-                # fmps_rating goes from 0.0 to 1.0 (5 stars)
-                normalized_rating = float(fmps_rating) * 5
-                return normalized_name, normalized_rating
         # default case is no match, no value found
         return normalized_name, None
 

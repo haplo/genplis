@@ -11,6 +11,7 @@ from genplis.m3ug import (
     NameNode,
     NotEqualRuleNode,
     ValueNode,
+    get_rating,
     parse_m3ug,
 )
 
@@ -305,6 +306,30 @@ def test_contains_rule_list_value() -> None:
     rules = parse_m3ug("genre ~= wave")
     assert rules[0].apply({"genre": ["Synthwave", "Retrowave"]})
     assert not rules[0].apply({"genre": ["Metal", "Rock"]})
+
+
+def test_get_rating_from_fmps_rating() -> None:
+    assert get_rating({"fmps_rating": ["0.8"]}) == pytest.approx(4.0)
+
+
+def test_get_rating_without_rating_tags() -> None:
+    assert get_rating({"title": ["Test"]}) is None
+
+
+def test_get_rating_returns_none_when_raw_rating_tag_exists() -> None:
+    assert get_rating({"rating": 4, "fmps_rating": ["0.8"]}) is None
+
+
+def test_find_rating_uses_raw_rating_tag() -> None:
+    name, value = NameNode("rating").find({"rating": 4, "fmps_rating": ["0.8"]})
+    assert name == "rating"
+    assert value == 4
+
+
+def test_find_rating_uses_zero_raw_rating_tag() -> None:
+    name, value = NameNode("rating").find({"rating": 0, "fmps_rating": ["0.8"]})
+    assert name == "rating"
+    assert value == 0
 
 
 def test_find_rating_from_single_item_fmps_rating_list() -> None:

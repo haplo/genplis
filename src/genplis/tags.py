@@ -1,13 +1,31 @@
 import sys
+from collections.abc import Mapping
 from pathlib import Path
+from typing import Final
 
 from tinytag import TinyTag, TinyTagException
 
-from .types import Tags
+from .types import Tags, TagValue
 
 DEFAULT_MAX_TAG_SIZE = 1000
 # Backwards-compatible alias for callers that used the old constant name.
 LARGE_TAG = DEFAULT_MAX_TAG_SIZE
+
+# Keys that tinytag adds from the file path and audio stream instead of from
+# embedded metadata tags. See TinyTag.as_dict().
+AUDIO_PROPERTY_TAGS: Final[frozenset[str]] = frozenset(
+    {
+        "filename",
+        "filesize",
+        "mime_type",
+        "duration",
+        "channels",
+        "bitrate",
+        "bitdepth",
+        "samplerate",
+        "is_lossless",
+    }
+)
 
 
 def get_tags(
@@ -51,6 +69,15 @@ def get_tags(
             continue
         tags[key] = value
     return tags
+
+
+def get_audio_property_tags(tags: Mapping[str, TagValue]) -> Tags:
+    """Return calculated audio properties as display tags.
+
+    Calculated tags are prefixed with ``*`` to distinguish them from tags
+    embedded in the file.
+    """
+    return {f"*{name}": tags[name] for name in AUDIO_PROPERTY_TAGS if name in tags}
 
 
 def get_tag_size(value: object) -> int:

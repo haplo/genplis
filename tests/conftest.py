@@ -46,6 +46,7 @@ def make_args() -> Callable[..., Args]:
         config: Config | None = None,
         db_path: Path | None = None,
         include_source: bool = True,
+        clean: bool = False,
     ) -> Args:
         return Args(
             path=Path(path_str),
@@ -55,6 +56,7 @@ def make_args() -> Callable[..., Args]:
             db_path=db_path if db_path is not None else Path("genplis.db"),
             config=config if config is not None else Config(),
             include_source=include_source,
+            clean=clean,
         )
 
     return _make_args

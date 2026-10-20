@@ -1,7 +1,9 @@
+import json
 import os
 import re
 import shutil
 import sqlite3
+import sys
 from collections.abc import Callable
 from pathlib import Path
 
@@ -18,13 +20,17 @@ from genplis.config import (
 )
 from genplis.core import (
     Args,
+    clean_database,
+    format_size,
+    get_calculated_tags,
+    main,
     process_directory,
     process_file,
     process_path,
     resolve_args,
     setup_argparse,
 )
-from genplis.db import CacheStatus
+from genplis.db import CacheStatus, create_files_table, setup_database_connection
 from genplis.exceptions import GenplisConfigError, GenplisError
 from genplis.m3ug import (
     ContainsRuleNode,
@@ -32,6 +38,7 @@ from genplis.m3ug import (
     NameNode,
     ValueNode,
 )
+from genplis.types import Tags
 
 
 def test_process_audio_file(
@@ -112,6 +119,116 @@ def test_process_path_reports_cache_status(
     # The stale entry was refreshed by the previous run.
     process_path(genplis_db, cursor, args)
     assert "Cache status: valid" in capsys.readouterr().out
+
+
+def test_get_calculated_tags_adds_rating_from_fmps_rating() -> None:
+    assert get_calculated_tags({"fmps_rating": ["0.8"]}) == {"*rating": approx(4.0)}
+
+
+def test_get_calculated_tags_omits_missing_rating() -> None:
+    assert get_calculated_tags({"title": ["Test"]}) == {}
+
+
+def test_get_calculated_tags_omits_rating_when_raw_rating_exists() -> None:
+    tags = {"rating": 4, "fmps_rating": ["0.8"]}
+    assert get_calculated_tags(tags) == {}
+
+
+def test_get_calculated_tags_adds_audio_properties() -> None:
+    tags = {
+        "filename": "/music/test.mp3",
+        "filesize": 1234,
+        "duration": 1.5,
+        "is_lossless": False,
+        "title": ["Test"],
+    }
+
+    assert get_calculated_tags(tags) == {
+        "*filename": "/music/test.mp3",
+        "*filesize": 1234,
+        "*duration": 1.5,
+        "*is_lossless": False,
+    }
+
+
+def test_get_calculated_tags_omits_absent_audio_properties() -> None:
+    tags = {
+        "filename": "/music/test.mp3",
+        "title": ["Test"],
+    }
+
+    assert get_calculated_tags(tags) == {"*filename": "/music/test.mp3"}
+
+
+def test_process_path_prints_calculated_rating(
+    genplis_db: sqlite3.Connection,
+    make_args: Callable[..., Args],
+    file_mp3: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_get_tags(*_args: object, **_kwargs: object) -> Tags:
+        return {"fmps_rating": ["0.8"], "title": ["Test"]}
+
+    monkeypatch.setattr("genplis.core.get_tags", fake_get_tags)
+
+    process_path(genplis_db, genplis_db.cursor(), make_args(str(file_mp3)))
+
+    assert "    *rating = 4.0" in capsys.readouterr().out
+
+
+def test_process_path_omits_calculated_rating_when_raw_rating_exists(
+    genplis_db: sqlite3.Connection,
+    make_args: Callable[..., Args],
+    file_mp3: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_get_tags(*_args: object, **_kwargs: object) -> Tags:
+        return {"rating": 4, "fmps_rating": ["0.8"], "title": ["Test"]}
+
+    monkeypatch.setattr("genplis.core.get_tags", fake_get_tags)
+
+    process_path(genplis_db, genplis_db.cursor(), make_args(str(file_mp3)))
+
+    output = capsys.readouterr().out
+    assert "    rating = 4" in output
+    assert "*rating" not in output
+
+
+def test_process_path_stars_audio_properties(
+    genplis_db: sqlite3.Connection,
+    make_args: Callable[..., Args],
+    file_mp3: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_get_tags(*_args: object, **_kwargs: object) -> Tags:
+        return {
+            "bitrate": 128.0,
+            "duration": 1.5,
+            "filename": str(file_mp3),
+            "filesize": 1234,
+            "is_lossless": False,
+            "title": ["Test"],
+        }
+
+    monkeypatch.setattr("genplis.core.get_tags", fake_get_tags)
+
+    process_path(genplis_db, genplis_db.cursor(), make_args(str(file_mp3)))
+
+    output = capsys.readouterr().out
+    assert "    *bitrate = 128.0" in output
+    assert "    *duration = 1.5" in output
+    assert f"    *filename = {file_mp3}" in output
+    assert "    *filesize = 1234" in output
+    assert "    *is_lossless = False" in output
+    assert "    filename = " not in output
+    assert "    duration = " not in output
+    assert "    bitrate = " not in output
+    assert "    filesize = " not in output
+    assert "    is_lossless = " not in output
+    assert "*bitdepth" not in output
 
 
 def test_process_file_error_if_dir(
@@ -387,3 +504,168 @@ def test_resolve_args_db_path_precedence(tmp_path: Path) -> None:
         config,
     )
     assert from_cli.db_path == tmp_path / "cli.db"
+
+
+def test_resolve_args_allows_clean_without_path() -> None:
+    args = resolve_args(setup_argparse().parse_args(["--clean"]), Config())
+
+    assert args.path is None
+    assert args.clean is True
+
+
+def test_resolve_args_clean_uses_config_path() -> None:
+    config = Config(collection=CollectionConfig(path=Path("/music")))
+    args = resolve_args(setup_argparse().parse_args(["--clean"]), config)
+
+    assert args.path == Path("/music")
+    assert args.clean is True
+
+
+def test_format_size() -> None:
+    assert format_size(0) == "0 B"
+    assert format_size(1023) == "1023 B"
+    assert format_size(1024) == "1.0 KiB"
+    assert format_size(1536) == "1.5 KiB"
+    assert format_size(1024 * 1024) == "1.0 MiB"
+
+
+def test_clean_database_reports_stats(
+    genplis_db: sqlite3.Connection,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    missing = tmp_path / "gone.mp3"
+    genplis_db.execute(
+        "INSERT INTO files(path, last_modified, tags) VALUES (?, 0, '{}')",
+        (str(missing),),
+    )
+
+    stats = clean_database(
+        genplis_db,
+        genplis_db.cursor(),
+        None,
+        tmp_path / "genplis.db",
+        verbose=True,
+    )
+
+    output = capsys.readouterr().out
+    assert stats.removed == (missing,)
+    assert f"Removed stale cache entry for {missing}" in output
+    assert "Removed 1 stale entry from the cache database." in output
+    assert "Database size:" in output
+    assert "saved)." in output
+
+
+def test_main_clean_without_path_removes_stale_entries(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    db_path = tmp_path / "genplis.db"
+    conn, cursor = setup_database_connection(db_path)
+    try:
+        create_files_table(cursor)
+        for index in range(50):
+            cursor.execute(
+                "INSERT INTO files(path, last_modified, tags) VALUES (?, 0, ?)",
+                (
+                    str(tmp_path / f"gone-{index}.mp3"),
+                    json.dumps({"blob": "x" * 4096}),
+                ),
+            )
+        existing = tmp_path / "keep.mp3"
+        existing.write_bytes(b"")
+        cursor.execute(
+            "INSERT INTO files(path, last_modified, tags) VALUES (?, 0, '{}')",
+            (str(existing),),
+        )
+        conn.commit()
+        size_before = db_path.stat().st_size
+    finally:
+        conn.close()
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["genplis", "--clean", "--no-config", "--db", str(db_path)],
+    )
+    main()
+
+    output = capsys.readouterr().out
+    assert "Removed 50 stale entries from the cache database." in output
+    assert "Database size:" in output
+    assert "saved)." in output
+    assert db_path.stat().st_size < size_before
+
+    conn, cursor = setup_database_connection(db_path)
+    try:
+        assert cursor.execute("SELECT path FROM files").fetchall() == [(str(existing),)]
+    finally:
+        conn.close()
+
+
+def test_main_clean_with_path_processes_and_scopes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    file_mp3: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    music = tmp_path / "music"
+    music.mkdir()
+    song = music / "song.mp3"
+    shutil.copy2(file_mp3, song)
+
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    outside_missing = outside / "gone.mp3"
+    inside_missing = music / "gone.mp3"
+
+    db_path = tmp_path / "genplis.db"
+    conn, cursor = setup_database_connection(db_path)
+    try:
+        create_files_table(cursor)
+        for missing in (inside_missing, outside_missing):
+            cursor.execute(
+                "INSERT INTO files(path, last_modified, tags) VALUES (?, 0, '{}')",
+                (str(missing),),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["genplis", "--clean", "--no-config", "--db", str(db_path), str(music)],
+    )
+    main()
+
+    output = capsys.readouterr().out
+    assert "Removed 1 stale entry from the cache database." in output
+
+    conn, cursor = setup_database_connection(db_path)
+    try:
+        assert set(cursor.execute("SELECT path FROM files").fetchall()) == {
+            (str(song),),
+            (str(outside_missing),),
+        }
+    finally:
+        conn.close()
+
+
+def test_main_clean_without_database(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    db_path = tmp_path / "missing" / "genplis.db"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["genplis", "--clean", "--no-config", "--db", str(db_path)],
+    )
+
+    main()
+
+    assert "Database does not exist; nothing to clean." in capsys.readouterr().out
+    assert not db_path.exists()

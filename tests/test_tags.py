@@ -2,7 +2,7 @@ from pathlib import Path
 
 from pytest import approx
 
-from genplis.tags import get_tag_size, get_tags
+from genplis.tags import get_audio_property_tags, get_tag_size, get_tags
 
 
 def test_get_tags_mp3(file_mp3: Path) -> None:
@@ -40,6 +40,21 @@ def test_get_tags_ogg(file_ogg: Path) -> None:
         "mime_type": 'audio/ogg; codecs="vorbis"',
         "samplerate": 44100,
         "title": ["Test"],
+    }
+
+
+def test_get_audio_property_tags() -> None:
+    tags = {
+        "filename": "/music/test.mp3",
+        "duration": 1.5,
+        "is_lossless": False,
+        "title": ["Test"],
+    }
+
+    assert get_audio_property_tags(tags) == {
+        "*filename": "/music/test.mp3",
+        "*duration": 1.5,
+        "*is_lossless": False,
     }
 
 

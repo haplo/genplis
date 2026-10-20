@@ -14,9 +14,9 @@ from . import db
 from .config import Config, load_config
 from .exceptions import GenplisConfigError, GenplisError
 from .m3u import create_m3u
-from .m3ug import RuleNode, parse_m3ug
-from .tags import get_tags
-from .types import Tags
+from .m3ug import RuleNode, get_rating, parse_m3ug
+from .tags import AUDIO_PROPERTY_TAGS, get_audio_property_tags, get_tags
+from .types import Tags, TagValue
 
 # User-facing description of each cache state.
 CACHE_STATUS_MESSAGES = {
@@ -28,13 +28,41 @@ CACHE_STATUS_MESSAGES = {
 
 @dataclass(frozen=True, slots=True)
 class Args:
-    path: Path
+    path: Path | None
     exclude: tuple[re.Pattern[str], ...]
     verbose: bool
     overwrite: bool
     db_path: Path
     config: Config
     include_source: bool = True
+    clean: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class CleanStats:
+    """Result of a cache cleaning operation."""
+
+    removed: tuple[Path, ...]
+    size_before: int
+    size_after: int
+
+    @property
+    def bytes_saved(self) -> int:
+        """Return how many bytes the database shrank."""
+        return max(0, self.size_before - self.size_after)
+
+
+_SIZE_UNITS = ("B", "KiB", "MiB", "GiB", "TiB")
+
+
+def format_size(size: int) -> str:
+    """Format a byte count using binary units."""
+    value = float(size)
+    for unit in _SIZE_UNITS[:-1]:
+        if value < 1024:
+            return f"{int(value)} B" if unit == "B" else f"{value:.1f} {unit}"
+        value /= 1024
+    return f"{value:.1f} {_SIZE_UNITS[-1]}"
 
 
 def regex_type(arg_value: str) -> re.Pattern[str]:
@@ -95,6 +123,15 @@ def setup_argparse() -> argparse.ArgumentParser:
         metavar="PATH",
     )
     parser.add_argument(
+        "--clean",
+        help=(
+            "Remove cache entries for files that no longer exist. With PATH, "
+            "process it normally first and clean only entries under it; "
+            "without PATH, clean the whole database."
+        ),
+        action="store_true",
+    )
+    parser.add_argument(
         "--overwrite",
         help="Overwrite existing generated playlists",
         action=argparse.BooleanOptionalAction,
@@ -119,6 +156,9 @@ def resolve_args(args: argparse.Namespace, config: Config) -> Args:
         path = args.path
     elif config.collection.path is not None:
         path = config.collection.path
+    elif args.clean:
+        # Cleaning without a path removes entries from the whole database.
+        path = None
     else:
         raise GenplisConfigError(
             "PATH is required unless [collection] path is set in the config file"
@@ -146,6 +186,7 @@ def resolve_args(args: argparse.Namespace, config: Config) -> Args:
         db_path=db_path,
         config=config,
         include_source=include_source,
+        clean=args.clean,
     )
 
 
@@ -165,32 +206,55 @@ def is_excluded(path: Path, args: Args, *, is_dir: bool = False) -> bool:
     )
 
 
+def get_calculated_tags(tags: Mapping[str, TagValue]) -> Tags:
+    """Return calculated tags for display.
+
+    Calculated tag names are prefixed with ``*`` to distinguish them from
+    tags that are embedded in the original file.
+    """
+    calculated = get_audio_property_tags(tags)
+    rating = get_rating(tags)
+    if rating is not None:
+        calculated["*rating"] = rating
+    return calculated
+
+
 def process_path(conn: sqlite3.Connection, cursor: sqlite3.Cursor, args: Args) -> None:
     """Process an arbitrary path through genplis.
 
     It will use process_file or process_directory depending on the type of the path.
 
     """
-    if args.path.is_dir():
-        process_directory(conn, cursor, args.path, args)
-    elif args.path.is_file():
-        tags, filters, cache_status = process_file(conn, cursor, args.path, args)
+    path = args.path
+    if path is None:
+        raise GenplisError("Attempted to process a path but none was given")
+
+    if path.is_dir():
+        process_directory(conn, cursor, path, args)
+    elif path.is_file():
+        tags, filters, cache_status = process_file(conn, cursor, path, args)
         if tags:
-            print(f"{args.path} detected as music file")
+            print(f"{path} detected as music file")
             print(f"Cache status: {CACHE_STATUS_MESSAGES[cache_status]}")
 
             print("Parsed tags:")
-            for key, value in sorted(tags.items(), key=lambda t: t[0]):
+            display_tags = {
+                key: value
+                for key, value in tags.items()
+                if key not in AUDIO_PROPERTY_TAGS
+            }
+            display_tags.update(get_calculated_tags(tags))
+            for key, value in sorted(display_tags.items(), key=lambda t: t[0]):
                 print(f"    {key} = {value}")
         if filters:
-            print(f"{args.path} detected as M3UG file")
+            print(f"{path} detected as M3UG file")
             print("Parsed filters:")
             for f in filters:
                 print(f"    {f}")
-        if is_excluded(args.path, args):
+        if is_excluded(path, args):
             print("WARNING: This file is excluded by current configuration.")
     else:
-        print(f"{args.path} must be either a directory or a file. Exiting...")
+        print(f"{path} must be either a directory or a file. Exiting...")
         sys.exit(1)
 
 
@@ -353,6 +417,48 @@ def filter_songs(
     return filtered_songs
 
 
+def clean_database(
+    conn: sqlite3.Connection,
+    cursor: sqlite3.Cursor,
+    root: Path | None,
+    db_path: Path,
+    verbose: bool = False,
+) -> CleanStats:
+    """Remove cache entries for missing files and reclaim their space.
+
+    When root is given, only entries under root are considered. VACUUM runs
+    only when something was removed, so the reported size reduction is the
+    actual change on disk.
+
+    """
+    conn.commit()
+    size_before = db_path.stat().st_size
+
+    removed = db.remove_missing_files(cursor, root)
+    conn.commit()
+    if removed:
+        db.vacuum_database(conn)
+    size_after = db_path.stat().st_size
+
+    if verbose:
+        for path in removed:
+            print(f"Removed stale cache entry for {path}")
+
+    stats = CleanStats(
+        removed=tuple(removed),
+        size_before=size_before,
+        size_after=size_after,
+    )
+    entry_word = "entry" if len(removed) == 1 else "entries"
+    print(f"Removed {len(removed)} stale {entry_word} from the cache database.")
+    print(
+        "Database size: "
+        f"{format_size(size_before)} -> {format_size(size_after)} "
+        f"({format_size(stats.bytes_saved)} saved)."
+    )
+    return stats
+
+
 def main() -> None:
     # Set up argparse
     parser = setup_argparse()
@@ -371,6 +477,10 @@ def main() -> None:
             print("No config file found; using defaults")
         print(f"Using {args.db_path} for genplis DB")
 
+    if args.path is None and not args.db_path.exists():
+        print("Database does not exist; nothing to clean.")
+        return
+
     try:
         args.db_path.parent.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
@@ -385,7 +495,16 @@ def main() -> None:
         db.create_files_table(cursor, db.get_cache_version(config.tags))
         conn.commit()
 
-        process_path(conn, cursor, args)
+        if args.path is not None:
+            process_path(conn, cursor, args)
+        if args.clean:
+            clean_database(
+                conn,
+                cursor,
+                args.path,
+                args.db_path,
+                verbose=args.verbose,
+            )
 
 
 if __name__ == "__main__":

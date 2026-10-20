@@ -34,6 +34,14 @@ For now you have to get this repository and run the script manually:
 It will parse the tags of all music files within, ignoring ones deemed too long (over 1 KB).
 Results will be saved in a SQLite database, so in subsequent runs the script will parse only the modified files according to the OS modification date.
 
+When `PATH` points to a single audio file, *genplis* prints its parsed tags.
+Tags that are not embedded in the file are prefixed with `*`. This includes
+audio properties calculated by *genplis*'s tag library, such as `*filename`,
+`*duration`, `*bitrate`, and `*samplerate`, as well as `*rating`, the
+normalized 0–5 rating derived from tags such as `fmps_rating`. `*rating` is
+omitted when the file already has a `rating` tag, since that value is used
+directly.
+
 In a second step *genplis* will look for `.m3ug` files among the music collection.
 These files define one or more filters (see *Defining filters* section below for details).
 *genplis* will then apply the filters to the whole music collection, create a M3U playlist with all the file matches and save it in the same directory as the original M3UG file.
@@ -44,6 +52,22 @@ By default the original M3UG source is embedded at the top of the playlist as
 
 Currently *genplis* saves all parsed data in RAM for simplicity and speed.
 Exact RAM usage will depend on the music tags used, but estimate 10 MiB per 1,000 files, or even less for lightly-tagged collections.
+
+## Cleaning the cache
+
+To remove cache entries for files that were deleted, renamed, or moved:
+
+    $ uv run genplis --clean ~/Music
+
+With a `PATH`, *genplis* runs normally first and then removes the entries under
+that path only. Without a path (and without `[collection] path` in the config),
+it cleans the whole database:
+
+    $ uv run genplis --clean
+
+Cleaning reports how many entries were removed and how much space the database
+reclaimed. The database is vacuumed afterward, so the operation can take a
+while and temporarily needs free disk space roughly the size of the database.
 
 ## Configuration
 
@@ -182,7 +206,7 @@ Type checking is done with [ty](https://docs.astral.sh/ty/):
   - [x] Tags to ignore
   - [x] Example config in README
 - [ ] Support OR conditionals
-- [ ] Command for DB cleaning
+- [x] Command for DB cleaning
 - [ ] Optimize memory usage
 - [ ] Optimize DB space
 - [ ] Improve Windows support (**HELP NEEDED!**)

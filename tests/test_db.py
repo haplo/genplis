@@ -13,6 +13,7 @@ from genplis.db import (
     get_cache_version,
     get_cached_tags,
     get_db_path,
+    remove_missing_files,
     setup_database_connection,
 )
 from genplis.exceptions import GenplisDBError
@@ -163,6 +164,73 @@ def test_cache_invalidated_on_tag_config_change(
     )
 
     assert genplis_db.execute("SELECT count(*) FROM files").fetchone() == (0,)
+
+
+def insert_cached_path(conn: sqlite3.Connection, path: Path) -> None:
+    conn.execute(
+        "INSERT INTO files(path, last_modified, tags) VALUES (?, 0, '{}')",
+        (str(path.absolute()),),
+    )
+
+
+def test_remove_missing_files_removes_only_missing(
+    genplis_db: sqlite3.Connection,
+    file_mp3: Path,
+    tmp_path: Path,
+) -> None:
+    missing = tmp_path / "gone.mp3"
+    cache_tags_for_file(genplis_db.cursor(), file_mp3, {"a": "b"})
+    insert_cached_path(genplis_db, missing)
+
+    removed = remove_missing_files(genplis_db.cursor())
+
+    assert removed == [missing.absolute()]
+    assert genplis_db.execute("SELECT path FROM files").fetchall() == [(str(file_mp3),)]
+
+
+def test_remove_missing_files_respects_root(
+    genplis_db: sqlite3.Connection,
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "music"
+    root.mkdir()
+    outside = tmp_path / "music2"
+    outside.mkdir()
+    inside = tmp_path / "music" / "gone.mp3"
+    outside_file = outside / "gone.mp3"
+    existing = root / "keep.mp3"
+    existing.write_bytes(b"")
+
+    insert_cached_path(genplis_db, inside)
+    insert_cached_path(genplis_db, outside_file)
+    insert_cached_path(genplis_db, existing)
+
+    removed = remove_missing_files(genplis_db.cursor(), root)
+
+    assert removed == [inside]
+    assert set(genplis_db.execute("SELECT path FROM files").fetchall()) == {
+        (str(outside_file),),
+        (str(existing),),
+    }
+
+
+def test_remove_missing_files_without_root_cleans_whole_db(
+    genplis_db: sqlite3.Connection,
+    tmp_path: Path,
+) -> None:
+    first = tmp_path / "first" / "gone.mp3"
+    second = tmp_path / "second" / "gone.mp3"
+    insert_cached_path(genplis_db, first)
+    insert_cached_path(genplis_db, second)
+
+    removed = remove_missing_files(genplis_db.cursor())
+
+    assert set(removed) == {first.absolute(), second.absolute()}
+    assert genplis_db.execute("SELECT count(*) FROM files").fetchone() == (0,)
+
+
+def test_remove_missing_files_on_empty_db(genplis_db: sqlite3.Connection) -> None:
+    assert remove_missing_files(genplis_db.cursor()) == []
 
 
 def test_get_cached_tags_success(genplis_db: sqlite3.Connection) -> None:
