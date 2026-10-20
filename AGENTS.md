@@ -156,6 +156,7 @@ from genplis.exceptions import GenplisError
 ### Code Structure
 - Main entry point: `src/genplis/__main__.py`
 - Core logic: `src/genplis/core.py`
+- Configuration loading: `src/genplis/config.py`
 - Database operations: `src/genplis/db.py`
 - Tag parsing: `src/genplis/tags.py`
 - M3UG parsing: `src/genplis/m3ug.py`

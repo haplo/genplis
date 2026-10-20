@@ -11,3 +11,7 @@ class GenplisM3UGException(GenplisError):
         super().__init__(message)
         self.filename = filename
         self.line = line
+
+
+class GenplisConfigError(GenplisError):
+    pass

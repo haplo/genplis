@@ -42,6 +42,69 @@ This generated playlist can then be used in any M3U-compatible music player.
 Currently *genplis* saves all parsed data in RAM for simplicity and speed.
 Exact RAM usage will depend on the music tags used, but estimate 10 MiB per 1,000 files, or even less for lightly-tagged collections.
 
+## Configuration
+
+*genplis* reads optional settings from an INI file in the XDG configuration
+directory:
+
+    $XDG_CONFIG_HOME/genplis/config.ini
+
+If `XDG_CONFIG_HOME` is not set, this is `~/.config/genplis/config.ini`.
+
+The file is optional: when it is missing, *genplis* uses its built-in defaults.
+Command-line options take precedence over the config file. In particular:
+
+- `PATH` may be omitted when `[collection] path` is set.
+- Passing one or more `--exclude` options replaces `[collection] exclude`.
+- `--config FILE` reads a different config file; `--no-config` ignores
+  configuration entirely.
+- `--db`, `--verbose`/`--no-verbose`, and `--overwrite`/`--no-overwrite`
+  override the corresponding settings.
+
+A complete example:
+
+```ini
+[general]
+# Same as --verbose.
+verbose = false
+
+[collection]
+# Used when PATH is omitted on the command line.
+path = ~/Music
+
+# Regular expressions matched against file paths, one per line.
+# Files matching any pattern are skipped.
+exclude =
+    /\.Trash/
+    /@eaDir/
+    \.tmp$
+
+[tags]
+# Tag values larger than this many bytes are discarded.
+max_size = 1000
+
+# Tag names to discard before caching and filtering, one per line.
+ignore =
+    filename
+    filesize
+    encoder_settings
+
+[database]
+# Optional cache location. Defaults to
+# $XDG_CACHE_HOME/genplis/genplis.db
+# path = ~/.cache/genplis/genplis.db
+
+[output]
+# Overwrite generated .m3u files that already exist.
+overwrite = true
+```
+
+Paths may start with `~`. Relative paths are resolved relative to the config
+file, not the current directory. `exclude` and `ignore` take one entry per
+line. The percent sign (`%`) has no special meaning in values.
+
+A copy of this example is available at [examples/config.ini](examples/config.ini).
+
 ## Defining filters
 
 TODO
@@ -97,13 +160,14 @@ Type checking is done with [ty](https://docs.astral.sh/ty/):
   - [ ] Include original M3UG content as comment
   - [ ] Support [basic extended M3U playlist tags](https://datatracker.ietf.org/doc/html/rfc8216#section-4.3)
 - [ ] Parallel parsing of files
-- [ ] Support narrowing of valid tag names
-- [ ] Config file support
-  - [ ] Default music collection path
-  - [ ] Default exclude
   - [ ] Number of processes for parallel parsing
-  - [ ] Tag size threshold to ignore
-  - [ ] Tags to ignore
+- [ ] Support narrowing of valid tag names
+- [x] Config file support
+  - [x] Default music collection path
+  - [x] Default exclude
+  - [x] Tag size threshold to ignore
+  - [x] Tags to ignore
+  - [x] Example config in README
 - [ ] Support OR conditionals
 - [ ] Command for DB cleaning
 - [ ] Optimize memory usage

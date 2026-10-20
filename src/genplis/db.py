@@ -7,6 +7,7 @@ from typing import cast
 import tinytag
 from xdg_base_dirs import xdg_cache_home
 
+from .config import TagsConfig
 from .exceptions import GenplisDBError
 from .files import get_last_modified
 from .json import GenplisJSONEncoder
@@ -17,16 +18,24 @@ DB_NAME = "genplis.db"
 CACHE_SCHEMA_VERSION = 1
 
 
-def get_cache_version() -> str:
+def get_cache_version(tags: TagsConfig | None = None) -> str:
     """Return the version of the cached tag data.
 
     Includes the tinytag version so upgrading the parser invalidates cached
-    tags, which may otherwise keep old values until files are modified.
+    tags, which may otherwise keep old values until files are modified. Also
+    includes tag filtering settings, because changing them changes which tags
+    are stored.
     """
-    return f"{CACHE_SCHEMA_VERSION}:{tinytag.__version__}"
+    if tags is None:
+        tags = TagsConfig()
+    ignored = ",".join(sorted(tags.ignore))
+    return f"{CACHE_SCHEMA_VERSION}:{tinytag.__version__}:{tags.max_size}:{ignored}"
 
 
-def get_db_path() -> Path:
+def get_db_path(override: Path | None = None) -> Path:
+    """Return the DB path, using override if given."""
+    if override is not None:
+        return override
     db_path = xdg_cache_home() / "genplis" / DB_NAME
     return db_path
 
@@ -51,7 +60,9 @@ def setup_database_connection(
     return conn, cursor
 
 
-def create_files_table(cursor: sqlite3.Cursor) -> None:
+def create_files_table(
+    cursor: sqlite3.Cursor, cache_version: str | None = None
+) -> None:
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS cache_meta (
             key TEXT PRIMARY KEY,
@@ -59,7 +70,8 @@ def create_files_table(cursor: sqlite3.Cursor) -> None:
         )
     """)
 
-    cache_version = get_cache_version()
+    if cache_version is None:
+        cache_version = get_cache_version()
     row = cursor.execute(
         "SELECT value FROM cache_meta WHERE key = 'tag_version'"
     ).fetchone()

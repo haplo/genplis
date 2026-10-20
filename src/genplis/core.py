@@ -3,24 +3,29 @@ import re
 import sqlite3
 import sys
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from timeit import default_timer as timer
-from typing import Protocol, cast
 
 import psutil
 
 from . import db
-from .exceptions import GenplisError
+from .config import Config, load_config
+from .exceptions import GenplisConfigError, GenplisError
 from .m3u import create_m3u
 from .m3ug import RuleNode, parse_m3ug
 from .tags import get_tags
 from .types import Tags
 
 
-class Args(Protocol):
+@dataclass(frozen=True, slots=True)
+class Args:
     path: Path
-    exclude: list[re.Pattern[str]]
+    exclude: tuple[re.Pattern[str], ...]
     verbose: bool
+    overwrite: bool
+    db_path: Path
+    config: Config
 
 
 def regex_type(arg_value: str) -> re.Pattern[str]:
@@ -34,25 +39,93 @@ def setup_argparse() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "path",
+        nargs="?",
         type=Path,
-        help="Path to parse (directory with music collection or individual file)",
+        help=(
+            "Path to parse (directory with music collection or individual file). "
+            "Defaults to [collection] path from the config file."
+        ),
         metavar="PATH",
     )
     parser.add_argument(
         "-e",
         "--exclude",
-        help="Exclude files matching this regex",
+        help=(
+            "Exclude files matching this regex. Replaces the config file's "
+            "exclude list when used."
+        ),
         action="append",
-        default=[],
+        default=None,
         type=regex_type,
     )
+
+    config_group = parser.add_mutually_exclusive_group()
+    config_group.add_argument(
+        "--config",
+        help="Read settings from this file instead of the XDG default",
+        type=Path,
+        metavar="FILE",
+    )
+    config_group.add_argument(
+        "--no-config",
+        help="Do not read any configuration file",
+        action="store_true",
+    )
+
     parser.add_argument(
         "-v",
         "--verbose",
         help="Print verbose diagnostics",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+    )
+    parser.add_argument(
+        "--db",
+        help="Use this database file instead of the XDG cache default",
+        type=Path,
+        metavar="PATH",
+    )
+    parser.add_argument(
+        "--overwrite",
+        help="Overwrite existing generated playlists",
+        action=argparse.BooleanOptionalAction,
+        default=None,
     )
     return parser
+
+
+def resolve_args(args: argparse.Namespace, config: Config) -> Args:
+    """Combine command-line arguments with configuration file values.
+
+    Command-line values take precedence. Excludes are special: when any
+    --exclude option is present, it replaces the config file's exclude list.
+    """
+    if args.path is not None:
+        path = args.path
+    elif config.collection.path is not None:
+        path = config.collection.path
+    else:
+        raise GenplisConfigError(
+            "PATH is required unless [collection] path is set in the config file"
+        )
+
+    exclude = (
+        tuple(args.exclude) if args.exclude is not None else config.collection.exclude
+    )
+    verbose = args.verbose if args.verbose is not None else config.general.verbose
+    overwrite = (
+        args.overwrite if args.overwrite is not None else config.output.overwrite
+    )
+    db_path = db.get_db_path(args.db if args.db is not None else config.database.path)
+
+    return Args(
+        path=path,
+        exclude=exclude,
+        verbose=verbose,
+        overwrite=overwrite,
+        db_path=db_path,
+        config=config,
+    )
 
 
 def is_excluded(path: Path, args: Args) -> bool:
@@ -144,7 +217,11 @@ def process_directory(
         if len(files) > 0:
             playlist_file = filter_file.with_suffix(".m3u")
             print(f"Creating playlist {playlist_file}")
-            create_m3u(playlist_file, files, overwrite=True)
+            create_m3u(
+                playlist_file,
+                files,
+                overwrite=args.overwrite,
+            )
 
     end_time = timer()
     process_time = end_time - start_time
@@ -185,7 +262,12 @@ def process_file(
         cached_tags = db.get_cached_tags(cursor, file)
         return cached_tags, []
 
-    tags = get_tags(file, args.verbose)
+    tags = get_tags(
+        file,
+        args.verbose,
+        max_size=args.config.tags.max_size,
+        ignore=args.config.tags.ignore,
+    )
     if tags:
         db.cache_tags_for_file(cursor, file, tags)
         conn.commit()
@@ -221,17 +303,33 @@ def filter_songs(
 def main() -> None:
     # Set up argparse
     parser = setup_argparse()
-    args = cast(Args, parser.parse_args())
+    raw_args = parser.parse_args()
 
-    db_path = db.get_db_path()
+    try:
+        config = Config() if raw_args.no_config else load_config(raw_args.config)
+        args = resolve_args(raw_args, config)
+    except GenplisConfigError as exc:
+        parser.exit(1, f"genplis: error: {exc}\n")
+
     if args.verbose:
-        print(f"Using {db_path} for genplis DB")
+        if config.source is not None:
+            print(f"Using config file {config.source}")
+        else:
+            print("No config file found; using defaults")
+        print(f"Using {args.db_path} for genplis DB")
 
-    with sqlite3.connect(db_path) as conn:
+    try:
+        args.db_path.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise GenplisError(
+            f"Cannot create database directory {args.db_path.parent}: {exc}"
+        ) from exc
+
+    with sqlite3.connect(args.db_path) as conn:
         cursor = conn.cursor()
 
         # Create a DB for caching results if it doesn't exist
-        db.create_files_table(cursor)
+        db.create_files_table(cursor, db.get_cache_version(config.tags))
         conn.commit()
 
         process_path(conn, cursor, args)

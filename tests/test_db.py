@@ -4,9 +4,11 @@ from pathlib import Path
 import pytest
 
 import genplis.db as db
+from genplis.config import TagsConfig
 from genplis.db import (
     cache_tags_for_file,
     create_files_table,
+    get_cache_version,
     get_cached_tags,
     get_db_path,
     is_cache_valid,
@@ -19,6 +21,11 @@ from genplis.files import get_last_modified
 def test_get_db_path(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("XDG_CACHE_HOME", "/home/user/.cache")
     assert get_db_path() == Path("/home/user/.cache/genplis/genplis.db")
+
+
+def test_get_db_path_override(tmp_path: Path) -> None:
+    custom_path = tmp_path / "custom.db"
+    assert get_db_path(custom_path) == custom_path
 
 
 def test_db_connection_and_create(tmp_path: Path) -> None:
@@ -108,6 +115,30 @@ def test_cache_invalidated_on_version_change(
 
     monkeypatch.setattr(db, "CACHE_SCHEMA_VERSION", 999)
     db.create_files_table(genplis_db.cursor())
+
+    assert genplis_db.execute("SELECT count(*) FROM files").fetchone() == (0,)
+
+
+def test_cache_version_includes_tag_settings() -> None:
+    default_version = get_cache_version()
+
+    assert default_version != get_cache_version(TagsConfig(max_size=1))
+    assert default_version != get_cache_version(
+        TagsConfig(ignore=frozenset({"artist"}))
+    )
+
+
+def test_cache_invalidated_on_tag_config_change(
+    genplis_db: sqlite3.Connection,
+    file_mp3: Path,
+) -> None:
+    cache_tags_for_file(genplis_db.cursor(), file_mp3, {"a": "b"})
+    assert genplis_db.execute("SELECT count(*) FROM files").fetchone() == (1,)
+
+    db.create_files_table(
+        genplis_db.cursor(),
+        get_cache_version(TagsConfig(max_size=1)),
+    )
 
     assert genplis_db.execute("SELECT count(*) FROM files").fetchone() == (0,)
 

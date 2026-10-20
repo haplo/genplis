@@ -57,3 +57,25 @@ def test_get_tags_invalid_file(tmp_path: Path) -> None:
     invalid_file.write_bytes(b"\x1aE\xdf\xa3")
 
     assert get_tags(invalid_file) is None
+
+
+def test_get_tags_respects_ignore_list(file_mp3: Path) -> None:
+    tags = get_tags(file_mp3, ignore=frozenset({"artist", "genre"}))
+
+    assert tags is not None
+    assert "artist" not in tags
+    assert "genre" not in tags
+    assert "title" in tags
+
+
+def test_get_tags_respects_max_size(file_mp3: Path) -> None:
+    tags = get_tags(file_mp3, max_size=0)
+
+    assert tags == {}
+
+
+def test_get_tags_ignore_is_case_insensitive(file_mp3: Path) -> None:
+    tags = get_tags(file_mp3, ignore=frozenset({"ARTIST"}))
+
+    assert tags is not None
+    assert "artist" not in tags
