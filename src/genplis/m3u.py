@@ -1,12 +1,15 @@
 from collections.abc import Iterable
 from pathlib import Path
 
+from .types import Verbosity
+
 
 def create_m3u(
     playlist_path: Path,
     entries: Iterable[Path],
     comments: Iterable[str] = (),
     overwrite: bool = False,
+    verbosity: Verbosity = Verbosity.NORMAL,
 ) -> None:
     """Write an M3U playlist.
 
@@ -17,7 +20,8 @@ def create_m3u(
 
     """
     if playlist_path.exists() and not overwrite:
-        print(f"WARNING: {playlist_path} already exists, skipping...")
+        if verbosity.shows_normal_output:
+            print(f"WARNING: {playlist_path} already exists, skipping...")
         return
 
     playlist_dir = playlist_path.parent

@@ -4,7 +4,7 @@ from typing import Final
 
 from tinytag import TinyTag, TinyTagException
 
-from .types import Tags, TagValue
+from .types import Tags, TagValue, Verbosity
 
 DEFAULT_MAX_TAG_SIZE = 1000
 # Backwards-compatible alias for callers that used the old constant name.
@@ -29,7 +29,7 @@ AUDIO_PROPERTY_TAGS: Final[frozenset[str]] = frozenset(
 
 def get_tags(
     file_path: Path,
-    verbose: bool = False,
+    verbosity: Verbosity = Verbosity.NORMAL,
     *,
     max_size: int = DEFAULT_MAX_TAG_SIZE,
     ignore: frozenset[str] = frozenset(),
@@ -44,14 +44,14 @@ def get_tags(
     Calculated audio properties are never dropped by the size limit.
     """
     if not TinyTag.is_supported(file_path):
-        if verbose:
+        if verbosity.is_verbose:
             print(f"Skipping {file_path}: not supported by tinytag")
         return None
 
     try:
         raw_tags = TinyTag.get(file_path).as_dict()
     except TinyTagException as exc:
-        if verbose:
+        if verbosity.is_verbose:
             print(f"Skipping {file_path}: {exc}")
         return None
     tags: Tags = {}
@@ -62,7 +62,7 @@ def get_tags(
     # Remove ignored and large tags, they are likely lyrics or long comments
     for key, value in raw_tags.items():
         if key.lower() in ignored:
-            if verbose:
+            if verbosity.is_verbose:
                 print(f"Removing tag {key} because it is configured to be ignored")
             continue
         if (
@@ -70,7 +70,7 @@ def get_tags(
             and key not in AUDIO_PROPERTY_TAGS
             and get_tag_size(value) > max_size
         ):
-            if verbose:
+            if verbosity.is_verbose:
                 print(
                     f"Removing tag {key} because it's larger than "
                     f"{max_size} UTF-8 bytes"

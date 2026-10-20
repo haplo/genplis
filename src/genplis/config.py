@@ -15,7 +15,7 @@ from .tags import DEFAULT_MAX_TAG_SIZE
 CONFIG_FILENAME = "config.ini"
 
 _KNOWN_SECTIONS: Final[dict[str, frozenset[str]]] = {
-    "general": frozenset({"verbose"}),
+    "general": frozenset({"verbose", "quiet"}),
     "collection": frozenset({"path", "exclude"}),
     "tags": frozenset({"max_size", "ignore"}),
     "database": frozenset({"path"}),
@@ -26,6 +26,7 @@ _KNOWN_SECTIONS: Final[dict[str, frozenset[str]]] = {
 @dataclass(frozen=True, slots=True)
 class GeneralConfig:
     verbose: bool = False
+    quiet: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,6 +101,7 @@ def load_config(path: Path | None = None) -> Config:
     _validate_sections(parser, sections, config_path)
 
     general_raw = _get_option(parser, sections, "general", "verbose")
+    general_quiet_raw = _get_option(parser, sections, "general", "quiet")
     collection_path_raw = _get_option(parser, sections, "collection", "path")
     collection_exclude_raw = _get_option(parser, sections, "collection", "exclude")
     tags_max_size_raw = _get_option(parser, sections, "tags", "max_size")
@@ -110,14 +112,23 @@ def load_config(path: Path | None = None) -> Config:
         parser, sections, "output", "include_source"
     )
 
+    general_verbose = _parse_bool(
+        general_raw,
+        default=False,
+        where=_where(config_path, "general", "verbose"),
+    )
+    general_quiet = _parse_bool(
+        general_quiet_raw,
+        default=False,
+        where=_where(config_path, "general", "quiet"),
+    )
+    if general_verbose and general_quiet:
+        raise GenplisConfigError(
+            f"{config_path}: [general] verbose and quiet cannot both be true"
+        )
+
     return Config(
-        general=GeneralConfig(
-            verbose=_parse_bool(
-                general_raw,
-                default=False,
-                where=_where(config_path, "general", "verbose"),
-            )
-        ),
+        general=GeneralConfig(verbose=general_verbose, quiet=general_quiet),
         collection=CollectionConfig(
             path=_parse_path(
                 collection_path_raw,

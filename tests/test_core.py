@@ -46,7 +46,7 @@ from genplis.m3ug import (
     NameNode,
     ValueNode,
 )
-from genplis.types import Tags
+from genplis.types import Tags, Verbosity
 
 
 def test_process_audio_file(
@@ -176,7 +176,7 @@ def test_process_path_rejects_nonexistent_path(
     assert exc_info.value.code == 1
     assert (
         f"{missing} must be either a directory or a file. Exiting..."
-        in capsys.readouterr().out
+        in capsys.readouterr().err
     )
 
 
@@ -406,6 +406,55 @@ def test_process_dir_does_not_create_playlist_when_no_song_matches(
     assert not (tmp_path / "favorites.m3u").exists()
 
 
+def test_process_dir_quiet_only_reports_filters_and_playlists(
+    genplis_db: sqlite3.Connection,
+    make_args: Callable[..., Args],
+    file_mp3: Path,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    shutil.copy2(file_mp3, tmp_path / "song.mp3")
+    filter_file = tmp_path / "favorites.m3ug"
+    filter_file.write_text('artist = "Test Artist"\n', encoding="utf-8")
+    playlist_file = tmp_path / "favorites.m3u"
+
+    process_directory(
+        genplis_db,
+        genplis_db.cursor(),
+        tmp_path,
+        make_args(str(tmp_path), verbosity=Verbosity.QUIET),
+    )
+
+    assert capsys.readouterr().out.splitlines() == [
+        f"Filter file {filter_file} matched 1 songs",
+        f"Creating playlist {playlist_file}",
+    ]
+
+
+def test_process_dir_double_quiet_prints_nothing(
+    genplis_db: sqlite3.Connection,
+    make_args: Callable[..., Args],
+    file_mp3: Path,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    shutil.copy2(file_mp3, tmp_path / "song.mp3")
+    filter_file = tmp_path / "favorites.m3ug"
+    filter_file.write_text('artist = "Test Artist"\n', encoding="utf-8")
+
+    process_directory(
+        genplis_db,
+        genplis_db.cursor(),
+        tmp_path,
+        make_args(str(tmp_path), verbosity=Verbosity.REALLY_QUIET),
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ""
+    assert (tmp_path / "favorites.m3u").exists()
+
+
 def test_process_dir_verbose_lists_matching_songs(
     genplis_db: sqlite3.Connection,
     make_args: Callable[..., Args],
@@ -425,7 +474,7 @@ def test_process_dir_verbose_lists_matching_songs(
         genplis_db,
         genplis_db.cursor(),
         tmp_path,
-        make_args(str(tmp_path), verbose=True),
+        make_args(str(tmp_path), verbosity=Verbosity.VERBOSE),
     )
 
     output = capsys.readouterr().out
@@ -584,7 +633,7 @@ def test_process_file_ignores_unsupported_file_without_caching(
         genplis_db,
         genplis_db.cursor(),
         unsupported,
-        make_args(str(unsupported), verbose=True),
+        make_args(str(unsupported), verbosity=Verbosity.VERBOSE),
     )
 
     assert tags == {}
@@ -630,7 +679,9 @@ def test_process_dir_prints_and_prunes_excluded_folder(
 
     # The pattern targets folder paths, which only match with a trailing
     # separator added before testing.
-    args = make_args(str(tmp_path), exclude=[re.compile(r"/@eaDir/")], verbose=True)
+    args = make_args(
+        str(tmp_path), exclude=[re.compile(r"/@eaDir/")], verbosity=Verbosity.VERBOSE
+    )
     all_tags, all_filters = process_directory(
         genplis_db, genplis_db.cursor(), tmp_path, args
     )
@@ -671,7 +722,9 @@ def test_process_dir_still_skips_excluded_files(
     shutil.copy2(file_mp3, tmp_path / "skip-me.mp3")
 
     args = make_args(
-        str(tmp_path), exclude=[re.compile(r"skip-me\.mp3$")], verbose=True
+        str(tmp_path),
+        exclude=[re.compile(r"skip-me\.mp3$")],
+        verbosity=Verbosity.VERBOSE,
     )
     all_tags, _ = process_directory(genplis_db, genplis_db.cursor(), tmp_path, args)
 
@@ -792,9 +845,40 @@ def test_resolve_args_boolean_precedence() -> None:
         config,
     )
 
-    assert args.verbose is False
+    assert args.verbosity is Verbosity.NORMAL
     assert args.overwrite is True
     assert args.include_source is True
+
+
+def test_resolve_args_verbosity() -> None:
+    parser = setup_argparse()
+
+    def resolve(argv: list[str], config: Config | None = None) -> Verbosity:
+        return resolve_args(
+            parser.parse_args([*argv, "/music"]),
+            config if config is not None else Config(),
+        ).verbosity
+
+    assert resolve([]) is Verbosity.NORMAL
+    assert resolve([], Config(general=GeneralConfig(verbose=True))) is Verbosity.VERBOSE
+    assert resolve([], Config(general=GeneralConfig(quiet=True))) is Verbosity.QUIET
+    assert (
+        resolve(["--no-verbose"], Config(general=GeneralConfig(verbose=True)))
+        is Verbosity.NORMAL
+    )
+    assert (
+        resolve(["--no-verbose"], Config(general=GeneralConfig(quiet=True)))
+        is Verbosity.QUIET
+    )
+    assert resolve(["-v"]) is Verbosity.VERBOSE
+    assert (
+        resolve(["-v"], Config(general=GeneralConfig(quiet=True))) is Verbosity.VERBOSE
+    )
+    assert (
+        resolve(["-q"], Config(general=GeneralConfig(verbose=True))) is Verbosity.QUIET
+    )
+    assert resolve(["-qq"]) is Verbosity.REALLY_QUIET
+    assert resolve(["-qqq"]) is Verbosity.REALLY_QUIET
 
 
 def test_resolve_args_uses_include_source_from_config() -> None:
@@ -863,7 +947,7 @@ def test_clean_database_reports_stats(
         genplis_db.cursor(),
         None,
         tmp_path / "genplis.db",
-        verbose=True,
+        verbosity=Verbosity.VERBOSE,
     )
 
     output = capsys.readouterr().out
@@ -987,3 +1071,44 @@ def test_main_clean_without_database(
 
     assert "Database does not exist; nothing to clean." in capsys.readouterr().out
     assert not db_path.exists()
+
+
+def test_main_rejects_quiet_and_verbose_together(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["genplis", "-q", "-v", "--no-config", "/music"],
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        main()
+
+    assert exc_info.value.code == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "--quiet cannot be combined with --verbose" in captured.err
+
+
+def test_main_double_quiet_reports_errors_on_stderr(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    db_path = tmp_path / "genplis.db"
+    missing = tmp_path / "missing.mp3"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["genplis", "-qq", "--no-config", "--db", str(db_path), str(missing)],
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        main()
+
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert f"{missing} must be either a directory or a file." in captured.err

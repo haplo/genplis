@@ -66,13 +66,13 @@ Description=Generate M3U playlists with genplis
 
 [Service]
 Type=oneshot
-ExecStart=%h/.local/bin/genplis
+ExecStart=%h/.local/bin/genplis --quiet
 ```
 
 `Type=oneshot` is correct because the process scans the collection and exits;
 there is no daemon to keep running. `%h` expands to your home directory, so you
-do not need to hard-code a username. Add `--verbose` to `ExecStart` while
-troubleshooting; output goes to the journal either way.
+do not need to hard-code a username. Replace `--quiet` with `--verbose` to
+troubleshoot issues.
 
 ### Create the timer
 

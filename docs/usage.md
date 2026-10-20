@@ -25,6 +25,7 @@ required.
 | `--config FILE` | Read settings from this file instead of the XDG default. |
 | `--no-config` | Ignore all configuration files. |
 | `-v`, `--verbose`, `--no-verbose` | Print diagnostics: config and database paths, skipped files, parsed rules, matching songs. |
+| `-q`, `--quiet` | Reduce output. Once prints only filter match counts and playlist creation; twice (`-qq`) prints nothing except errors. Cannot be combined with `--verbose`. |
 | `--db PATH` | Use this SQLite database instead of the default cache location. |
 | `--clean` | Remove cache entries for files that no longer exist. See [Cleaning the cache](#cleaning-the-cache). |
 | `--overwrite`, `--no-overwrite` | Whether to replace an existing generated playlist. |
@@ -165,12 +166,21 @@ Normal runs print per-file cache updates, a line for each filter file with its
 match count, and a final summary. `--verbose` adds config/database paths,
 exclusion decisions, parsed rules, and the list of matching songs.
 
-- An invalid `PATH` (neither a file nor a directory) prints a message and
-  exits with status 1.
-- Configuration problems are reported as `genplis: error: ...` with status 1.
+`-q` limits output to one line per filter file with its match count and, when
+a playlist is written, the line announcing it. `-qq` suppresses all normal
+output, so scheduled runs stay silent; errors are still printed to standard
+error. `-q` and `-v` cannot be used together on the command line; the same
+applies to `verbose = true` and `quiet = true` in the config file. A
+command-line verbosity flag overrides the configured one.
+
+- An invalid `PATH` (neither a file nor a directory) prints a message to
+  standard error and exits with status 1.
+- Configuration problems and other fatal errors are reported to standard
+  error as `genplis: error: ...` with status 1.
 - An invalid `.m3ug` file stops the run with an error describing the problem.
 - A playlist that exists and cannot be overwritten because of
-  `--no-overwrite` produces a warning, not an error.
+  `--no-overwrite` produces a warning, not an error. The warning is
+  suppressed by `-q`.
 
 ## See also
 

@@ -16,7 +16,7 @@ from .exceptions import GenplisConfigError, GenplisError
 from .m3u import create_m3u
 from .m3ug import RuleNode, get_rating, parse_m3ug
 from .tags import AUDIO_PROPERTY_TAGS, get_audio_property_tags, get_tags
-from .types import Tags, TagValue
+from .types import Tags, TagValue, Verbosity
 
 # User-facing description of each cache state.
 CACHE_STATUS_MESSAGES = {
@@ -30,7 +30,7 @@ CACHE_STATUS_MESSAGES = {
 class Args:
     path: Path | None
     exclude: tuple[re.Pattern[str], ...]
-    verbose: bool
+    verbosity: Verbosity
     overwrite: bool
     db_path: Path
     config: Config
@@ -117,6 +117,16 @@ def setup_argparse() -> argparse.ArgumentParser:
         default=None,
     )
     parser.add_argument(
+        "-q",
+        "--quiet",
+        help=(
+            "Reduce output. Repeat (-qq) to print nothing except errors. "
+            "Cannot be combined with --verbose."
+        ),
+        action="count",
+        default=0,
+    )
+    parser.add_argument(
         "--db",
         help="Use this database file instead of the XDG cache default",
         type=Path,
@@ -146,6 +156,25 @@ def setup_argparse() -> argparse.ArgumentParser:
     return parser
 
 
+def _resolve_verbosity(args: argparse.Namespace, config: Config) -> Verbosity:
+    """Combine command-line and config output settings.
+
+    Command-line verbosity flags override the config file. A quiet flag and a
+    verbose flag from the same source are rejected before this is called.
+    """
+    if args.quiet:
+        return Verbosity.REALLY_QUIET if args.quiet >= 2 else Verbosity.QUIET
+    if args.verbose:
+        return Verbosity.VERBOSE
+    if config.general.quiet:
+        return Verbosity.QUIET
+    if args.verbose is False:
+        return Verbosity.NORMAL
+    if config.general.verbose:
+        return Verbosity.VERBOSE
+    return Verbosity.NORMAL
+
+
 def resolve_args(args: argparse.Namespace, config: Config) -> Args:
     """Combine command-line arguments with configuration file values.
 
@@ -167,7 +196,7 @@ def resolve_args(args: argparse.Namespace, config: Config) -> Args:
     exclude = (
         tuple(args.exclude) if args.exclude is not None else config.collection.exclude
     )
-    verbose = args.verbose if args.verbose is not None else config.general.verbose
+    verbosity = _resolve_verbosity(args, config)
     overwrite = (
         args.overwrite if args.overwrite is not None else config.output.overwrite
     )
@@ -181,7 +210,7 @@ def resolve_args(args: argparse.Namespace, config: Config) -> Args:
     return Args(
         path=path,
         exclude=exclude,
-        verbose=verbose,
+        verbosity=verbosity,
         overwrite=overwrite,
         db_path=db_path,
         config=config,
@@ -233,7 +262,7 @@ def process_path(conn: sqlite3.Connection, cursor: sqlite3.Cursor, args: Args) -
         process_directory(conn, cursor, path, args)
     elif path.is_file():
         tags, filters, cache_status = process_file(conn, cursor, path, args)
-        if tags:
+        if tags and args.verbosity.shows_normal_output:
             print(f"{path} detected as music file")
             print(f"Cache status: {CACHE_STATUS_MESSAGES[cache_status]}")
 
@@ -246,15 +275,18 @@ def process_path(conn: sqlite3.Connection, cursor: sqlite3.Cursor, args: Args) -
             display_tags.update(get_calculated_tags(tags))
             for key, value in sorted(display_tags.items(), key=lambda t: t[0]):
                 print(f"    {key} = {value}")
-        if filters:
+        if filters and args.verbosity.shows_normal_output:
             print(f"{path} detected as M3UG file")
             print("Parsed filters:")
             for f in filters:
                 print(f"    {f}")
-        if is_excluded(path, args):
+        if is_excluded(path, args) and args.verbosity.shows_normal_output:
             print("WARNING: This file is excluded by current configuration.")
     else:
-        print(f"{path} must be either a directory or a file. Exiting...")
+        print(
+            f"{path} must be either a directory or a file. Exiting...",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
 
@@ -292,7 +324,7 @@ def process_directory(
         for name in dirnames:
             folder = current / name
             if is_excluded(folder, args, is_dir=True):
-                if args.verbose:
+                if args.verbosity.is_verbose:
                     print(f"Skipping {folder} because of exclude pattern.")
                 continue
             kept_dirs.append(name)
@@ -301,7 +333,7 @@ def process_directory(
         for name in filenames:
             file = current / name
             if is_excluded(file, args):
-                if args.verbose:
+                if args.verbosity.is_verbose:
                     print(f"Skipping {file} because of exclude pattern.")
                 continue
 
@@ -317,11 +349,13 @@ def process_directory(
 
     # Apply each filter to all songs to generate playlists
     for filter_file, rules in all_filters.items():
-        files = filter_songs(all_tags, filter_file, rules, args.verbose)
-        print(f"Filter file {filter_file} matched {len(files)} songs")
+        files = filter_songs(all_tags, filter_file, rules, args.verbosity)
+        if args.verbosity.shows_progress:
+            print(f"Filter file {filter_file} matched {len(files)} songs")
         if len(files) > 0:
             playlist_file = filter_file.with_suffix(".m3u")
-            print(f"Creating playlist {playlist_file}")
+            if args.verbosity.shows_progress:
+                print(f"Creating playlist {playlist_file}")
             comments: list[str] = []
             if args.include_source:
                 source = filter_file.read_text(encoding="utf-8-sig")
@@ -335,13 +369,15 @@ def process_directory(
                 files,
                 comments=comments,
                 overwrite=args.overwrite,
+                verbosity=args.verbosity,
             )
 
     end_time = timer()
     process_time = end_time - start_time
     used_memory = psutil.Process().memory_info().rss / (1024 * 1024)
-    print(f"Processed {len(all_tags)} files in {process_time:.3f} seconds")
-    print(f"Total RAM usage: {used_memory} MiB")
+    if args.verbosity.shows_normal_output:
+        print(f"Processed {len(all_tags)} files in {process_time:.3f} seconds")
+        print(f"Total RAM usage: {used_memory} MiB")
 
     return all_tags, all_filters
 
@@ -368,7 +404,7 @@ def process_file(
 
     if file.suffix.lower() == ".m3ug":
         content = file.read_text(encoding="utf-8-sig")
-        rules = parse_m3ug(content, str(file), args.verbose)
+        rules = parse_m3ug(content, str(file), args.verbosity)
         return {}, rules, db.CacheStatus.MISS
 
     cache_status = db.get_cache_status(cursor, file)
@@ -381,12 +417,12 @@ def process_file(
 
     tags = get_tags(
         file,
-        args.verbose,
+        args.verbosity,
         max_size=args.config.tags.max_size,
         ignore=args.config.tags.ignore,
     )
     if tags:
-        db.cache_tags_for_file(cursor, file, tags)
+        db.cache_tags_for_file(cursor, file, tags, verbosity=args.verbosity)
         conn.commit()
     return tags or {}, [], cache_status
 
@@ -395,9 +431,9 @@ def filter_songs(
     files_and_tags: Mapping[Path, Tags],
     filter_file: Path,
     rules: Sequence[RuleNode],
-    verbose: bool = False,
+    verbosity: Verbosity = Verbosity.NORMAL,
 ) -> list[Path]:
-    if verbose:
+    if verbosity.is_verbose:
         print(f"\nFiltering songs and generating playlist for {filter_file}")
 
     filtered_songs: list[Path] = []
@@ -409,7 +445,7 @@ def filter_songs(
             # only executed if all rules pass
             filtered_songs.append(file)
 
-    if verbose:
+    if verbosity.is_verbose:
         print(f"Files that match the filter {filter_file}:")
         for song in filtered_songs:
             print(f"  {song}")
@@ -422,7 +458,7 @@ def clean_database(
     cursor: sqlite3.Cursor,
     root: Path | None,
     db_path: Path,
-    verbose: bool = False,
+    verbosity: Verbosity = Verbosity.NORMAL,
 ) -> CleanStats:
     """Remove cache entries for missing files and reclaim their space.
 
@@ -440,7 +476,7 @@ def clean_database(
         db.vacuum_database(conn)
     size_after = db_path.stat().st_size
 
-    if verbose:
+    if verbosity.is_verbose:
         for path in removed:
             print(f"Removed stale cache entry for {path}")
 
@@ -450,35 +486,28 @@ def clean_database(
         size_after=size_after,
     )
     entry_word = "entry" if len(removed) == 1 else "entries"
-    print(f"Removed {len(removed)} stale {entry_word} from the cache database.")
-    print(
-        "Database size: "
-        f"{format_size(size_before)} -> {format_size(size_after)} "
-        f"({format_size(stats.bytes_saved)} saved)."
-    )
+    if verbosity.shows_normal_output:
+        print(f"Removed {len(removed)} stale {entry_word} from the cache database.")
+        print(
+            "Database size: "
+            f"{format_size(size_before)} -> {format_size(size_after)} "
+            f"({format_size(stats.bytes_saved)} saved)."
+        )
     return stats
 
 
-def main() -> None:
-    # Set up argparse
-    parser = setup_argparse()
-    raw_args = parser.parse_args()
-
-    try:
-        config = Config() if raw_args.no_config else load_config(raw_args.config)
-        args = resolve_args(raw_args, config)
-    except GenplisConfigError as exc:
-        parser.exit(1, f"genplis: error: {exc}\n")
-
-    if args.verbose:
-        if config.source is not None:
-            print(f"Using config file {config.source}")
+def _run(args: Args) -> None:
+    """Run genplis with resolved arguments."""
+    if args.verbosity.is_verbose:
+        if args.config.source is not None:
+            print(f"Using config file {args.config.source}")
         else:
             print("No config file found; using defaults")
         print(f"Using {args.db_path} for genplis DB")
 
     if args.path is None and not args.db_path.exists():
-        print("Database does not exist; nothing to clean.")
+        if args.verbosity.shows_normal_output:
+            print("Database does not exist; nothing to clean.")
         return
 
     try:
@@ -492,7 +521,7 @@ def main() -> None:
         cursor = conn.cursor()
 
         # Create a DB for caching results if it doesn't exist
-        db.create_files_table(cursor, db.get_cache_version(config.tags))
+        db.create_files_table(cursor, db.get_cache_version(args.config.tags))
         conn.commit()
 
         if args.path is not None:
@@ -503,8 +532,29 @@ def main() -> None:
                 cursor,
                 args.path,
                 args.db_path,
-                verbose=args.verbose,
+                verbosity=args.verbosity,
             )
+
+
+def main() -> None:
+    # Set up argparse
+    parser = setup_argparse()
+    raw_args = parser.parse_args()
+
+    if raw_args.quiet and raw_args.verbose:
+        parser.error("--quiet cannot be combined with --verbose")
+
+    try:
+        config = Config() if raw_args.no_config else load_config(raw_args.config)
+        args = resolve_args(raw_args, config)
+    except GenplisConfigError as exc:
+        parser.exit(1, f"genplis: error: {exc}\n")
+
+    try:
+        _run(args)
+    except GenplisError as exc:
+        print(f"genplis: error: {exc}", file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

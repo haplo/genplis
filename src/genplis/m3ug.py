@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from typing import ClassVar, Self, TypeGuard
 
 from .exceptions import GenplisM3UGException
-from .types import TagValue
+from .types import TagValue, Verbosity
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +36,7 @@ def values_equal(tag_value: TagValue, expected: RuleValue) -> bool:
     return tag_value == expected
 
 
-def normalize(raw: TagValue, verbose: bool = False) -> TagValue:
+def normalize(raw: TagValue) -> TagValue:
     if isinstance(raw, list):
         # tinytag transforms some values into lists in its as_dict() method
         length = len(raw)
@@ -75,9 +75,8 @@ def get_rating(tags: Mapping[str, TagValue]) -> float | None:
 
 
 class NameNode:
-    def __init__(self, name: str, verbose: bool = False) -> None:
+    def __init__(self, name: str) -> None:
         self.name = name
-        self.verbose = verbose
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, NameNode):
@@ -91,12 +90,10 @@ class NameNode:
         return self.name
 
     @classmethod
-    def build(
-        cls, name: object, filename: str, line: int, verbose: bool = False
-    ) -> Self:
+    def build(cls, name: object, filename: str, line: int) -> Self:
         if not isinstance(name, str):
             raise GenplisM3UGException("Invalid name: {name}", filename, line)
-        return cls(name, verbose)
+        return cls(name)
 
     def find(self, tags: Mapping[str, TagValue]) -> tuple[str, TagValue]:
         normalized_name = self.name.lower()
@@ -113,9 +110,8 @@ class NameNode:
 
 
 class ValueNode:
-    def __init__(self, value: RuleValue, verbose: bool = False) -> None:
+    def __init__(self, value: RuleValue) -> None:
         self.value = value
-        self.verbose = verbose
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, ValueNode):
@@ -129,25 +125,23 @@ class ValueNode:
         return str(self.value)
 
     @classmethod
-    def build(
-        cls, value: object, filename: str, line: int, verbose: bool = False
-    ) -> Self:
+    def build(cls, value: object, filename: str, line: int) -> Self:
         if not isinstance(value, str):
             raise GenplisM3UGException(f"Invalid value: {value}", filename, line)
 
         value = value.strip()
         # quoted values are always literal strings, even if they look numeric
         if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
-            return cls(value[1:-1], verbose)
+            return cls(value[1:-1])
 
         if FLOAT_RE.match(value):
-            return cls(float(value), verbose)
+            return cls(float(value))
         elif INT_RE.match(value):
-            return cls(int(value), verbose)
-        return cls(value, verbose)
+            return cls(int(value))
+        return cls(value)
 
     def normalize(self, raw: TagValue) -> TagValue:
-        return normalize(raw, self.verbose)
+        return normalize(raw)
 
     def numeric(self) -> int | float | None:
         if is_number(self.value):
@@ -163,10 +157,9 @@ class ValueNode:
 class RuleNode:
     OPERATOR_NAME: ClassVar[str]
 
-    def __init__(self, name: NameNode, value: ValueNode, verbose: bool = False) -> None:
+    def __init__(self, name: NameNode, value: ValueNode) -> None:
         self.name_node = name
         self.value_node = value
-        self.verbose = verbose
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, RuleNode):
@@ -187,7 +180,6 @@ class RuleNode:
         value: ValueNode,
         filename: str,
         line: int,
-        verbose: bool = False,
     ) -> RuleNode:
         rule_cls: type[RuleNode]
         if operator == "=":
@@ -209,7 +201,7 @@ class RuleNode:
                 f"Unrecognized operator: {operator}", filename, line
             )
         rule_cls.check_params(name, value, filename, line)
-        return rule_cls(name, value, verbose)
+        return rule_cls(name, value)
 
     def apply(self, tags: Mapping[str, TagValue]) -> bool:
         _, raw_value = self.name_node.find(tags)
@@ -395,10 +387,10 @@ class GreaterOrEqualRuleNode(RuleNode):
 
 
 def parse_m3ug(
-    content: str, filename: str = "N/A", verbose: bool = False
+    content: str, filename: str = "N/A", verbosity: Verbosity = Verbosity.NORMAL
 ) -> list[RuleNode]:
     rules: list[RuleNode] = []
-    if verbose:
+    if verbosity.is_verbose:
         print(f"Parsing M3UG file {filename}:")
         print("----------------")
         print(content.ljust(4))
@@ -406,11 +398,11 @@ def parse_m3ug(
     for n, line in enumerate(content.splitlines(), 1):
         # ignore comments
         if line.startswith("#"):
-            if verbose:
+            if verbosity.is_verbose:
                 print("Ignoring line {n}: comment")
             continue
         elif not line.strip():
-            if verbose:
+            if verbosity.is_verbose:
                 print("Ignoring line {n}: empty")
             continue
 
@@ -422,13 +414,13 @@ def parse_m3ug(
         tag, operator, value = components
 
         # building validates data
-        tag_node = NameNode.build(tag, filename, n, verbose)
-        value_node = ValueNode.build(value, filename, n, verbose)
-        rule_node = RuleNode.build(operator, tag_node, value_node, filename, n, verbose)
+        tag_node = NameNode.build(tag, filename, n)
+        value_node = ValueNode.build(value, filename, n)
+        rule_node = RuleNode.build(operator, tag_node, value_node, filename, n)
 
         rules.append(rule_node)
 
-    if verbose:
+    if verbosity.is_verbose:
         print("Parsed rules:")
         for rule in rules:
             print(str(rule))

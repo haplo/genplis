@@ -11,6 +11,7 @@ from genplis.db import (
     create_files_table,
     setup_database_connection,
 )
+from genplis.types import Verbosity
 
 
 @pytest.fixture(scope="session")
@@ -41,7 +42,7 @@ def make_args() -> Callable[..., Args]:
     def _make_args(
         path_str: str,
         exclude: list[re.Pattern[str]] | None = None,
-        verbose: bool = False,
+        verbosity: Verbosity = Verbosity.NORMAL,
         overwrite: bool = True,
         config: Config | None = None,
         db_path: Path | None = None,
@@ -51,7 +52,7 @@ def make_args() -> Callable[..., Args]:
         return Args(
             path=Path(path_str),
             exclude=tuple(exclude) if exclude is not None else (),
-            verbose=verbose,
+            verbosity=verbosity,
             overwrite=overwrite,
             db_path=db_path if db_path is not None else Path("genplis.db"),
             config=config if config is not None else Config(),

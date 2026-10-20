@@ -94,6 +94,25 @@ include_source = false
     assert config.source == config_file
 
 
+def test_load_quiet_general_config(tmp_path: Path) -> None:
+    config_file = tmp_path / "config.ini"
+    config_file.write_text("[general]\nquiet = yes\n")
+
+    config = load_config(config_file)
+
+    assert config.general == GeneralConfig(quiet=True)
+
+
+def test_reject_verbose_and_quiet_together(tmp_path: Path) -> None:
+    config_file = tmp_path / "config.ini"
+    config_file.write_text("[general]\nverbose = true\nquiet = true\n")
+
+    with pytest.raises(
+        GenplisConfigError, match=r"\[general\] verbose and quiet cannot both be true"
+    ):
+        load_config(config_file)
+
+
 def test_examples_config_loads() -> None:
     """The config example linked from the docs must remain valid."""
     examples_dir = Path(__file__).resolve().parent.parent / "examples"

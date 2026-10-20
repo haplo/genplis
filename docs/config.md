@@ -70,6 +70,12 @@ genplis: error: /home/me/.config/genplis/config.ini: [tags] max_size: expected a
 | Option | Type | Default | CLI equivalent | Description |
 | --- | --- | --- | --- | --- |
 | `verbose` | boolean | `false` | `--verbose` / `--no-verbose` | Print config and database paths, skip decisions, parsed rules, and matching songs. |
+| `quiet` | boolean | `false` | `-q` / `--quiet` | Print only filter match counts and playlist creation. |
+
+`verbose = true` and `quiet = true` cannot be enabled at the same time. A
+command-line verbosity flag overrides the configured value, so
+`verbose = true` with `-q` runs quietly, and `quiet = true` with `-v` runs
+verbosely.
 
 ## `[collection]`
 

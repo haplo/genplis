@@ -12,7 +12,7 @@ from .config import TagsConfig
 from .exceptions import GenplisDBError
 from .files import get_last_modified
 from .json import GenplisJSONEncoder
-from .types import Tags
+from .types import Tags, Verbosity
 
 DB_NAME = "genplis.db"
 # Bump this when the way genplis extracts or stores tags changes.
@@ -147,7 +147,13 @@ def get_cache_status(cursor: sqlite3.Cursor, file_path: Path) -> CacheStatus:
     return CacheStatus.STALE
 
 
-def cache_tags_for_file(cursor: sqlite3.Cursor, file_path: Path, tags: Tags) -> None:
+def cache_tags_for_file(
+    cursor: sqlite3.Cursor,
+    file_path: Path,
+    tags: Tags,
+    *,
+    verbosity: Verbosity = Verbosity.NORMAL,
+) -> None:
     """Save given tags for a music file in DB.
 
     Caller is responsible for calling commit on the DB connection.
@@ -169,7 +175,8 @@ def cache_tags_for_file(cursor: sqlite3.Cursor, file_path: Path, tags: Tags) -> 
         """,
         (db_key, last_modified, json_tags, last_modified, json_tags),
     )
-    print(f"Updated cache for file: {file_path}")
+    if verbosity.shows_normal_output:
+        print(f"Updated cache for file: {file_path}")
 
 
 def remove_missing_files(

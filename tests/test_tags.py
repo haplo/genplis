@@ -10,7 +10,7 @@ from genplis.tags import (
     get_tag_size,
     get_tags,
 )
-from genplis.types import Tags
+from genplis.types import Tags, Verbosity
 
 
 class _FakeTinyTag:
@@ -187,7 +187,7 @@ def test_get_tags_verbose_explains_ignored_and_oversized_tags(
 ) -> None:
     tags = get_tags(
         file_mp3,
-        verbose=True,
+        Verbosity.VERBOSE,
         max_size=1,
         ignore=frozenset({"artist"}),
     )
@@ -208,7 +208,7 @@ def test_get_tags_verbose_explains_unsupported_and_unparseable_files(
     unsupported = tmp_path / "notes.txt"
     unsupported.write_text("not music\n", encoding="utf-8")
 
-    assert get_tags(unsupported, verbose=True) is None
+    assert get_tags(unsupported, Verbosity.VERBOSE) is None
     assert (
         f"Skipping {unsupported}: not supported by tinytag" in capsys.readouterr().out
     )
@@ -221,5 +221,5 @@ def test_get_tags_verbose_explains_unsupported_and_unparseable_files(
 
     monkeypatch.setattr("genplis.tags.TinyTag.get", fail_get)
 
-    assert get_tags(broken, verbose=True) is None
+    assert get_tags(broken, Verbosity.VERBOSE) is None
     assert f"Skipping {broken}: boom" in capsys.readouterr().out
