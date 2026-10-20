@@ -96,6 +96,15 @@ def create_files_table(
     """)
 
 
+def get_db_key(file_path: Path) -> str:
+    """Return the canonical path string used as the key in the files table.
+
+    Paths are stored as absolute paths, so every DB operation must use this
+    helper to look up the same key regardless of how the path was given.
+    """
+    return str(file_path.absolute())
+
+
 def is_cache_valid(cursor: sqlite3.Cursor, file_path: Path) -> bool | None:
     """True if the file is cached in DB and the entry is not stale.
 
@@ -107,13 +116,13 @@ def is_cache_valid(cursor: sqlite3.Cursor, file_path: Path) -> bool | None:
     Cached tags can then be retrieved with get_cached_tags.
 
     """
-    abs_file_path = file_path.absolute()
+    db_key = get_db_key(file_path)
     file_last_modified = get_last_modified(file_path)
 
     # Check if the file path already exists in the database
     cursor.execute(
         """SELECT last_modified FROM files WHERE path = ?""",
-        (str(abs_file_path),),
+        (db_key,),
     )
     row = cursor.fetchone()
     if row is None:
@@ -132,6 +141,7 @@ def cache_tags_for_file(cursor: sqlite3.Cursor, file_path: Path, tags: Tags) -> 
     file_path = file_path.absolute()
     last_modified = get_last_modified(file_path)
     json_tags = json.dumps(tags, cls=GenplisJSONEncoder)
+    db_key = get_db_key(file_path)
 
     # UPSERT: https://www.sqlite.org/lang_upsert.html
     # Attempt to insert entry on DB, if path already exists then update tags and
@@ -142,7 +152,7 @@ def cache_tags_for_file(cursor: sqlite3.Cursor, file_path: Path, tags: Tags) -> 
         ON CONFLICT(path) DO
         UPDATE SET last_modified=?, tags=?
         """,
-        (str(file_path), last_modified, json_tags, last_modified, json_tags),
+        (db_key, last_modified, json_tags, last_modified, json_tags),
     )
     print(f"Updated cache for file: {file_path}")
 
@@ -158,7 +168,7 @@ def get_cached_tags(cursor: sqlite3.Cursor, file_path: Path) -> Tags:
     """
     cursor.execute(
         """SELECT tags FROM files WHERE path = ?""",
-        (str(file_path),),
+        (get_db_key(file_path),),
     )
     row = cursor.fetchone()
     if row:

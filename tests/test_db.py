@@ -105,6 +105,27 @@ def test_cache_tags_for_file(genplis_db: sqlite3.Connection, file_mp3: Path) -> 
     ]
 
 
+def test_cache_lookup_with_relative_path(
+    genplis_db: sqlite3.Connection,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cached tags must be retrievable with a relative path.
+
+    Paths are stored as absolute paths, so all DB operations need to
+    normalize them the same way.
+    """
+    song = tmp_path / "song.mp3"
+    song.write_bytes(b"")
+    monkeypatch.chdir(tmp_path)
+
+    relative_song = Path(song.name)
+    cache_tags_for_file(genplis_db.cursor(), relative_song, {"a": "b"})
+
+    assert is_cache_valid(genplis_db.cursor(), relative_song) is True
+    assert get_cached_tags(genplis_db.cursor(), relative_song) == {"a": "b"}
+
+
 def test_cache_invalidated_on_version_change(
     genplis_db: sqlite3.Connection,
     file_mp3: Path,
