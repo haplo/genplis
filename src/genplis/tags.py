@@ -36,6 +36,8 @@ def get_tags(
 ) -> Tags | None:
     """Return music tags as a dictionary, or None if not a music file.
 
+    Also returns None when the file cannot be read or parsed.
+
     Tag names in ``ignore`` are dropped before size checking. Values whose
     combined UTF-8 encoded length exceeds ``max_size`` bytes are dropped as
     well; they are usually lyrics or long comments. A ``max_size`` of 0
@@ -50,7 +52,7 @@ def get_tags(
 
     try:
         raw_tags = TinyTag.get(file_path).as_dict()
-    except TinyTagException as exc:
+    except (TinyTagException, OSError) as exc:
         if verbosity.is_verbose:
             print(f"Skipping {file_path}: {exc}")
         return None

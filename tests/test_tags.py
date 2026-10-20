@@ -223,3 +223,22 @@ def test_get_tags_verbose_explains_unsupported_and_unparseable_files(
 
     assert get_tags(broken, Verbosity.VERBOSE) is None
     assert f"Skipping {broken}: boom" in capsys.readouterr().out
+
+
+def test_get_tags_skips_unreadable_file(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    unreadable = tmp_path / "unreadable.mp3"
+    unreadable.write_bytes(b"")
+    monkeypatch.setattr("genplis.tags.TinyTag.is_supported", lambda _path: True)
+
+    def fail_get(*_args: object, **_kwargs: object) -> None:
+        raise PermissionError("permission denied")
+
+    monkeypatch.setattr("genplis.tags.TinyTag.get", fail_get)
+
+    assert get_tags(unreadable) is None
+    assert get_tags(unreadable, Verbosity.VERBOSE) is None
+    assert f"Skipping {unreadable}: permission denied" in capsys.readouterr().out
