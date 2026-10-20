@@ -250,3 +250,16 @@ def test_get_cached_tags_success(genplis_db: sqlite3.Connection) -> None:
 def test_get_cached_tags_error_if_missing(genplis_db: sqlite3.Connection) -> None:
     with pytest.raises(GenplisDBError):
         get_cached_tags(genplis_db.cursor(), Path("/invalid/path/"))
+
+
+@pytest.mark.parametrize("stored_tags", ["not json", None])
+def test_get_cached_tags_error_if_data_is_invalid(
+    genplis_db: sqlite3.Connection, stored_tags: str | None
+) -> None:
+    genplis_db.execute(
+        "INSERT INTO files(path, last_modified, tags) VALUES (?, 0, ?)",
+        ("/some/path", stored_tags),
+    )
+
+    with pytest.raises(GenplisDBError, match="invalid cached tag data"):
+        get_cached_tags(genplis_db.cursor(), Path("/some/path"))

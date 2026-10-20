@@ -240,6 +240,9 @@ def get_cached_tags(cursor: sqlite3.Cursor, file_path: Path) -> Tags:
     )
     row = cursor.fetchone()
     if row:
-        return cast(Tags, json.loads(row[0]))
+        try:
+            return cast(Tags, json.loads(row[0]))
+        except (TypeError, json.JSONDecodeError) as exc:
+            raise GenplisDBError(f"{file_path}: invalid cached tag data") from exc
 
     raise GenplisDBError(f"{file_path} not found on DB")
