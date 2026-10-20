@@ -136,10 +136,11 @@ def process_directory(conn, cursor, directory, args):
     return all_tags, all_filters
 
 
-def process_file(conn, cursor, file, args):
+def process_file(conn, cursor, file, args) -> tuple[dict, list]:
     """Process a single file.
 
-    Returns a tuple in the form (tags, filters)
+    Returns a tuple in the form (tags, filters), where tags is a dictionary
+    and filters is always a list (empty for non-M3UG files).
 
     If it's an M3UG file, parse it as such and return its filters.
     See m3ug module.
@@ -161,12 +162,13 @@ def process_file(conn, cursor, file, args):
         # empty tags mean the file is not a supported music file and
         # should be ignored
         cached_tags = db.get_cached_tags(cursor, file)
-        return cached_tags, {}
+        return cached_tags, []
 
-    if tags := get_tags(file, args.verbose):
+    tags = get_tags(file, args.verbose)
+    if tags:
         db.cache_tags_for_file(cursor, file, tags)
         conn.commit()
-    return tags, {}
+    return tags or {}, []
 
 
 def filter_songs(files_and_tags, filter_file, rules, verbose: bool = False):
