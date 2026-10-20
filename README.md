@@ -187,7 +187,7 @@ run summary also includes a coverage report for Python 3.12.
 - [x] --exclude option
 - [x] Install as genplis command
 - [x] pre-commit
-- [ ] Tests
+- [x] Tests
   - [x] m3ug
   - [x] db
   - [x] tags

@@ -8,6 +8,10 @@ on:
 permissions:
   contents: read
 
+env:
+  # Keep this in sync with the exclude-newer window used to generate uv.lock.
+  UV_EXCLUDE_NEWER: "7 days"
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
