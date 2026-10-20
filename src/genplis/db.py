@@ -1,6 +1,7 @@
 import json
 import sqlite3
 from datetime import datetime
+from enum import StrEnum
 from pathlib import Path
 from typing import cast
 
@@ -16,6 +17,14 @@ from .types import Tags
 DB_NAME = "genplis.db"
 # Bump this when the way genplis extracts or stores tags changes.
 CACHE_SCHEMA_VERSION = 1
+
+
+class CacheStatus(StrEnum):
+    """State of the tag cache for a file, as found before processing it."""
+
+    MISS = "miss"  # file has no entry in the cache
+    STALE = "stale"  # file is cached, but it changed since it was cached
+    HIT = "hit"  # file is cached and the cache is up to date
 
 
 def get_cache_version(tags: TagsConfig | None = None) -> str:
@@ -105,13 +114,12 @@ def get_db_key(file_path: Path) -> str:
     return str(file_path.absolute())
 
 
-def is_cache_valid(cursor: sqlite3.Cursor, file_path: Path) -> bool | None:
-    """True if the file is cached in DB and the entry is not stale.
+def get_cache_status(cursor: sqlite3.Cursor, file_path: Path) -> CacheStatus:
+    """Check whether file_path is cached in DB and whether the entry is fresh.
 
-    False if file_path is in DB but the timestamp of the file is
-    more recent (i.e. cache is stale and shouldn't be used).
-
-    None if file_path is not in DB.
+    Returns CacheStatus.MISS if file_path is not in DB, CacheStatus.STALE if
+    the file is more recent than the cached entry (so the cache shouldn't be
+    used), and CacheStatus.HIT if the cached entry is up to date.
 
     Cached tags can then be retrieved with get_cached_tags.
 
@@ -126,10 +134,12 @@ def is_cache_valid(cursor: sqlite3.Cursor, file_path: Path) -> bool | None:
     )
     row = cursor.fetchone()
     if row is None:
-        return None
+        return CacheStatus.MISS
 
     cached_timestamp = row[0]  # int, UNIX timestamp
-    return file_last_modified <= cached_timestamp
+    if file_last_modified <= cached_timestamp:
+        return CacheStatus.HIT
+    return CacheStatus.STALE
 
 
 def cache_tags_for_file(cursor: sqlite3.Cursor, file_path: Path, tags: Tags) -> None:
@@ -160,7 +170,7 @@ def cache_tags_for_file(cursor: sqlite3.Cursor, file_path: Path, tags: Tags) -> 
 def get_cached_tags(cursor: sqlite3.Cursor, file_path: Path) -> Tags:
     """Retrieve cached tags for the given file.
 
-    Should have previously called is_cache_valid to check that the file is
+    Should have previously called get_cache_status to check that the file is
     actually cached and that the data is not stale.
 
     Will raise GenplisDBError if file_path is not actually on DB.

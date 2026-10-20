@@ -6,12 +6,13 @@ import pytest
 import genplis.db as db
 from genplis.config import TagsConfig
 from genplis.db import (
+    CacheStatus,
     cache_tags_for_file,
     create_files_table,
+    get_cache_status,
     get_cache_version,
     get_cached_tags,
     get_db_path,
-    is_cache_valid,
     setup_database_connection,
 )
 from genplis.exceptions import GenplisDBError
@@ -76,9 +77,9 @@ def test_db_connection_and_create(tmp_path: Path) -> None:
         conn.close()
 
 
-def test_is_cache_valid(genplis_db: sqlite3.Connection, file_mp3: Path) -> None:
+def test_get_cache_status(genplis_db: sqlite3.Connection, file_mp3: Path) -> None:
     # not present in DB
-    assert is_cache_valid(genplis_db.cursor(), file_mp3) is None
+    assert get_cache_status(genplis_db.cursor(), file_mp3) is CacheStatus.MISS
 
     # simulate file being cached
     timestamp = get_last_modified(file_mp3)
@@ -86,14 +87,14 @@ def test_is_cache_valid(genplis_db: sqlite3.Connection, file_mp3: Path) -> None:
         "INSERT INTO files(path, last_modified, tags) VALUES (?, ?, '{}')",
         [str(file_mp3), timestamp],
     )
-    assert is_cache_valid(genplis_db.cursor(), file_mp3) is True
+    assert get_cache_status(genplis_db.cursor(), file_mp3) is CacheStatus.HIT
 
     # manually make cached timestamp stale
     genplis_db.execute(
         "UPDATE files SET last_modified=last_modified-1 WHERE path=?",
         [str(file_mp3)],
     )
-    assert is_cache_valid(genplis_db.cursor(), file_mp3) is False
+    assert get_cache_status(genplis_db.cursor(), file_mp3) is CacheStatus.STALE
 
 
 def test_cache_tags_for_file(genplis_db: sqlite3.Connection, file_mp3: Path) -> None:
@@ -122,7 +123,7 @@ def test_cache_lookup_with_relative_path(
     relative_song = Path(song.name)
     cache_tags_for_file(genplis_db.cursor(), relative_song, {"a": "b"})
 
-    assert is_cache_valid(genplis_db.cursor(), relative_song) is True
+    assert get_cache_status(genplis_db.cursor(), relative_song) is CacheStatus.HIT
     assert get_cached_tags(genplis_db.cursor(), relative_song) == {"a": "b"}
 
 

@@ -1,3 +1,4 @@
+import os
 import re
 import shutil
 import sqlite3
@@ -7,7 +8,6 @@ from pathlib import Path
 import pytest
 from pytest import approx
 
-import genplis.core as core
 from genplis.config import (
     CollectionConfig,
     Config,
@@ -24,6 +24,7 @@ from genplis.core import (
     resolve_args,
     setup_argparse,
 )
+from genplis.db import CacheStatus
 from genplis.exceptions import GenplisConfigError, GenplisError
 from genplis.m3ug import (
     ContainsRuleNode,
@@ -39,7 +40,9 @@ def test_process_audio_file(
     file_mp3: Path,
 ) -> None:
     args = make_args(str(file_mp3))
-    tags, filters = process_file(genplis_db, genplis_db.cursor(), file_mp3, args)
+    tags, filters, cache_status = process_file(
+        genplis_db, genplis_db.cursor(), file_mp3, args
+    )
     assert tags == {
         "artist": ["Test Artist"],
         "bitrate": approx(127.99768145161289),
@@ -55,6 +58,7 @@ def test_process_audio_file(
         "title": ["Test"],
     }
     assert filters == []
+    assert cache_status is CacheStatus.MISS
 
 
 def test_process_m3ug_file(
@@ -63,32 +67,51 @@ def test_process_m3ug_file(
     file_m3ug: Path,
 ) -> None:
     args = make_args(str(file_m3ug))
-    tags, filters = process_file(genplis_db, genplis_db.cursor(), file_m3ug, args)
+    tags, filters, cache_status = process_file(
+        genplis_db, genplis_db.cursor(), file_m3ug, args
+    )
     assert tags == {}
     assert filters == [
         GreaterOrEqualRuleNode(NameNode("rating"), ValueNode(3)),
         ContainsRuleNode(NameNode("genre"), ValueNode("Metal")),
     ]
+    assert cache_status is CacheStatus.MISS
 
 
-def test_process_path_reports_stale_cache(
+def test_process_path_reports_cache_status(
     genplis_db: sqlite3.Connection,
     make_args: Callable[..., Args],
     file_mp3: Path,
+    tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A stale cache entry must be reported as stale.
+    """Each run must report the cache state found before parsing the file.
 
-    Regression test: the match statement had two `case True` arms, so a
-    stale entry (is_cache_valid returning False) printed nothing.
+    Regression test: the cache was checked after process_file had already
+    refreshed it, so it always reported "valid".
     """
-    monkeypatch.setattr(core.db, "is_cache_valid", lambda *_: False)
-    args = make_args(str(file_mp3))
+    song = tmp_path / file_mp3.name
+    shutil.copy2(file_mp3, song)
+    args = make_args(str(song))
+    cursor = genplis_db.cursor()
 
-    process_path(genplis_db, genplis_db.cursor(), args)
+    # First run: nothing cached yet, tags are parsed.
+    process_path(genplis_db, cursor, args)
+    assert "Cache status: not present" in capsys.readouterr().out
 
+    # Second run: tags come from the cache.
+    process_path(genplis_db, cursor, args)
+    assert "Cache status: valid" in capsys.readouterr().out
+
+    # Touch the file so the cached entry becomes stale, then run again.
+    mtime = song.stat().st_mtime + 10
+    os.utime(song, (mtime, mtime))
+    process_path(genplis_db, cursor, args)
     assert "Cache status: stale" in capsys.readouterr().out
+
+    # The stale entry was refreshed by the previous run.
+    process_path(genplis_db, cursor, args)
+    assert "Cache status: valid" in capsys.readouterr().out
 
 
 def test_process_file_error_if_dir(
@@ -131,7 +154,7 @@ def test_process_file_uses_config_tags(
 ) -> None:
     config = Config(tags=TagsConfig(ignore=frozenset({"artist", "genre"})))
     args = make_args(str(file_mp3), config=config)
-    tags, _ = process_file(genplis_db, genplis_db.cursor(), file_mp3, args)
+    tags, _, _ = process_file(genplis_db, genplis_db.cursor(), file_mp3, args)
 
     assert "artist" not in tags
     assert "genre" not in tags

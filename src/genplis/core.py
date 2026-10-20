@@ -17,6 +17,13 @@ from .m3ug import RuleNode, parse_m3ug
 from .tags import get_tags
 from .types import Tags
 
+# User-facing description of each cache state.
+CACHE_STATUS_MESSAGES = {
+    db.CacheStatus.MISS: "not present",
+    db.CacheStatus.STALE: "stale",
+    db.CacheStatus.HIT: "valid",
+}
+
 
 @dataclass(frozen=True, slots=True)
 class Args:
@@ -144,18 +151,10 @@ def process_path(conn: sqlite3.Connection, cursor: sqlite3.Cursor, args: Args) -
     if args.path.is_dir():
         process_directory(conn, cursor, args.path, args)
     elif args.path.is_file():
-        tags, filters = process_file(conn, cursor, args.path, args)
+        tags, filters, cache_status = process_file(conn, cursor, args.path, args)
         if tags:
             print(f"{args.path} detected as music file")
-
-            cache_status = db.is_cache_valid(cursor, args.path)
-            match cache_status:
-                case None:
-                    print("Cache status: not present")
-                case True:
-                    print("Cache status: valid")
-                case False:
-                    print("Cache status: stale")
+            print(f"Cache status: {CACHE_STATUS_MESSAGES[cache_status]}")
 
             print("Parsed tags:")
             for key, value in sorted(tags.items(), key=lambda t: t[0]):
@@ -204,7 +203,7 @@ def process_directory(
             continue
 
         if file.is_file():
-            tags, filters = process_file(conn, cursor, file, args)
+            tags, filters, _ = process_file(conn, cursor, file, args)
             if tags:
                 all_tags[file] = tags
             if filters:
@@ -234,17 +233,19 @@ def process_directory(
 
 def process_file(
     conn: sqlite3.Connection, cursor: sqlite3.Cursor, file: Path, args: Args
-) -> tuple[Tags, list[RuleNode]]:
+) -> tuple[Tags, list[RuleNode], db.CacheStatus]:
     """Process a single file.
 
-    Returns a tuple in the form (tags, filters), where tags is a dictionary
-    and filters is always a list (empty for non-M3UG files).
+    Returns a tuple in the form (tags, filters, cache_status), where tags is a
+    dictionary, filters is always a list (empty for non-M3UG files) and
+    cache_status is the state of the tag cache when the file was found.
 
     If it's an M3UG file, parse it as such and return its filters.
     See m3ug module.
 
     Music files are parsed with tinytag, detected tags are returned as a
-    dictionary.
+    dictionary. Up-to-date cached tags are reused instead of parsing again;
+    M3UG files are never cached, so they always report CacheStatus.MISS.
 
     """
     if not file.is_file():
@@ -253,14 +254,15 @@ def process_file(
     if file.suffix.lower() == ".m3ug":
         content = file.read_text()
         rules = parse_m3ug(content, str(file), args.verbose)
-        return {}, rules
+        return {}, rules, db.CacheStatus.MISS
 
-    if db.is_cache_valid(cursor, file):
+    cache_status = db.get_cache_status(cursor, file)
+    if cache_status is db.CacheStatus.HIT:
         # reuse cached tags from DB instead of parsing them again
         # empty tags mean the file is not a supported music file and
         # should be ignored
         cached_tags = db.get_cached_tags(cursor, file)
-        return cached_tags, []
+        return cached_tags, [], cache_status
 
     tags = get_tags(
         file,
@@ -271,7 +273,7 @@ def process_file(
     if tags:
         db.cache_tags_for_file(cursor, file, tags)
         conn.commit()
-    return tags or {}, []
+    return tags or {}, [], cache_status
 
 
 def filter_songs(
