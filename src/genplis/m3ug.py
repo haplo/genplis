@@ -86,7 +86,11 @@ class NameNode:
             # If you know of a rating tag that is missing feel free to open an
             # issue with a PR to add support for it.
             fmps_rating = normalize(tags.get("fmps_rating"))
-            if fmps_rating is not None and not isinstance(fmps_rating, list):
+            if isinstance(fmps_rating, list):
+                # normalize() only leaves lists with more than one item
+                logger.warning("Unexpected fmps_rating as list: %s", fmps_rating)
+                fmps_rating = fmps_rating[0]
+            if fmps_rating is not None:
                 # fmps_rating goes from 0.0 to 1.0 (5 stars)
                 normalized_rating = float(fmps_rating) * 5
                 return normalized_name, normalized_rating

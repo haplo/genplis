@@ -307,6 +307,22 @@ def test_contains_rule_list_value() -> None:
     assert not rules[0].apply({"genre": ["Metal", "Rock"]})
 
 
+def test_find_rating_from_single_item_fmps_rating_list() -> None:
+    name, value = NameNode("rating").find({"fmps_rating": ["0.8"]})
+    assert name == "rating"
+    assert value == pytest.approx(4.0)
+
+
+def test_find_rating_from_multi_item_fmps_rating_list(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    with caplog.at_level("WARNING", logger="genplis.m3ug"):
+        name, value = NameNode("rating").find({"fmps_rating": ["0.8", "0.9"]})
+    assert name == "rating"
+    assert value == pytest.approx(4.0)
+    assert "Unexpected fmps_rating as list" in caplog.text
+
+
 def test_multiple_rules() -> None:
     assert parse_m3ug("""
 # My favorite DANCE WITH THE DEAD songs
