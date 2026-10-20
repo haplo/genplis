@@ -25,6 +25,33 @@ def test_contains_rule_string_value():
     assert not rules[0].apply({"genre": "Synth; Electronic"})
 
 
+def test_contains_rule_quoted_string_value():
+    rules = parse_m3ug('genre ~= "Heavy Metal"')
+    assert rules == [
+        ContainsRuleNode(NameNode("genre"), ValueNode("Heavy Metal")),
+    ]
+    assert rules[0].apply({"genre": "Heavy Metal"})
+    assert rules[0].apply({"genre": ["Power Metal", "Heavy Metal"]})
+    assert not rules[0].apply({"genre": "Synthwave"})
+
+
+def test_equal_rule_single_quoted_string_value():
+    rules = parse_m3ug("artist = 'DANCE WITH THE DEAD'")
+    assert rules == [
+        EqualRuleNode(NameNode("artist"), ValueNode("DANCE WITH THE DEAD")),
+    ]
+    assert rules[0].apply({"artist": "DANCE WITH THE DEAD"})
+    assert not rules[0].apply({"artist": "DANCE WITH THE DEAD "})
+
+
+def test_quoted_numeric_value_is_string():
+    rules = parse_m3ug('rating = "4"')
+    assert rules == [
+        EqualRuleNode(NameNode("rating"), ValueNode("4")),
+    ]
+    assert not rules[0].apply({"rating": 4})
+
+
 def test_equal_rule_float_value():
     rules = parse_m3ug("rating = 4.5")
     assert rules == [

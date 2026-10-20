@@ -86,14 +86,19 @@ class ValueNode:
 
     @classmethod
     def build(cls, value, filename: str, line: int, verbose: bool = False):
+        if not isinstance(value, str):
+            raise GenplisM3UGException(f"Invalid value: {value}", filename, line)
+
+        value = value.strip()
+        # quoted values are always literal strings, even if they look numeric
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+            return cls(value[1:-1], verbose)
+
         if FLOAT_RE.match(value):
             return cls(float(value), verbose)
         elif INT_RE.match(value):
             return cls(int(value), verbose)
-        elif isinstance(value, str):
-            return cls(str(value), verbose)
-        else:
-            raise GenplisM3UGException("Invalid value: {value}", filename, line)
+        return cls(value, verbose)
 
     def normalize(self, raw) -> Value:
         return normalize(raw, self.verbose)
