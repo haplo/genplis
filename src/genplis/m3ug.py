@@ -171,6 +171,7 @@ class RuleNode:
         line: int,
         verbose: bool = False,
     ) -> RuleNode:
+        rule_cls: type[RuleNode]
         if operator == "=":
             rule_cls = EqualRuleNode
         elif operator == "!=":
