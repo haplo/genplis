@@ -16,6 +16,7 @@ from genplis.m3ug import (
     get_rating,
     parse_m3ug,
 )
+from genplis.types import Verbosity
 
 
 def test_contains_rule_string_value() -> None:
@@ -275,6 +276,21 @@ def test_not_equal_rule_string_value() -> None:
 def test_m3ug_exception_includes_location() -> None:
     error = GenplisM3UGException("Invalid filter syntax", "Favorites.m3ug", 7)
     assert str(error) == "Favorites.m3ug:7: Invalid filter syntax"
+
+
+def test_name_node_build_error_includes_name() -> None:
+    with pytest.raises(GenplisM3UGException, match="Invalid name: 42"):
+        NameNode.build(42, "filter.m3ug", 3)
+
+
+def test_verbose_parse_reports_line_numbers(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    parse_m3ug("# comment\n\nartist = x\n", verbosity=Verbosity.VERBOSE)
+
+    output = capsys.readouterr().out
+    assert "Ignoring line 1: comment" in output
+    assert "Ignoring line 2: empty" in output
 
 
 def test_invalid_input() -> None:

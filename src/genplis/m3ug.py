@@ -102,7 +102,7 @@ class NameNode:
     @classmethod
     def build(cls, name: object, filename: str, line: int) -> Self:
         if not isinstance(name, str):
-            raise GenplisM3UGException("Invalid name: {name}", filename, line)
+            raise GenplisM3UGException(f"Invalid name: {name}", filename, line)
         return cls(name)
 
     def find(self, tags: Mapping[str, TagValue]) -> tuple[str, TagValue]:
@@ -411,11 +411,11 @@ def parse_m3ug(
         # ignore comments
         if line.startswith("#"):
             if verbosity.is_verbose:
-                print("Ignoring line {n}: comment")
+                print(f"Ignoring line {n}: comment")
             continue
         elif not line.strip():
             if verbosity.is_verbose:
-                print("Ignoring line {n}: empty")
+                print(f"Ignoring line {n}: empty")
             continue
 
         components = line.split(" ", 2)
