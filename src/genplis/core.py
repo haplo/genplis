@@ -90,10 +90,15 @@ def process_path(conn, cursor, args):
         sys.exit(1)
 
 
-def process_directory(conn, cursor, directory, args):
+def process_directory(conn, cursor, directory, args) -> tuple[dict, dict]:
     """Traverse the directory and process all files.
 
     See process_file for how each file is handled.
+
+    Returns a tuple in the form (all_tags, all_filters), both keyed by file
+    path: all_tags maps music files to their tags, all_filters maps M3UG
+    files to their parsed rules. A playlist is generated for each M3UG file
+    that matches at least one song.
 
     """
     if not directory.is_dir():
