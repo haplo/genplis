@@ -42,7 +42,6 @@ isort.known-first-party = ["genplis"]
 # only until tinytag is removed from src
 isort.known-third-party = ["tinytag"]
 select = ["ANN", "ASYNC", "E4", "E7", "E9", "F", "I", "S", "UP"]
-ignore = ["ANN101", "ANN102"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S101"]
@@ -54,7 +53,7 @@ python-version = "3.12"
 include = ["src", "tests"]
 
 [tool.uv]
-upgrade-package = ["ty"]
+upgrade-package = ["ty", "ruff"]
 
 [dependency-groups]
 dev = [
@@ -62,6 +61,6 @@ dev = [
     "pytest>=8.3.3",
     "python-lsp-ruff>=2.2.2",
     "python-lsp-server>=1.12.0",
-    "ruff>=0.7.0",
+    "ruff>=0.17.0",
     "ty>=0.0.86",
 ]
