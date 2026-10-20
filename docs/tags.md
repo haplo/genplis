@@ -163,6 +163,7 @@ Rules:
 - A raw `rating` always wins over `fmps_rating`.
 - The derived rating only exists when `fmps_rating` exists and is not ignored
   by `[tags] ignore`.
+- A non-numeric `fmps_rating` is ignored; no derived rating is produced.
 - If neither tag is present, there is no rating; `rating >= 4` does not match.
 - If your files use a 0–100 or 0–255 scale and you cannot change it, compare
   against that scale (for example `rating >= 80`) or use a player/tagger that

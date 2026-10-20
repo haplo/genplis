@@ -73,7 +73,14 @@ def get_rating(tags: Mapping[str, TagValue]) -> float | None:
         fmps_rating = fmps_rating[0]
     if fmps_rating is not None:
         # fmps_rating goes from 0.0 to 1.0 (5 stars)
-        return float(fmps_rating) * 5
+        if isinstance(fmps_rating, bool):
+            logger.warning("Ignoring non-numeric fmps_rating: %r", fmps_rating)
+            return None
+        try:
+            return float(fmps_rating) * 5
+        except (TypeError, ValueError):
+            logger.warning("Ignoring non-numeric fmps_rating: %r", fmps_rating)
+            return None
     return None
 
 

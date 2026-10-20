@@ -324,6 +324,18 @@ def test_get_rating_from_fmps_rating() -> None:
     assert get_rating({"fmps_rating": ["0.8"]}) == pytest.approx(4.0)
 
 
+def test_get_rating_ignores_non_numeric_fmps_rating(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    with caplog.at_level("WARNING", logger="genplis.m3ug"):
+        assert get_rating({"fmps_rating": ["abc"]}) is None
+        assert get_rating({"fmps_rating": [""]}) is None
+        assert get_rating({"fmps_rating": ["0,8"]}) is None
+        assert get_rating({"fmps_rating": ["abc", "0.8"]}) is None
+        assert get_rating({"fmps_rating": True}) is None
+    assert "Ignoring non-numeric fmps_rating" in caplog.text
+
+
 def test_get_rating_without_rating_tags() -> None:
     assert get_rating({"title": ["Test"]}) is None
 
