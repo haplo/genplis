@@ -1,6 +1,5 @@
 import logging
 import re
-from typing import TypeGuard
 
 from .exceptions import GenplisM3UGException
 
@@ -13,14 +12,13 @@ FLOAT_RE = re.compile(r"^\d+\.\d+$")
 INT_RE = re.compile(r"^\d+$")
 
 
-def is_number(value: Value) -> TypeGuard[int | float]:
+def is_number(value: Value) -> bool:
     return isinstance(value, int | float)
 
 
-def normalize(raw: Value, verbose: bool = False) -> Value:
+def normalize(raw, verbose: bool = False) -> Value:
     if isinstance(raw, list):
         # tinytag transforms some values into lists in its as_dict() method
-        # we want to extract values from 1-item lists
         length = len(raw)
         if length == 0:
             return None
@@ -51,7 +49,7 @@ class NameNode:
             raise GenplisM3UGException("Invalid name: {name}", filename, line)
         return cls(name, verbose)
 
-    def find(self, tags) -> tuple[str, str | float | None]:
+    def find(self, tags) -> tuple[str, str | None]:
         normalized_name = self.name.lower()
         # if there is a tag with the exact (case-insensitive) name, use it
         if raw_value := tags.get(normalized_name):
@@ -66,11 +64,7 @@ class NameNode:
             fmps_rating = normalize(tags.get("fmps_rating"))
             if fmps_rating is not None:
                 # fmps_rating goes from 0.0 to 1.0 (5 stars)
-                if isinstance(fmps_rating, list):
-                    print(f"WARNING: unexpected fmps_rating as list: {fmps_rating}")
-                    normalized_rating = float(fmps_rating[0]) * 5
-                else:
-                    normalized_rating = float(fmps_rating) * 5
+                normalized_rating = float(fmps_rating) * 5
                 return normalized_name, normalized_rating
         # default case is no match, no value found
         return normalized_name, None
@@ -130,7 +124,6 @@ class RuleNode:
         line: int,
         verbose: bool = False,
     ):
-        rule_cls: type[RuleNode]
         if operator == "=":
             rule_cls = EqualRuleNode
         elif operator == "!=":
@@ -177,7 +170,7 @@ class EqualRuleNode(RuleNode):
 
     def check(self, tag_value: Value) -> bool:
         if isinstance(tag_value, list):
-            return any(v == self.value_node.value for v in tag_value)
+            any(v == self.value_node.value for v in tag_value)
         else:
             return tag_value == self.value_node.value
 
@@ -187,7 +180,7 @@ class NotEqualRuleNode(RuleNode):
 
     def check(self, tag_value: Value) -> bool:
         if isinstance(tag_value, list):
-            return any(v != self.value_node.value for v in tag_value)
+            any(v != self.value_node.value for v in tag_value)
         else:
             return tag_value != self.value_node.value
 
@@ -198,11 +191,6 @@ class ContainsRuleNode(RuleNode):
     def check(self, tag_value: Value) -> bool:
         if tag_value is None or is_number(tag_value):
             return False
-
-        # TypeGuard doesn't work in the negative case
-        # https://github.com/python/typing/discussions/1013
-        assert not isinstance(tag_value, int | float)  # noqa: S101
-
         return self.value_node.value in tag_value
 
     @classmethod
@@ -219,12 +207,12 @@ class LesserRuleNode(RuleNode):
     def check(self, tag_value: Value) -> bool:
         if isinstance(tag_value, list):
             return any(self.check(v) for v in tag_value)
-        elif is_number(tag_value) and is_number(self.value_node.value):
+        elif is_number(tag_value):
             return tag_value < self.value_node.value
         elif isinstance(tag_value, str):
-            if INT_RE.match(tag_value) and is_number(self.value_node.value):
+            if INT_RE.match(tag_value):
                 return int(tag_value) < self.value_node.value
-            elif FLOAT_RE.match(tag_value) and is_number(self.value_node.value):
+            elif FLOAT_RE.match(tag_value):
                 return float(tag_value) < self.value_node.value
         return False
 
@@ -244,12 +232,12 @@ class LesserOrEqualRuleNode(RuleNode):
     def check(self, tag_value: Value) -> bool:
         if isinstance(tag_value, list):
             return any(self.check(v) for v in tag_value)
-        elif is_number(tag_value) and is_number(self.value_node.value):
+        elif is_number(tag_value):
             return tag_value <= self.value_node.value
         elif isinstance(tag_value, str):
-            if INT_RE.match(tag_value) and is_number(self.value_node.value):
+            if INT_RE.match(tag_value):
                 return int(tag_value) <= self.value_node.value
-            elif FLOAT_RE.match(tag_value) and is_number(self.value_node.value):
+            elif FLOAT_RE.match(tag_value):
                 return float(tag_value) <= self.value_node.value
         return False
 
@@ -269,12 +257,12 @@ class GreaterRuleNode(RuleNode):
     def check(self, tag_value: Value) -> bool:
         if isinstance(tag_value, list):
             return any(self.check(v) for v in tag_value)
-        elif is_number(tag_value) and is_number(self.value_node.value):
+        elif is_number(tag_value):
             return tag_value > self.value_node.value
         elif isinstance(tag_value, str):
-            if INT_RE.match(tag_value) and is_number(self.value_node.value):
+            if INT_RE.match(tag_value):
                 return int(tag_value) > self.value_node.value
-            elif FLOAT_RE.match(tag_value) and is_number(self.value_node.value):
+            elif FLOAT_RE.match(tag_value):
                 return float(tag_value) > self.value_node.value
         return False
 
@@ -294,12 +282,12 @@ class GreaterOrEqualRuleNode(RuleNode):
     def check(self, tag_value: Value) -> bool:
         if isinstance(tag_value, list):
             return any(self.check(v) for v in tag_value)
-        elif is_number(tag_value) and is_number(self.value_node.value):
+        elif is_number(tag_value):
             return tag_value >= self.value_node.value
         elif isinstance(tag_value, str):
-            if INT_RE.match(tag_value) and is_number(self.value_node.value):
+            if INT_RE.match(tag_value):
                 return int(tag_value) >= self.value_node.value
-            elif FLOAT_RE.match(tag_value) and is_number(self.value_node.value):
+            elif FLOAT_RE.match(tag_value):
                 return float(tag_value) >= self.value_node.value
         return False
 
