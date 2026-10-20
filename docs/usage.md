@@ -39,8 +39,8 @@ Every option with an on/off form overrides the corresponding config setting.
 `PATH` is optional in two situations:
 
 1. `[collection] path` is set in the config file. Running `genplis` with no
-   arguments then scans that collection, which is convenient for cron jobs and
-   systemd timers.
+   arguments then scans that collection, which is convenient for
+   [scheduled runs](https://github.com/haplo/genplis/blob/main/docs/scheduling.md).
 2. `--clean` is used without a path, which cleans the **whole** database
    instead of a subtree.
 
@@ -177,4 +177,5 @@ exclusion decisions, parsed rules, and the list of matching songs.
 - [M3UG reference](https://github.com/haplo/genplis/blob/main/docs/m3ug.md)
 - [Configuration reference](https://github.com/haplo/genplis/blob/main/docs/config.md)
 - [Tags](https://github.com/haplo/genplis/blob/main/docs/tags.md)
+- [Scheduling runs](https://github.com/haplo/genplis/blob/main/docs/scheduling.md)
 - [Example filters](https://github.com/haplo/genplis/tree/main/examples)

@@ -170,7 +170,7 @@ from genplis.exceptions import GenplisError
 - Use docstrings for all public functions and classes
 - Keep comments concise and relevant
 - User documentation lives in `docs/`: `usage.md`, `m3ug.md`, `config.md`,
-  `tags.md`, `dev.md`
+  `tags.md`, `scheduling.md`, `dev.md`
 - Update README.md and the relevant docs/ page for user-facing changes; keep
   README short and link to docs with absolute GitHub URLs
 - Use TODO comments in code for future improvements
@@ -212,4 +212,4 @@ from genplis.exceptions import GenplisError
 - `tests/`: Test files and fixtures
 - `examples/`: Sample M3UG filter files and the annotated `config.ini`
 - `docs/`: User and developer documentation (`usage.md`, `m3ug.md`,
-  `config.md`, `tags.md`, `dev.md`)
+  `config.md`, `tags.md`, `scheduling.md`, `dev.md`)

@@ -88,7 +88,8 @@ path = ~/Music
 ```
 
 Relative paths are resolved against the config file's directory. This is what
-lets a timer or service run plain `genplis` with no arguments.
+lets a timer or service run plain `genplis` with no arguments; see [Running
+genplis on a schedule](https://github.com/haplo/genplis/blob/main/docs/scheduling.md).
 
 ### `exclude`
 

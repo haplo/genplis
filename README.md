@@ -71,6 +71,7 @@ details and the common pitfalls.
 | [Configuration](https://github.com/haplo/genplis/blob/main/docs/config.md) | Config file location, every setting, precedence, annotated example |
 | [M3UG reference](https://github.com/haplo/genplis/blob/main/docs/m3ug.md) | Filter language: rules, operators, values, examples, limitations |
 | [Tags](https://github.com/haplo/genplis/blob/main/docs/tags.md) | Available tag names, calculated audio properties, rating handling |
+| [Scheduling](https://github.com/haplo/genplis/blob/main/docs/scheduling.md) | Running genplis daily with systemd or cron |
 | [Development](https://github.com/haplo/genplis/blob/main/docs/dev.md) | Setup, tests, pre-commit, typing, CI, internals, roadmap |
 | [Examples](https://github.com/haplo/genplis/tree/main/examples) | Ready-to-copy `.m3ug` filters and `config.ini` |
 

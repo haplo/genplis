@@ -231,6 +231,7 @@ User docs are Markdown files under `docs/`:
 | `m3ug.md` | users | filter language, operators, examples, limitations |
 | `config.md` | users | every config setting and precedence |
 | `tags.md` | users | tag names, calculated properties, rating |
+| `scheduling.md` | users | running genplis daily with systemd or cron |
 | `dev.md` | contributors | this page |
 
 Guidelines:
@@ -281,7 +282,7 @@ pending; see the roadmap.
     - [x] Test on every supported Python version
 - [x] Documentation
 - [ ] Publish to PyPI! 🚀
-- [ ] Example systemd files and instructions on how to run periodically
+- [x] Example cron and systemd files and instructions on how to run periodically
 - [ ] Improve M3U generation
   - [x] Include original M3UG content as comment
   - [ ] Support [basic extended M3U playlist tags](https://datatracker.ietf.org/doc/html/rfc8216#section-4.3)
