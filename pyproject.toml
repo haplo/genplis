@@ -32,10 +32,6 @@ testpaths = ["tests"]
 
 [tool.ruff]
 target-version = "py312"
-# Exclude a variety of commonly ignored directories.
-extend-exclude = [
-    "src/tinytag/**",
-]
 
 [tool.ruff.lint]
 isort.known-first-party = ["genplis"]
