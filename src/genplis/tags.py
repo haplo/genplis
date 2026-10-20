@@ -1,4 +1,3 @@
-import sys
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Final
@@ -37,9 +36,12 @@ def get_tags(
 ) -> Tags | None:
     """Return music tags as a dictionary, or None if not a music file.
 
-    Tag names in ``ignore`` are dropped before size checking. Values larger
-    than ``max_size`` bytes are dropped as well; they are usually images or
-    lyrics.
+    Tag names in ``ignore`` are dropped before size checking. Values whose
+    combined UTF-8 encoded length exceeds ``max_size`` bytes are dropped as
+    well; they are usually lyrics or long comments. A ``max_size`` of 0
+    disables size filtering.
+
+    Calculated audio properties are never dropped by the size limit.
     """
     if not TinyTag.is_supported(file_path):
         if verbose:
@@ -57,15 +59,22 @@ def get_tags(
     ignored = {name.lower() for name in ignore}
 
     # Sanitize tags:
-    # Remove ignored and large tags, they are likely images or lyrics
+    # Remove ignored and large tags, they are likely lyrics or long comments
     for key, value in raw_tags.items():
         if key.lower() in ignored:
             if verbose:
                 print(f"Removing tag {key} because it is configured to be ignored")
             continue
-        if get_tag_size(value) > max_size:
+        if (
+            max_size > 0
+            and key not in AUDIO_PROPERTY_TAGS
+            and get_tag_size(value) > max_size
+        ):
             if verbose:
-                print(f"Removing tag {key} because it's larger than {max_size} bytes")
+                print(
+                    f"Removing tag {key} because it's larger than "
+                    f"{max_size} UTF-8 bytes"
+                )
             continue
         tags[key] = value
     return tags
@@ -81,6 +90,12 @@ def get_audio_property_tags(tags: Mapping[str, TagValue]) -> Tags:
 
 
 def get_tag_size(value: object) -> int:
+    """Return the UTF-8 encoded size of a tag value in bytes.
+
+    Multi-valued tags are measured as the sum of their values.
+    """
     if isinstance(value, list):
-        return sum(get_tag_size(v) for v in value)
-    return sys.getsizeof(value)
+        return sum(get_tag_size(item) for item in value)
+    if isinstance(value, str):
+        return len(value.encode("utf-8"))
+    return len(str(value).encode("utf-8"))

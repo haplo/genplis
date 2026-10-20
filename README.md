@@ -110,7 +110,10 @@ exclude =
     \.tmp$
 
 [tags]
-# Tag values larger than this many bytes are discarded.
+# Discard tag values whose combined UTF-8 encoded length exceeds this many
+# bytes. Values exactly at the limit are kept. Set to 0 to disable the
+# limit. Calculated values such as filename and filesize are never discarded
+# by this limit.
 max_size = 1000
 
 # Tag names to discard before caching and filtering, one per line.

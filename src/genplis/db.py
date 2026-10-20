@@ -16,7 +16,7 @@ from .types import Tags
 
 DB_NAME = "genplis.db"
 # Bump this when the way genplis extracts or stores tags changes.
-CACHE_SCHEMA_VERSION = 1
+CACHE_SCHEMA_VERSION = 2
 
 
 class CacheStatus(StrEnum):

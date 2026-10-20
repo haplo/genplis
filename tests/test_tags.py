@@ -4,7 +4,29 @@ import pytest
 from pytest import approx
 from tinytag import TinyTagException
 
-from genplis.tags import get_audio_property_tags, get_tag_size, get_tags
+from genplis.tags import (
+    AUDIO_PROPERTY_TAGS,
+    get_audio_property_tags,
+    get_tag_size,
+    get_tags,
+)
+from genplis.types import Tags
+
+
+class _FakeTinyTag:
+    def __init__(self, raw_tags: Tags) -> None:
+        self._raw_tags = raw_tags
+
+    def as_dict(self) -> Tags:
+        return self._raw_tags
+
+
+def _patch_tinytag(monkeypatch: pytest.MonkeyPatch, raw_tags: Tags) -> None:
+    monkeypatch.setattr("genplis.tags.TinyTag.is_supported", lambda _path: True)
+    monkeypatch.setattr(
+        "genplis.tags.TinyTag.get",
+        lambda _path: _FakeTinyTag(raw_tags),
+    )
 
 
 def test_get_tags_mp3(file_mp3: Path) -> None:
@@ -61,12 +83,19 @@ def test_get_audio_property_tags() -> None:
 
 
 def test_get_tag_size() -> None:
-    assert get_tag_size(None) == 16
-    assert get_tag_size(2) == 28
-    assert get_tag_size(128.0) == 24
-    assert get_tag_size("") == 41
-    assert get_tag_size("DANCE WITH THE DEAD") == 60
-    assert get_tag_size(["Synthwave", "Retrowave", "Electronic"]) == 151
+    assert get_tag_size(None) == 4
+    assert get_tag_size(2) == 1
+    assert get_tag_size(128.0) == 5
+    assert get_tag_size("") == 0
+    assert get_tag_size("DANCE WITH THE DEAD") == 19
+    assert get_tag_size(["Synthwave", "Retrowave", "Electronic"]) == 28
+
+
+def test_get_tag_size_counts_utf8_bytes() -> None:
+    assert get_tag_size("\u03b1") == 2
+    assert get_tag_size("\u4e00") == 3
+    assert get_tag_size("\U0001f600") == 4
+    assert get_tag_size(["\u03b1", "abc"]) == 5
 
 
 def test_get_tags_invalid_file(tmp_path: Path) -> None:
@@ -85,10 +114,64 @@ def test_get_tags_respects_ignore_list(file_mp3: Path) -> None:
     assert "title" in tags
 
 
-def test_get_tags_respects_max_size(file_mp3: Path) -> None:
-    tags = get_tags(file_mp3, max_size=0)
+def test_get_tags_respects_max_size(monkeypatch: pytest.MonkeyPatch) -> None:
+    raw_tags: Tags = {
+        "exact": ["a" * 6],
+        "over": ["a" * 7],
+        "multi": ["abc", "def"],
+    }
+    _patch_tinytag(monkeypatch, raw_tags)
 
-    assert tags == {}
+    tags = get_tags(Path("song.mp3"), max_size=6)
+
+    assert tags == {
+        "exact": ["a" * 6],
+        "multi": ["abc", "def"],
+    }
+
+
+def test_get_tags_max_size_counts_utf8_bytes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    raw_tags: Tags = {
+        "fits": ["\u03b1" * 3],
+        "too_big": ["\u03b1" * 4],
+    }
+    _patch_tinytag(monkeypatch, raw_tags)
+
+    tags = get_tags(Path("song.mp3"), max_size=6)
+
+    assert tags == {"fits": ["\u03b1" * 3]}
+
+
+def test_get_tags_max_size_zero_disables_filtering(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    raw_tags: Tags = {"title": ["x" * 2000]}
+    _patch_tinytag(monkeypatch, raw_tags)
+
+    assert get_tags(Path("song.mp3"), max_size=0) == raw_tags
+
+
+def test_get_tags_size_limit_ignores_audio_properties(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    long_path = "/music/" + "x" * 2000 + ".mp3"
+    raw_tags: Tags = {
+        "filename": long_path,
+        "lyrics": ["y" * 2000],
+    }
+    _patch_tinytag(monkeypatch, raw_tags)
+
+    assert get_tags(Path("song.mp3"), max_size=100) == {"filename": long_path}
+    assert (
+        get_tags(
+            Path("song.mp3"),
+            max_size=100,
+            ignore=frozenset({"filename"}),
+        )
+        == {}
+    )
 
 
 def test_get_tags_ignore_is_case_insensitive(file_mp3: Path) -> None:
@@ -105,14 +188,16 @@ def test_get_tags_verbose_explains_ignored_and_oversized_tags(
     tags = get_tags(
         file_mp3,
         verbose=True,
-        max_size=0,
+        max_size=1,
         ignore=frozenset({"artist"}),
     )
 
     output = capsys.readouterr().out
-    assert tags == {}
+    assert tags is not None
+    assert set(tags) <= AUDIO_PROPERTY_TAGS
+    assert "title" not in tags
     assert "Removing tag artist because it is configured to be ignored" in output
-    assert "because it's larger than 0 bytes" in output
+    assert "because it's larger than 1 UTF-8 bytes" in output
 
 
 def test_get_tags_verbose_explains_unsupported_and_unparseable_files(
