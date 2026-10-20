@@ -164,6 +164,8 @@ class RuleNode:
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, RuleNode):
             return NotImplemented
+        if type(self) is not type(other):
+            return False
         return self.name_node == other.name_node and self.value_node == other.value_node
 
     def __repr__(self) -> str:

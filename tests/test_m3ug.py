@@ -58,13 +58,17 @@ def test_quoted_numeric_value_is_string() -> None:
 def test_equal_rule_float_value() -> None:
     rules = parse_m3ug("rating = 4.5")
     assert rules == [
-        NotEqualRuleNode(NameNode("rating"), ValueNode(4.5)),
+        EqualRuleNode(NameNode("rating"), ValueNode(4.5)),
     ]
     assert rules[0].apply({"rating": 4.5})
     assert not rules[0].apply({"rating": 3.5})
     assert not rules[0].apply({"rating": "string for some reason"})
     assert not rules[0].apply({"rating": None})
     assert not rules[0].apply({})
+
+
+def test_rules_with_different_operators_are_not_equal() -> None:
+    assert parse_m3ug("rating = 4")[0] != parse_m3ug("rating != 4")[0]
 
 
 def test_equal_rule_integer_value() -> None:
