@@ -1001,11 +1001,11 @@ def test_resolve_args_allows_clean_without_path() -> None:
     assert args.clean is True
 
 
-def test_resolve_args_clean_uses_config_path() -> None:
+def test_resolve_args_clean_without_path_ignores_config_path() -> None:
     config = Config(collection=CollectionConfig(path=Path("/music")))
     args = resolve_args(setup_argparse().parse_args(["--clean"]), config)
 
-    assert args.path == Path("/music")
+    assert args.path is None
     assert args.clean is True
 
 

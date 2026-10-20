@@ -183,11 +183,12 @@ def resolve_args(args: argparse.Namespace, config: Config) -> Args:
     """
     if args.path is not None:
         path = args.path
+    elif args.clean:
+        # Cleaning without a CLI path removes entries from the whole database,
+        # even when a collection path is configured.
+        path = None
     elif config.collection.path is not None:
         path = config.collection.path
-    elif args.clean:
-        # Cleaning without a path removes entries from the whole database.
-        path = None
     else:
         raise GenplisConfigError(
             "PATH is required unless [collection] path is set in the config file"

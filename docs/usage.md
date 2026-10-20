@@ -154,6 +154,9 @@ Without a path, the whole database is cleaned:
 uv run genplis --clean
 ```
 
+This ignores `[collection] path` when it is configured. To clean only the
+configured collection, pass its path explicitly (`genplis --clean /path`).
+
 Cleaning prints how many entries were removed and how much disk space was
 reclaimed. The database is vacuumed only when something was removed, and
 vacuuming can take a while and temporarily needs free disk space roughly the
