@@ -95,7 +95,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "psutil", specifier = ">=6.0.0" },
-    { name = "tinytag", specifier = ">=2.0.0" },
+    { name = "tinytag", specifier = ">=2.3.2,<2.4" },
     { name = "xdg-base-dirs", specifier = ">=6.0.2" },
 ]
 
@@ -339,11 +339,11 @@ wheels = [
 
 [[package]]
 name = "tinytag"
-version = "2.0.0"
+version = "2.3.2"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/21/7a/04f50e2c660862b9929a06d710968b2520ae1bf215ed57a9972065d0aeef/tinytag-2.0.0.tar.gz", hash = "sha256:d041f53d15553bb148549bfbc7feab445caf7105ba95fa2ecb9827bb06b62275", size = 35367, upload-time = "2024-11-03T15:25:06.262Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/38/0f/fae085b7f19fe0c67b68e6d70098ac6cd046cc498f253f5ee56a3dd03bbc/tinytag-2.3.2.tar.gz", hash = "sha256:021d711cdbdbf840d3b67b976cb34dadc58d2fcfd490eb74ef9602b37b991414", size = 47353, upload-time = "2026-09-07T17:46:08.886Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/78/60/5440472b05e761d703240e222f7451c86eaca9ae66bf7c66defb26e76772/tinytag-2.0.0-py3-none-any.whl", hash = "sha256:971b9dceae2d1de73b5e8300639ea0b41454633b899426e702aed15f0e72a9b4", size = 30734, upload-time = "2024-11-03T15:25:04.598Z" },
+    { url = "https://files.pythonhosted.org/packages/6b/54/d378858d14e5c5c7b921cb9ffccf27be3d34f3d6d010c57404ddd634685d/tinytag-2.3.2-py3-none-any.whl", hash = "sha256:ebaf957915266b9c20414a10f8c5170a345aa039a794650d39d66e7d6b96199f", size = 37171, upload-time = "2026-09-07T17:46:07.434Z" },
 ]
 
 [[package]]

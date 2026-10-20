@@ -21,6 +21,21 @@ def is_number(value: object) -> TypeGuard[int | float]:
     return isinstance(value, int | float)
 
 
+def values_equal(tag_value: TagValue, expected: RuleValue) -> bool:
+    """Compare a tag value with a rule value.
+
+    tinytag 2.3 stores numeric metadata such as ``track`` and ``disc`` as
+    strings inside lists, so compare numeric strings numerically when the
+    rule value is a number.
+    """
+    if is_number(expected) and isinstance(tag_value, str):
+        if INT_RE.match(tag_value):
+            return int(tag_value) == expected
+        if FLOAT_RE.match(tag_value):
+            return float(tag_value) == expected
+    return tag_value == expected
+
+
 def normalize(raw: TagValue, verbose: bool = False) -> TagValue:
     if isinstance(raw, list):
         # tinytag transforms some values into lists in its as_dict() method
@@ -204,8 +219,8 @@ class EqualRuleNode(RuleNode):
 
     def check(self, tag_value: TagValue) -> bool:
         if isinstance(tag_value, list):
-            return any(v == self.value_node.value for v in tag_value)
-        return tag_value == self.value_node.value
+            return any(values_equal(v, self.value_node.value) for v in tag_value)
+        return values_equal(tag_value, self.value_node.value)
 
 
 class NotEqualRuleNode(RuleNode):
@@ -213,8 +228,8 @@ class NotEqualRuleNode(RuleNode):
 
     def check(self, tag_value: TagValue) -> bool:
         if isinstance(tag_value, list):
-            return all(v != self.value_node.value for v in tag_value)
-        return tag_value != self.value_node.value
+            return all(not values_equal(v, self.value_node.value) for v in tag_value)
+        return not values_equal(tag_value, self.value_node.value)
 
 
 class ContainsRuleNode(RuleNode):
@@ -227,7 +242,7 @@ class ContainsRuleNode(RuleNode):
         if isinstance(tag_value, str):
             return expected in tag_value
         if isinstance(tag_value, list):
-            return expected in tag_value
+            return any(expected in v for v in tag_value)
         return False
 
     @classmethod

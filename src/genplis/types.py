@@ -1,4 +1,4 @@
 """Shared type aliases."""
 
-type TagValue = str | float | int | list[str] | None
+type TagValue = str | float | int | bool | list[str] | None
 type Tags = dict[str, TagValue]

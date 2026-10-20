@@ -1,7 +1,7 @@
 import sys
 from pathlib import Path
 
-from tinytag import TinyTag
+from tinytag import TinyTag, TinyTagException
 
 from .types import Tags
 
@@ -15,7 +15,12 @@ def get_tags(file_path: Path, verbose: bool = False) -> Tags | None:
             print(f"Skipping {file_path}: not supported by tinytag")
         return None
 
-    raw_tags = TinyTag.get(file_path).as_dict()
+    try:
+        raw_tags = TinyTag.get(file_path).as_dict()
+    except TinyTagException as exc:
+        if verbose:
+            print(f"Skipping {file_path}: {exc}")
+        return None
     tags: Tags = {}
 
     # Sanitize tags:

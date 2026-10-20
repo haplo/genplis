@@ -5,6 +5,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 import pytest
+from pytest import approx
 
 from genplis.core import process_directory, process_file
 from genplis.exceptions import GenplisError
@@ -25,13 +26,15 @@ def test_process_audio_file(
     tags, filters = process_file(genplis_db, genplis_db.cursor(), file_mp3, args)
     assert tags == {
         "artist": ["Test Artist"],
-        "bitrate": 127.488,
+        "bitrate": approx(127.99768145161289),
         "channels": 2,
-        "duration": 3.2653061224489797,
+        "duration": approx(3.239183673469388),
         "encoder_settings": ["Lavf57.83.100"],
         "filename": "/home/fidel/Code/genplis/tests/files/test.mp3",
         "filesize": 53235,
         "genre": ["Synthwave; Retrowave; Electronic"],
+        "is_lossless": False,
+        "mime_type": "audio/mpeg",
         "samplerate": 44100,
         "title": ["Test"],
     }

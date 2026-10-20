@@ -7,7 +7,7 @@ authors = [
 ]
 dependencies = [
     "psutil>=6.0.0",
-    "tinytag>=2.0.0",
+    "tinytag>=2.3.2,<2.4",
     "xdg-base-dirs>=6.0.2",
 ]
 readme = "README.md"

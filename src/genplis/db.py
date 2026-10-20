@@ -4,6 +4,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import cast
 
+import tinytag
 from xdg_base_dirs import xdg_cache_home
 
 from .exceptions import GenplisDBError
@@ -12,6 +13,17 @@ from .json import GenplisJSONEncoder
 from .types import Tags
 
 DB_NAME = "genplis.db"
+# Bump this when the way genplis extracts or stores tags changes.
+CACHE_SCHEMA_VERSION = 1
+
+
+def get_cache_version() -> str:
+    """Return the version of the cached tag data.
+
+    Includes the tinytag version so upgrading the parser invalidates cached
+    tags, which may otherwise keep old values until files are modified.
+    """
+    return f"{CACHE_SCHEMA_VERSION}:{tinytag.__version__}"
 
 
 def get_db_path() -> Path:
@@ -40,6 +52,29 @@ def setup_database_connection(
 
 
 def create_files_table(cursor: sqlite3.Cursor) -> None:
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS cache_meta (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        )
+    """)
+
+    cache_version = get_cache_version()
+    row = cursor.execute(
+        "SELECT value FROM cache_meta WHERE key = 'tag_version'"
+    ).fetchone()
+    if row is None or row[0] != cache_version:
+        # The cache is disposable, so start over if the parser or the tag
+        # schema changed.
+        cursor.execute("DROP TABLE IF EXISTS files")
+        cursor.execute(
+            """INSERT INTO cache_meta(key, value)
+            VALUES ('tag_version', ?)
+            ON CONFLICT(key) DO UPDATE SET value=excluded.value
+            """,
+            (cache_version,),
+        )
+
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS files (
             path TEXT PRIMARY KEY,

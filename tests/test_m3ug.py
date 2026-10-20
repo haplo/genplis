@@ -284,6 +284,29 @@ def test_not_equal_rule_list_value() -> None:
     assert not rules[0].apply({"genre": ["Metal", "Rock"]})
 
 
+def test_equal_rule_numeric_string_value() -> None:
+    rules = parse_m3ug("track = 7")
+    assert rules[0].apply({"track": ["7"]})
+    assert rules[0].apply({"track": "7"})
+    assert rules[0].apply({"track": 7})
+    assert not rules[0].apply({"track": ["8"]})
+    assert not rules[0].apply({"track": "not a number"})
+
+
+def test_not_equal_rule_numeric_string_value() -> None:
+    rules = parse_m3ug("track != 7")
+    assert rules[0].apply({"track": ["8"]})
+    assert rules[0].apply({"track": "not a number"})
+    assert not rules[0].apply({"track": ["7"]})
+    assert not rules[0].apply({"track": 7})
+
+
+def test_contains_rule_list_value() -> None:
+    rules = parse_m3ug("genre ~= wave")
+    assert rules[0].apply({"genre": ["Synthwave", "Retrowave"]})
+    assert not rules[0].apply({"genre": ["Metal", "Rock"]})
+
+
 def test_multiple_rules() -> None:
     assert parse_m3ug("""
 # My favorite DANCE WITH THE DEAD songs

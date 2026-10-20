@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+import genplis.db as db
 from genplis.db import (
     cache_tags_for_file,
     create_files_table,
@@ -30,9 +31,26 @@ def test_db_connection_and_create(tmp_path: Path) -> None:
         assert rows == [
             (
                 "table",
-                "files",
-                "files",
+                "cache_meta",
+                "cache_meta",
                 2,
+                "CREATE TABLE cache_meta (\n"
+                "            key TEXT PRIMARY KEY,\n"
+                "            value TEXT NOT NULL\n"
+                "        )",
+            ),
+            (
+                "index",
+                "sqlite_autoindex_cache_meta_1",
+                "cache_meta",
+                3,
+                None,
+            ),
+            (
+                "table",
+                "files",
+                "files",
+                4,
                 "CREATE TABLE files (\n"
                 "            path TEXT PRIMARY KEY,\n"
                 "            last_modified TIMESTAMP,\n"
@@ -43,7 +61,7 @@ def test_db_connection_and_create(tmp_path: Path) -> None:
                 "index",
                 "sqlite_autoindex_files_1",
                 "files",
-                3,
+                5,
                 None,
             ),
         ]
@@ -78,6 +96,20 @@ def test_cache_tags_for_file(genplis_db: sqlite3.Connection, file_mp3: Path) -> 
     assert rows == [
         ("/home/fidel/Code/genplis/tests/files/test.mp3", timestamp, '{"a": "b"}')
     ]
+
+
+def test_cache_invalidated_on_version_change(
+    genplis_db: sqlite3.Connection,
+    file_mp3: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cache_tags_for_file(genplis_db.cursor(), file_mp3, {"a": "b"})
+    assert genplis_db.execute("SELECT count(*) FROM files").fetchone() == (1,)
+
+    monkeypatch.setattr(db, "CACHE_SCHEMA_VERSION", 999)
+    db.create_files_table(genplis_db.cursor())
+
+    assert genplis_db.execute("SELECT count(*) FROM files").fetchone() == (0,)
 
 
 def test_get_cached_tags_success(genplis_db: sqlite3.Connection) -> None:
