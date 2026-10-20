@@ -94,6 +94,28 @@ include_source = false
     assert config.source == config_file
 
 
+def test_examples_config_loads() -> None:
+    """The config example linked from the docs must remain valid."""
+    examples_dir = Path(__file__).resolve().parent.parent / "examples"
+    config_file = examples_dir / "config.ini"
+
+    config = load_config(config_file)
+
+    assert config.general == GeneralConfig(verbose=False)
+    assert config.collection.path == Path.home() / "Music"
+    assert [pattern.pattern for pattern in config.collection.exclude] == [
+        r"/\.Trash/",
+        r"/@eaDir/",
+        r"\.tmp$",
+    ]
+    assert config.tags == TagsConfig(
+        ignore=frozenset({"comment", "encoder", "encoder_settings", "lyrics"}),
+    )
+    assert config.database.path is None
+    assert config.output == OutputConfig()
+    assert config.source == config_file
+
+
 def test_relative_path_is_relative_to_config_file(tmp_path: Path) -> None:
     config_dir = tmp_path / "genplis"
     config_dir.mkdir()

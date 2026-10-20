@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 from genplis.exceptions import GenplisM3UGException
@@ -359,3 +361,14 @@ genre ~= Synthwave
         GreaterOrEqualRuleNode(NameNode("rating"), ValueNode(4)),
         ContainsRuleNode(NameNode("genre"), ValueNode("Synthwave")),
     ]
+
+
+def test_examples_parse() -> None:
+    """Every shipped example filter must remain valid."""
+    examples_dir = Path(__file__).resolve().parent.parent / "examples"
+    examples = sorted(examples_dir.glob("*.m3ug"))
+
+    assert examples
+    for example in examples:
+        rules = parse_m3ug(example.read_text(encoding="utf-8"), str(example))
+        assert rules, f"{example.name} should define at least one rule"

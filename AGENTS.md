@@ -142,7 +142,9 @@ from genplis.exceptions import GenplisError
 
 ### File Processing
 - Check file support before processing: `TinyTag.is_supported()`
-- Skip files with large tags (>1000 bytes) to avoid memory issues
+- Skip tag values whose combined UTF-8 length exceeds `[tags] max_size`
+  (default 1000 bytes, `0` disables the limit) to avoid memory issues;
+  calculated audio properties are exempt
 - Use file modification time for cache invalidation
 - Handle both files and directories in core functions
 
@@ -167,15 +169,17 @@ from genplis.exceptions import GenplisError
 ### Documentation
 - Use docstrings for all public functions and classes
 - Keep comments concise and relevant
-- Update README.md for user-facing changes
+- User documentation lives in `docs/`: `usage.md`, `m3ug.md`, `config.md`,
+  `tags.md`, `dev.md`
+- Update README.md and the relevant docs/ page for user-facing changes; keep
+  README short and link to docs with absolute GitHub URLs
 - Use TODO comments in code for future improvements
 
 ### Performance Considerations
 - Cache parsed tags in SQLite database
-- Filter out large tags (>1000 bytes) early
+- Filter out oversized tag values early (UTF-8 bytes, see `[tags] max_size`)
 - Use pathlib for efficient path operations
 - Consider memory usage for large music collections
-- Database operations use WAL mode for better concurrency
 
 ### Staging and Committing
 - Run `uv run pre-commit run` every time you stage files, before handing
@@ -206,4 +210,6 @@ from genplis.exceptions import GenplisError
 - `src/genplis/types.py`: Shared type aliases (`TagValue`, `Tags`)
 - `src/genplis/py.typed`: PEP 561 marker for typed package consumers
 - `tests/`: Test files and fixtures
-- `examples/`: Sample M3UG filter files for reference
+- `examples/`: Sample M3UG filter files and the annotated `config.ini`
+- `docs/`: User and developer documentation (`usage.md`, `m3ug.md`,
+  `config.md`, `tags.md`, `dev.md`)
