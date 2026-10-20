@@ -1,25 +1,35 @@
+import sqlite3
 from pathlib import Path
 
 import pytest
 
+import genplis.db as db
+from genplis.config import TagsConfig
 from genplis.db import (
+    CacheStatus,
     cache_tags_for_file,
     create_files_table,
+    get_cache_status,
+    get_cache_version,
     get_cached_tags,
     get_db_path,
-    is_cache_valid,
     setup_database_connection,
 )
 from genplis.exceptions import GenplisDBError
 from genplis.files import get_last_modified
 
 
-def test_get_db_path(monkeypatch):
+def test_get_db_path(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("XDG_CACHE_HOME", "/home/user/.cache")
     assert get_db_path() == Path("/home/user/.cache/genplis/genplis.db")
 
 
-def test_db_connection_and_create(tmp_path):
+def test_get_db_path_override(tmp_path: Path) -> None:
+    custom_path = tmp_path / "custom.db"
+    assert get_db_path(custom_path) == custom_path
+
+
+def test_db_connection_and_create(tmp_path: Path) -> None:
     db_path = tmp_path / "genplis.db"
     try:
         conn, cursor = setup_database_connection(db_path)
@@ -29,9 +39,26 @@ def test_db_connection_and_create(tmp_path):
         assert rows == [
             (
                 "table",
-                "files",
-                "files",
+                "cache_meta",
+                "cache_meta",
                 2,
+                "CREATE TABLE cache_meta (\n"
+                "            key TEXT PRIMARY KEY,\n"
+                "            value TEXT NOT NULL\n"
+                "        )",
+            ),
+            (
+                "index",
+                "sqlite_autoindex_cache_meta_1",
+                "cache_meta",
+                3,
+                None,
+            ),
+            (
+                "table",
+                "files",
+                "files",
+                4,
                 "CREATE TABLE files (\n"
                 "            path TEXT PRIMARY KEY,\n"
                 "            last_modified TIMESTAMP,\n"
@@ -42,7 +69,7 @@ def test_db_connection_and_create(tmp_path):
                 "index",
                 "sqlite_autoindex_files_1",
                 "files",
-                3,
+                5,
                 None,
             ),
         ]
@@ -50,9 +77,9 @@ def test_db_connection_and_create(tmp_path):
         conn.close()
 
 
-def test_is_cache_valid(genplis_db, file_mp3):
+def test_get_cache_status(genplis_db: sqlite3.Connection, file_mp3: Path) -> None:
     # not present in DB
-    assert is_cache_valid(genplis_db.cursor(), file_mp3) is None
+    assert get_cache_status(genplis_db.cursor(), file_mp3) is CacheStatus.MISS
 
     # simulate file being cached
     timestamp = get_last_modified(file_mp3)
@@ -60,17 +87,17 @@ def test_is_cache_valid(genplis_db, file_mp3):
         "INSERT INTO files(path, last_modified, tags) VALUES (?, ?, '{}')",
         [str(file_mp3), timestamp],
     )
-    assert is_cache_valid(genplis_db.cursor(), file_mp3) is True
+    assert get_cache_status(genplis_db.cursor(), file_mp3) is CacheStatus.HIT
 
     # manually make cached timestamp stale
     genplis_db.execute(
         "UPDATE files SET last_modified=last_modified-1 WHERE path=?",
         [str(file_mp3)],
     )
-    assert is_cache_valid(genplis_db.cursor(), file_mp3) is False
+    assert get_cache_status(genplis_db.cursor(), file_mp3) is CacheStatus.STALE
 
 
-def test_cache_tags_for_file(genplis_db, file_mp3):
+def test_cache_tags_for_file(genplis_db: sqlite3.Connection, file_mp3: Path) -> None:
     timestamp = get_last_modified(file_mp3)
     cache_tags_for_file(genplis_db.cursor(), file_mp3, {"a": "b"})
     rows = genplis_db.execute("SELECT * from files").fetchall()
@@ -79,7 +106,66 @@ def test_cache_tags_for_file(genplis_db, file_mp3):
     ]
 
 
-def test_get_cached_tags_success(genplis_db):
+def test_cache_lookup_with_relative_path(
+    genplis_db: sqlite3.Connection,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cached tags must be retrievable with a relative path.
+
+    Paths are stored as absolute paths, so all DB operations need to
+    normalize them the same way.
+    """
+    song = tmp_path / "song.mp3"
+    song.write_bytes(b"")
+    monkeypatch.chdir(tmp_path)
+
+    relative_song = Path(song.name)
+    cache_tags_for_file(genplis_db.cursor(), relative_song, {"a": "b"})
+
+    assert get_cache_status(genplis_db.cursor(), relative_song) is CacheStatus.HIT
+    assert get_cached_tags(genplis_db.cursor(), relative_song) == {"a": "b"}
+
+
+def test_cache_invalidated_on_version_change(
+    genplis_db: sqlite3.Connection,
+    file_mp3: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cache_tags_for_file(genplis_db.cursor(), file_mp3, {"a": "b"})
+    assert genplis_db.execute("SELECT count(*) FROM files").fetchone() == (1,)
+
+    monkeypatch.setattr(db, "CACHE_SCHEMA_VERSION", 999)
+    db.create_files_table(genplis_db.cursor())
+
+    assert genplis_db.execute("SELECT count(*) FROM files").fetchone() == (0,)
+
+
+def test_cache_version_includes_tag_settings() -> None:
+    default_version = get_cache_version()
+
+    assert default_version != get_cache_version(TagsConfig(max_size=1))
+    assert default_version != get_cache_version(
+        TagsConfig(ignore=frozenset({"artist"}))
+    )
+
+
+def test_cache_invalidated_on_tag_config_change(
+    genplis_db: sqlite3.Connection,
+    file_mp3: Path,
+) -> None:
+    cache_tags_for_file(genplis_db.cursor(), file_mp3, {"a": "b"})
+    assert genplis_db.execute("SELECT count(*) FROM files").fetchone() == (1,)
+
+    db.create_files_table(
+        genplis_db.cursor(),
+        get_cache_version(TagsConfig(max_size=1)),
+    )
+
+    assert genplis_db.execute("SELECT count(*) FROM files").fetchone() == (0,)
+
+
+def test_get_cached_tags_success(genplis_db: sqlite3.Connection) -> None:
     genplis_db.execute(
         "INSERT INTO files(path, last_modified, tags) VALUES ('/some/path', 12345, '{\"a\": \"b\"}')"
     )
@@ -87,6 +173,6 @@ def test_get_cached_tags_success(genplis_db):
     assert tags == {"a": "b"}
 
 
-def test_get_cached_tags_error_if_missing(genplis_db):
+def test_get_cached_tags_error_if_missing(genplis_db: sqlite3.Connection) -> None:
     with pytest.raises(GenplisDBError):
-        get_cached_tags(genplis_db.cursor(), "/invalid/path/")
+        get_cached_tags(genplis_db.cursor(), Path("/invalid/path/"))

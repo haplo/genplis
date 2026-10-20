@@ -1,7 +1,7 @@
 """The main entry point. Invoke as `genplis' or `python -m genplis'."""
 
 
-def main():
+def main() -> None:
     from genplis.core import main
 
     main()

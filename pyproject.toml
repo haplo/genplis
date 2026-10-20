@@ -7,11 +7,11 @@ authors = [
 ]
 dependencies = [
     "psutil>=6.0.0",
-    "tinytag>=2.0.0",
+    "tinytag>=2.3.2,<2.4",
     "xdg-base-dirs>=6.0.2",
 ]
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 
 [build-system]
 requires = ["hatchling"]
@@ -31,25 +31,32 @@ pythonpath = "src"
 testpaths = ["tests"]
 
 [tool.ruff]
-# Exclude a variety of commonly ignored directories.
-extend-exclude = [
-    "src/tinytag/**",
-]
+target-version = "py312"
 
 [tool.ruff.lint]
 isort.known-first-party = ["genplis"]
 # only until tinytag is removed from src
 isort.known-third-party = ["tinytag"]
-select = ["ASYNC", "E4", "E7", "E9", "F", "I", "S", "UP"]
+select = ["ANN", "ASYNC", "E4", "E7", "E9", "F", "I", "S", "UP"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S101"]
 
+[tool.ty.environment]
+python-version = "3.12"
+
+[tool.ty.src]
+include = ["src", "tests"]
+
 [tool.uv]
-dev-dependencies = [
+upgrade-package = ["ty", "ruff"]
+
+[dependency-groups]
+dev = [
     "pre-commit>=4.0.1",
     "pytest>=8.3.3",
     "python-lsp-ruff>=2.2.2",
     "python-lsp-server>=1.12.0",
-    "ruff>=0.7.0",
+    "ruff>=0.17.0",
+    "ty>=0.0.86",
 ]
