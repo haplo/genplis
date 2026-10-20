@@ -30,6 +30,14 @@ def test_get_db_path_override(tmp_path: Path) -> None:
     assert get_db_path(custom_path) == custom_path
 
 
+def test_get_db_key_normalizes_dot_dot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    assert db.get_db_key(Path("a/../b")) == db.get_db_key(Path("b"))
+
+
 def test_db_connection_and_create(tmp_path: Path) -> None:
     db_path = tmp_path / "genplis.db"
     try:

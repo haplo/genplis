@@ -130,7 +130,8 @@ Notes:
 
 - `filename` is the path used when reading the file. If you invoke genplis
   with a relative path, it can be relative; the cache itself always stores
-  absolute paths.
+  normalized absolute paths. `.` and `..` are collapsed, but symlinks are not
+  resolved.
 - `bitdepth` is absent for many lossy formats, so a rule on it will not match
   those files.
 - `is_lossless` is a boolean. The filter language currently has no boolean

@@ -1,4 +1,5 @@
 import json
+import os
 import sqlite3
 from datetime import datetime
 from enum import StrEnum
@@ -111,12 +112,13 @@ def create_files_table(
 
 
 def get_db_key(file_path: Path) -> str:
-    """Return the canonical path string used as the key in the files table.
+    """Return the normalized absolute path string used as the files key.
 
-    Paths are stored as absolute paths, so every DB operation must use this
-    helper to look up the same key regardless of how the path was given.
+    ``.`` and ``..`` components are collapsed, so different spellings of the
+    same path share one cache row. Symlinks are not resolved, so a symlinked
+    path and its target remain distinct entries.
     """
-    return str(file_path.absolute())
+    return os.path.normpath(file_path.absolute())
 
 
 def get_cache_status(cursor: sqlite3.Cursor, file_path: Path) -> CacheStatus:
@@ -191,7 +193,7 @@ def remove_missing_files(
     Caller is responsible for committing to the DB.
 
     """
-    scope = root.absolute() if root is not None else None
+    scope = Path(get_db_key(root)) if root is not None else None
 
     cursor.execute("SELECT path FROM files")
     missing: list[Path] = []
