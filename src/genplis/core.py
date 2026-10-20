@@ -154,7 +154,7 @@ def process_path(conn: sqlite3.Connection, cursor: sqlite3.Cursor, args: Args) -
                     print("Cache status: not present")
                 case True:
                     print("Cache status: valid")
-                case True:
+                case False:
                     print("Cache status: stale")
 
             print("Parsed tags:")

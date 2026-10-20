@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 from pytest import approx
 
+import genplis.core as core
 from genplis.config import (
     CollectionConfig,
     Config,
@@ -19,6 +20,7 @@ from genplis.core import (
     Args,
     process_directory,
     process_file,
+    process_path,
     resolve_args,
     setup_argparse,
 )
@@ -67,6 +69,26 @@ def test_process_m3ug_file(
         GreaterOrEqualRuleNode(NameNode("rating"), ValueNode(3)),
         ContainsRuleNode(NameNode("genre"), ValueNode("Metal")),
     ]
+
+
+def test_process_path_reports_stale_cache(
+    genplis_db: sqlite3.Connection,
+    make_args: Callable[..., Args],
+    file_mp3: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A stale cache entry must be reported as stale.
+
+    Regression test: the match statement had two `case True` arms, so a
+    stale entry (is_cache_valid returning False) printed nothing.
+    """
+    monkeypatch.setattr(core.db, "is_cache_valid", lambda *_: False)
+    args = make_args(str(file_mp3))
+
+    process_path(genplis_db, genplis_db.cursor(), args)
+
+    assert "Cache status: stale" in capsys.readouterr().out
 
 
 def test_process_file_error_if_dir(
