@@ -19,7 +19,7 @@ _KNOWN_SECTIONS: Final[dict[str, frozenset[str]]] = {
     "collection": frozenset({"path", "exclude"}),
     "tags": frozenset({"max_size", "ignore"}),
     "database": frozenset({"path"}),
-    "output": frozenset({"overwrite"}),
+    "output": frozenset({"overwrite", "include_source"}),
 }
 
 
@@ -48,6 +48,7 @@ class DatabaseConfig:
 @dataclass(frozen=True, slots=True)
 class OutputConfig:
     overwrite: bool = True
+    include_source: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,6 +106,9 @@ def load_config(path: Path | None = None) -> Config:
     tags_ignore_raw = _get_option(parser, sections, "tags", "ignore")
     database_path_raw = _get_option(parser, sections, "database", "path")
     output_overwrite_raw = _get_option(parser, sections, "output", "overwrite")
+    output_include_source_raw = _get_option(
+        parser, sections, "output", "include_source"
+    )
 
     return Config(
         general=GeneralConfig(
@@ -148,7 +152,12 @@ def load_config(path: Path | None = None) -> Config:
                 output_overwrite_raw,
                 default=True,
                 where=_where(config_path, "output", "overwrite"),
-            )
+            ),
+            include_source=_parse_bool(
+                output_include_source_raw,
+                default=True,
+                where=_where(config_path, "output", "include_source"),
+            ),
         ),
         source=config_path,
     )

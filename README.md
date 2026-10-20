@@ -38,6 +38,9 @@ In a second step *genplis* will look for `.m3ug` files among the music collectio
 These files define one or more filters (see *Defining filters* section below for details).
 *genplis* will then apply the filters to the whole music collection, create a M3U playlist with all the file matches and save it in the same directory as the original M3UG file.
 This generated playlist can then be used in any M3U-compatible music player.
+By default the original M3UG source is embedded at the top of the playlist as
+`#` comments, so the playlist documents how it was generated. Pass
+`--no-include-source` to omit it.
 
 Currently *genplis* saves all parsed data in RAM for simplicity and speed.
 Exact RAM usage will depend on the music tags used, but estimate 10 MiB per 1,000 files, or even less for lightly-tagged collections.
@@ -58,8 +61,8 @@ Command-line options take precedence over the config file. In particular:
 - Passing one or more `--exclude` options replaces `[collection] exclude`.
 - `--config FILE` reads a different config file; `--no-config` ignores
   configuration entirely.
-- `--db`, `--verbose`/`--no-verbose`, and `--overwrite`/`--no-overwrite`
-  override the corresponding settings.
+- `--db`, `--verbose`/`--no-verbose`, `--overwrite`/`--no-overwrite`, and
+  `--include-source`/`--no-include-source` override the corresponding settings.
 
 A complete example:
 
@@ -97,6 +100,9 @@ ignore =
 [output]
 # Overwrite generated .m3u files that already exist.
 overwrite = true
+
+# Embed the original M3UG source as comments in generated playlists.
+include_source = true
 ```
 
 Paths may start with `~`. Relative paths are resolved relative to the config
@@ -157,7 +163,7 @@ Type checking is done with [ty](https://docs.astral.sh/ty/):
 - [ ] Publish to PyPI! 🚀
 - [ ] Example systemd files and instructions on how to run periodically
 - [ ] Improve M3U generation
-  - [ ] Include original M3UG content as comment
+  - [x] Include original M3UG content as comment
   - [ ] Support [basic extended M3U playlist tags](https://datatracker.ietf.org/doc/html/rfc8216#section-4.3)
 - [ ] Parallel parsing of files
   - [ ] Number of processes for parallel parsing

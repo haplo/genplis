@@ -74,6 +74,7 @@ path = cache/genplis.db
 
 [output]
 overwrite = false
+include_source = false
 """)
 
     config = load_config(config_file)
@@ -89,7 +90,7 @@ overwrite = false
         ignore=frozenset({"filename", "filesize"}),
     )
     assert config.database.path == tmp_path / "cache" / "genplis.db"
-    assert config.output == OutputConfig(overwrite=False)
+    assert config.output == OutputConfig(overwrite=False, include_source=False)
     assert config.source == config_file
 
 
@@ -137,6 +138,7 @@ def test_percent_sign_is_literal(tmp_path: Path) -> None:
         ("[tags]\nmax_size = many\n", "expected an integer"),
         ("[tags]\nmax_size = -1\n", "at least 0"),
         ("[output]\noverwrite = maybe\n", "expected a boolean"),
+        ("[output]\ninclude_source = maybe\n", "expected a boolean"),
         ("[collection]\nexclude = [\n", "invalid regular expression"),
         ("[collection\npath = /music\n", "invalid INI"),
         ("[DEFAULT]\npath = /music\n", "DEFAULT"),
