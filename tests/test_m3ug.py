@@ -361,6 +361,21 @@ def test_find_rating_uses_zero_raw_rating_tag() -> None:
     assert value == 0
 
 
+def test_find_returns_falsy_tag_values() -> None:
+    assert NameNode("track").find({"track": 0}) == ("track", 0)
+    assert NameNode("is_lossless").find({"is_lossless": False}) == (
+        "is_lossless",
+        False,
+    )
+    assert NameNode("comment").find({"comment": ""}) == ("comment", "")
+    assert NameNode("genre").find({"genre": []}) == ("genre", [])
+
+
+def test_zero_and_empty_values_match_equality_rules() -> None:
+    assert parse_m3ug("track = 0")[0].apply({"track": 0})
+    assert parse_m3ug('comment = ""')[0].apply({"comment": ""})
+
+
 def test_find_rating_from_single_item_fmps_rating_list() -> None:
     name, value = NameNode("rating").find({"fmps_rating": ["0.8"]})
     assert name == "rating"

@@ -134,9 +134,8 @@ Notes:
 - `bitdepth` is absent for many lossy formats, so a rule on it will not match
   those files.
 - `is_lossless` is a boolean. The filter language currently has no boolean
-  literal, and false values are treated as missing, so it cannot be matched
-  reliably. Use `mime_type` as a workaround (for example
-  `mime_type ~= flac`).
+  literal, so it cannot be matched directly. Use `mime_type` as a workaround
+  (for example `mime_type ~= flac`).
 - Calculated properties are exempt from `[tags] max_size`, but can still be
   removed with `[tags] ignore` (use the unprefixed name).
 

@@ -113,8 +113,8 @@ class NameNode:
                 return normalized_name, tags["rating"]
             return normalized_name, get_rating(tags)
         # if there is a tag with the exact (case-insensitive) name, use it
-        if raw_value := tags.get(normalized_name):
-            return normalized_name, raw_value
+        if normalized_name in tags:
+            return normalized_name, tags[normalized_name]
         # default case is no match, no value found
         return normalized_name, None
 

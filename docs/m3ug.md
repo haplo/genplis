@@ -137,13 +137,11 @@ Details that matter when writing filters:
   per second, `samplerate` in hertz. See
   [Tags](https://github.com/haplo/genplis/blob/main/docs/tags.md).
 
-### Missing and zero values
+### Missing values
 
-A tag that is absent is treated as missing. In addition, the current
-implementation treats a tag whose value is numeric zero or boolean false as
-missing for tag lookup (the special `rating` tag is exempt). This matters for
-fields such as `is_lossless` and for `track = 0`; there is currently no
-boolean literal and no reliable way to filter on a false boolean value.
+A tag that is absent is treated as missing. Zero and false are real values,
+not missing ones, so `track = 0` and `comment = ""` work as expected. There is
+still no boolean literal, so `is_lossless` cannot be compared directly.
 
 ## Special tag names
 
@@ -290,8 +288,7 @@ uv run genplis --verbose ~/Music
 
 - No OR, grouping, or parentheses. All rules are ANDed.
 - No regex operator. `~=` is a case-sensitive substring test.
-- No boolean literals, and false/zero values are treated as missing for tag
-  lookup.
+- No boolean literals, so boolean tags cannot be compared directly.
 - No negative or scientific-notation numbers.
 - No inline comments.
 - No quote escaping.
