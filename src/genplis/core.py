@@ -20,7 +20,7 @@ from .executors import (
     auto_workers,
     make_executor,
 )
-from .m3u import PlaylistEntry, create_m3u, playlist_entry
+from .m3u import PlaylistEntry, create_m3u, duration_seconds, playlist_entry
 from .m3ug import (
     FilterNode,
     M3UGFile,
@@ -70,11 +70,12 @@ class Args:
 
 @dataclass(frozen=True, slots=True)
 class Match:
-    """A matching playlist entry with its sort keys and walk position."""
+    """A matching playlist entry with its keys and walk position."""
 
     order: int
     entry: Path | PlaylistEntry
     sort_values: SortValues = ()
+    duration: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -429,6 +430,36 @@ def _sort_matches(matched: list[Match], spec: SortSpec) -> None:
         matched.sort(key=lambda item: item.order)
 
 
+def _select_matches(
+    matched: list[Match],
+    limit: int | None,
+    max_duration: float | None,
+) -> list[Match]:
+    """Apply the playlist count and duration caps in order."""
+    count_cap = limit if limit is not None and limit > 0 else None
+    duration_cap = (
+        max_duration if max_duration is not None and max_duration > 0 else None
+    )
+    if count_cap is None and duration_cap is None:
+        return matched
+
+    selected: list[Match] = []
+    total_duration = 0.0
+    for match in matched:
+        if count_cap is not None and len(selected) >= count_cap:
+            break
+        duration = match.duration if match.duration is not None else 0.0
+        if (
+            duration_cap is not None
+            and selected
+            and total_duration + duration > duration_cap
+        ):
+            break
+        selected.append(match)
+        total_duration += duration
+    return selected
+
+
 def _walk_files(
     directory: Path,
     args: Args,
@@ -504,7 +535,10 @@ def _record_matches(
             spec = parsed.sort if parsed.sort is not None else default_sort
             if spec not in spec_cache:
                 spec_cache[spec] = _sort_values(file, tags, spec)
-            matches[filter_file].append(Match(order, entry, spec_cache[spec]))
+            duration = None
+            if parsed.max_duration is not None and parsed.max_duration > 0:
+                duration = duration_seconds(tags.get("duration"))
+            matches[filter_file].append(Match(order, entry, spec_cache[spec], duration))
 
 
 def process_directory(
@@ -653,6 +687,7 @@ def process_directory(
         matched = matches[filter_file]
         spec = parsed.sort if parsed.sort is not None else args.config.output.sort
         _sort_matches(matched, spec)
+        matched = _select_matches(matched, parsed.limit, parsed.max_duration)
         if args.verbosity.is_verbose:
             print(f"\nFiltering songs and generating playlist for {filter_file}")
             print(f"Sort order: {format_sort_spec(spec)}")
@@ -686,6 +721,7 @@ def process_directory(
                 verbosity=args.verbosity,
                 extended=args.extended_m3u,
             )
+        matches[filter_file].clear()
         matched.clear()
 
     end_time = timer()

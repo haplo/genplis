@@ -22,6 +22,7 @@ from genplis.m3ug import (
     ValueNode,
     format_expression,
     get_rating,
+    parse_duration_literal,
     parse_m3ug,
 )
 from genplis.sorting import SortKey
@@ -832,6 +833,96 @@ def test_comparison_negation_and_missing_tags() -> None:
     assert negated is not None and direct is not None
     assert negated.apply({})
     assert not direct.apply({})
+
+
+@pytest.mark.parametrize(
+    ("literal", "seconds"),
+    [
+        ("600", 600),
+        ("10m", 600),
+        ("1h30m", 5400),
+        ("2m15s", 135),
+        ("30s", 30),
+        ("2d", 172800),
+        ("1:30", 90),
+        ("90:00", 5400),
+        ("1:30:00", 5400),
+        ("0", 0),
+    ],
+)
+def test_duration_literals(literal: str, seconds: float) -> None:
+    assert parse_duration_literal(literal) == seconds
+
+
+@pytest.mark.parametrize(
+    "literal", ["", "10M", "1:60", "1:61:00", "1:30:60", "-5", "nope", "1.5m"]
+)
+def test_invalid_duration_literals(literal: str) -> None:
+    assert parse_duration_literal(literal) is None
+
+
+def test_duration_values_are_numeric_for_duration_tag() -> None:
+    for literal, seconds in (
+        ("10m", 600),
+        ("2m15s", 135),
+        ("1:30", 90),
+        ("1:30:00", 5400),
+    ):
+        rule = parse_rules(f"duration >= {literal}")[0]
+        assert rule == GreaterOrEqualRuleNode(NameNode("duration"), ValueNode(seconds))
+        assert rule.apply({"duration": seconds})
+        assert not rule.apply({"duration": seconds - 1})
+
+
+def test_duration_literals_require_every_tag_to_be_duration() -> None:
+    assert parse_rules("title = 10m")[0].value_node == ValueNode("10m")
+    assert parse_m3ug("[duration | bitrate] = 10m").rules[0].value_node == ValueNode(
+        "10m"
+    )
+    with pytest.raises(GenplisM3UGException, match="numeric value"):
+        parse_rules("rating > 10m")
+
+
+def test_quoted_duration_literals_are_strings() -> None:
+    assert parse_rules('duration = "10m"')[0].value_node == ValueNode("10m")
+    with pytest.raises(GenplisM3UGException, match="numeric value"):
+        parse_rules('duration > "10m"')
+
+
+def test_limit_and_max_duration_directives() -> None:
+    parsed = parse_m3ug("@LIMIT 10\n@MAX-DURATION 1h30m\nartist = X\n")
+
+    assert parsed.limit == 10
+    assert parsed.max_duration == 5400
+    assert parsed.expression is not None
+    assert parsed.expression.apply({"artist": "X"})
+
+
+def test_limit_zero_is_unlimited() -> None:
+    assert parse_m3ug("@LIMIT 0\n").limit == 0
+
+
+def test_max_duration_zero_is_unlimited() -> None:
+    assert parse_m3ug("@MAX-DURATION 0\n").max_duration == 0
+
+
+@pytest.mark.parametrize("directive", ["@LIMIT -1", "@LIMIT x", "@LIMIT 1.5"])
+def test_invalid_limit_is_an_error(directive: str) -> None:
+    with pytest.raises(GenplisM3UGException, match="@LIMIT"):
+        parse_m3ug(f"{directive}\n", "favorites.m3ug")
+
+
+@pytest.mark.parametrize("directive", ["@MAX-DURATION -1", "@MAX-DURATION nope"])
+def test_invalid_max_duration_is_an_error(directive: str) -> None:
+    with pytest.raises(GenplisM3UGException, match="@MAX-DURATION"):
+        parse_m3ug(f"{directive}\n", "favorites.m3ug")
+
+
+def test_duplicate_limit_and_max_duration_are_errors() -> None:
+    with pytest.raises(GenplisM3UGException, match="Duplicate @LIMIT"):
+        parse_m3ug("@LIMIT 1\n@LIMIT 2\n", "favorites.m3ug")
+    with pytest.raises(GenplisM3UGException, match="Duplicate @MAX-DURATION"):
+        parse_m3ug("@MAX-DURATION 1m\n@MAX-DURATION 2m\n", "favorites.m3ug")
 
 
 def test_sort_directive_is_parsed_with_filters() -> None:

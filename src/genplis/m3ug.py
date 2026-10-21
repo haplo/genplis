@@ -268,12 +268,20 @@ def _parse_tag_names(
 
 
 def _parse_value_set(
-    token: str, mode: ValueMode, filename: str, line: int
+    token: str,
+    mode: ValueMode,
+    filename: str,
+    line: int,
+    *,
+    allow_duration: bool = False,
 ) -> tuple[ValueNode, ...] | None:
     elements = _set_elements(token, filename, line)
     if elements is None:
         return None
-    return tuple(ValueNode.parse(element, mode, filename, line) for element in elements)
+    return tuple(
+        ValueNode.parse(element, mode, filename, line, allow_duration=allow_duration)
+        for element in elements
+    )
 
 
 def _build_rule_set(
@@ -339,6 +347,39 @@ def _normalize_inline_flags(pattern: str) -> str:
     return "".join(result) + ")" * closings
 
 
+def parse_duration_literal(text: str) -> float | None:
+    """Parse a duration literal into seconds, or return None."""
+    value = text.strip()
+    if not value:
+        return None
+    if INT_RE.match(value):
+        return float(int(value))
+
+    if re.fullmatch(r"(?:\d+[smhd])+", value):
+        total = 0
+        for amount, unit in re.findall(r"(\d+)([smhd])", value):
+            multiplier = {"s": 1, "m": 60, "h": 3600, "d": 86400}[unit]
+            total += int(amount) * multiplier
+        return float(total)
+
+    match = re.fullmatch(r"(\d+):(\d{1,2})", value)
+    if match is not None:
+        minutes, seconds = int(match.group(1)), int(match.group(2))
+        if seconds > 59:
+            return None
+        return float(minutes * 60 + seconds)
+
+    match = re.fullmatch(r"(\d+):(\d{1,2}):(\d{1,2})", value)
+    if match is not None:
+        hours = int(match.group(1))
+        minutes = int(match.group(2))
+        seconds = int(match.group(3))
+        if minutes > 59 or seconds > 59:
+            return None
+        return float(hours * 3600 + minutes * 60 + seconds)
+    return None
+
+
 class NameNode:
     def __init__(self, name: str) -> None:
         self.name = name
@@ -396,7 +437,15 @@ class ValueNode:
         return cls.parse(value, "equality", filename, line)
 
     @classmethod
-    def parse(cls, value: object, mode: ValueMode, filename: str, line: int) -> Self:
+    def parse(
+        cls,
+        value: object,
+        mode: ValueMode,
+        filename: str,
+        line: int,
+        *,
+        allow_duration: bool = False,
+    ) -> Self:
         if not isinstance(value, str):
             raise GenplisM3UGException(f"Invalid value: {value}", filename, line)
 
@@ -407,6 +456,11 @@ class ValueNode:
 
         if mode == "text":
             return cls(value)
+
+        if allow_duration:
+            duration = parse_duration_literal(value)
+            if duration is not None:
+                return cls(duration)
 
         if value == "true":
             return cls(True)
@@ -819,10 +873,12 @@ def format_expression(node: FilterNode | None) -> str:
 
 @dataclass(frozen=True, slots=True)
 class M3UGFile:
-    """A parsed M3UG file: a filter expression and an ordering override."""
+    """A parsed M3UG file: a filter expression and playlist settings."""
 
     expression: FilterNode | None
     sort: SortSpec | None = None
+    limit: int | None = None
+    max_duration: float | None = None
 
     @property
     def rules(self) -> tuple[RuleNode, ...]:
@@ -846,6 +902,10 @@ def parse_m3ug(
     and_groups: list[list[FilterNode]] = []
     current_group: list[FilterNode] | None = None
     sort_spec: SortSpec | None = None
+    limit_spec: int | None = None
+    max_duration_spec: float | None = None
+    limit_seen = False
+    max_duration_seen = False
     if verbosity.is_verbose:
         print(f"Parsing M3UG file {filename}:")
         print("----------------")
@@ -911,6 +971,51 @@ def parse_m3ug(
                     print(f"Parsed sort: {format_sort_spec(sort_spec)}")
                 is_directive = True
                 break
+            if modifier == "@limit":
+                if case_sensitive or or_modifier or not_modifier:
+                    raise GenplisM3UGException(
+                        "Directives cannot use rule modifiers", filename, n
+                    )
+                if limit_seen:
+                    raise GenplisM3UGException(
+                        "Duplicate @LIMIT directive", filename, n
+                    )
+                raw_limit = rest.strip()
+                if not INT_RE.match(raw_limit):
+                    raise GenplisM3UGException(
+                        f"@LIMIT needs a non-negative integer, got: {raw_limit!r}",
+                        filename,
+                        n,
+                    )
+                limit_spec = int(raw_limit)
+                limit_seen = True
+                if verbosity.is_verbose:
+                    print(f"Parsed limit: {limit_spec}")
+                is_directive = True
+                break
+            if modifier == "@max-duration":
+                if case_sensitive or or_modifier or not_modifier:
+                    raise GenplisM3UGException(
+                        "Directives cannot use rule modifiers", filename, n
+                    )
+                if max_duration_seen:
+                    raise GenplisM3UGException(
+                        "Duplicate @MAX-DURATION directive", filename, n
+                    )
+                raw_duration = rest.strip()
+                duration = parse_duration_literal(raw_duration)
+                if duration is None:
+                    raise GenplisM3UGException(
+                        f"Invalid @MAX-DURATION value: {raw_duration!r}",
+                        filename,
+                        n,
+                    )
+                max_duration_spec = duration
+                max_duration_seen = True
+                if verbosity.is_verbose:
+                    print(f"Parsed max duration: {max_duration_spec}")
+                is_directive = True
+                break
             raise GenplisM3UGException(f"Unrecognized directive: {first}", filename, n)
 
         if is_directive:
@@ -938,9 +1043,22 @@ def parse_m3ug(
         tag_names = _parse_tag_names(tag, filename, n)
         if tag_names is None:
             tag_names = (NameNode.build(tag, filename, n),)
-        value_set = _parse_value_set(value, mode, filename, n)
+        duration_only = all(
+            name_node.name.lower() == "duration" for name_node in tag_names
+        )
+        value_set = _parse_value_set(
+            value, mode, filename, n, allow_duration=duration_only
+        )
         if value_set is None:
-            value_set = (ValueNode.parse(value, mode, filename, n),)
+            value_set = (
+                ValueNode.parse(
+                    value,
+                    mode,
+                    filename,
+                    n,
+                    allow_duration=duration_only,
+                ),
+            )
         if mode == "numeric" and len(value_set) != 1:
             raise GenplisM3UGException(
                 "comparison operators take exactly one value; use @OR for alternatives",
@@ -975,4 +1093,9 @@ def parse_m3ug(
         print(format_expression(expression))
         print()
 
-    return M3UGFile(expression, sort_spec)
+    return M3UGFile(
+        expression,
+        sort_spec,
+        limit_spec,
+        max_duration_spec,
+    )

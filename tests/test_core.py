@@ -640,6 +640,158 @@ def test_process_dir_sorts_duration_numerically(
     assert entries == ["long.mp3", "short.mp3"]
 
 
+def test_process_dir_applies_limit_after_ordering(
+    genplis_db: sqlite3.Connection,
+    make_args: Callable[..., Args],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tracks: dict[str, Tags] = {
+        "c.mp3": {"artist": ["A"], "title": ["C"]},
+        "a.mp3": {"artist": ["A"], "title": ["A"]},
+        "b.mp3": {"artist": ["A"], "title": ["B"]},
+    }
+
+    entries = _run_sort_test(
+        genplis_db,
+        make_args,
+        tmp_path,
+        monkeypatch,
+        tracks,
+        "@LIMIT 2\nartist = A\n",
+    )
+
+    assert entries == ["a.mp3", "b.mp3"]
+
+
+def test_process_dir_limit_zero_is_unlimited(
+    genplis_db: sqlite3.Connection,
+    make_args: Callable[..., Args],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tracks: dict[str, Tags] = {
+        "a.mp3": {"artist": ["A"]},
+        "b.mp3": {"artist": ["A"]},
+        "c.mp3": {"artist": ["A"]},
+    }
+
+    entries = _run_sort_test(
+        genplis_db,
+        make_args,
+        tmp_path,
+        monkeypatch,
+        tracks,
+        "@LIMIT 0\nartist = A\n",
+    )
+
+    assert entries == ["a.mp3", "b.mp3", "c.mp3"]
+
+
+def test_process_dir_applies_max_duration_cap(
+    genplis_db: sqlite3.Connection,
+    make_args: Callable[..., Args],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tracks: dict[str, Tags] = {
+        "a.mp3": {"artist": ["A"], "duration": 10},
+        "b.mp3": {"artist": ["A"], "duration": 10},
+        "c.mp3": {"artist": ["A"], "duration": 10},
+    }
+
+    entries = _run_sort_test(
+        genplis_db,
+        make_args,
+        tmp_path,
+        monkeypatch,
+        tracks,
+        "@MAX-DURATION 25\nartist = A\n",
+    )
+
+    assert entries == ["a.mp3", "b.mp3"]
+
+
+def test_process_dir_includes_first_song_over_duration_cap(
+    genplis_db: sqlite3.Connection,
+    make_args: Callable[..., Args],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tracks: dict[str, Tags] = {
+        "a.mp3": {"artist": ["A"], "duration": 100},
+        "b.mp3": {"artist": ["A"], "duration": 10},
+    }
+
+    entries = _run_sort_test(
+        genplis_db,
+        make_args,
+        tmp_path,
+        monkeypatch,
+        tracks,
+        "@MAX-DURATION 50\nartist = A\n",
+    )
+
+    assert entries == ["a.mp3"]
+
+
+def test_process_dir_unknown_durations_count_as_zero(
+    genplis_db: sqlite3.Connection,
+    make_args: Callable[..., Args],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tracks: dict[str, Tags] = {
+        "a.mp3": {"artist": ["A"]},
+        "b.mp3": {"artist": ["A"], "duration": 30},
+        "c.mp3": {"artist": ["A"], "duration": 30},
+    }
+
+    entries = _run_sort_test(
+        genplis_db,
+        make_args,
+        tmp_path,
+        monkeypatch,
+        tracks,
+        "@MAX-DURATION 30\nartist = A\n",
+    )
+
+    assert entries == ["a.mp3", "b.mp3"]
+
+
+def test_process_dir_combines_limit_and_max_duration(
+    genplis_db: sqlite3.Connection,
+    make_args: Callable[..., Args],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tracks: dict[str, Tags] = {
+        "a.mp3": {"artist": ["A"], "duration": 20},
+        "b.mp3": {"artist": ["A"], "duration": 20},
+        "c.mp3": {"artist": ["A"], "duration": 20},
+    }
+
+    limited = _run_sort_test(
+        genplis_db,
+        make_args,
+        tmp_path,
+        monkeypatch,
+        tracks,
+        "@LIMIT 1\n@MAX-DURATION 30\nartist = A\n",
+    )
+    assert limited == ["a.mp3"]
+
+    capped = _run_sort_test(
+        genplis_db,
+        make_args,
+        tmp_path,
+        monkeypatch,
+        tracks,
+        "@LIMIT 3\n@MAX-DURATION 30\nartist = A\n",
+    )
+    assert capped == ["a.mp3"]
+
+
 def test_process_dir_sorts_by_derived_rating(
     genplis_db: sqlite3.Connection,
     make_args: Callable[..., Args],

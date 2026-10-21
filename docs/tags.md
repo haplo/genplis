@@ -119,7 +119,7 @@ They are printed with a `*` prefix but used without it in filters.
 | `filename` | Path of the file as genplis encountered it | string |
 | `filesize` | File size | bytes (integer) |
 | `mime_type` | MIME type reported by tinytag | string |
-| `duration` | Duration | seconds (float) |
+| `duration` | Duration | seconds (float); filters also accept duration literals such as `10m` or `1:30` |
 | `channels` | Number of audio channels | integer |
 | `bitrate` | Bitrate | kilobits per second (float) |
 | `bitdepth` | Sample bit depth, when available | bits (integer) |

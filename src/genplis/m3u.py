@@ -30,7 +30,7 @@ def playlist_entry(path: Path, tags: Mapping[str, TagValue]) -> PlaylistEntry:
     """
     return PlaylistEntry(
         path=path,
-        duration=_duration_seconds(tags.get("duration")),
+        duration=duration_seconds(tags.get("duration")),
         title=_entry_title(path, tags),
     )
 
@@ -127,7 +127,7 @@ def _sanitize_text(value: object) -> str:
     return str(value).translate(_CONTROL_CHARACTERS).strip()
 
 
-def _duration_seconds(value: TagValue) -> float | None:
+def duration_seconds(value: TagValue) -> float | None:
     """Return a usable duration in seconds, or None when the tag is unusable."""
     if isinstance(value, bool):
         return None

@@ -216,6 +216,35 @@ A tag that is absent is treated as missing. Zero and false are real values,
 not missing ones, so `track = 0`, `comment = ""`, and `is_lossless = false`
 work as expected.
 
+## Duration literals
+
+Rules whose left-hand side is only the `duration` tag accept duration
+literals instead of plain seconds:
+
+```text
+duration >= 10m
+duration < 1h30m
+duration >= 2m15s
+duration <= 1:30
+```
+
+| Form | Meaning |
+| --- | --- |
+| `600` | seconds |
+| `10m` | minutes |
+| `1h30m` | hours and minutes |
+| `2m15s` | minutes and seconds |
+| `30s` | seconds |
+| `2d` | days |
+| `1:30` | 90 seconds (`mm:ss`) |
+| `1:30:00` | 90 minutes (`h:mm:ss`) |
+
+Units are lowercase `s`, `m`, `h`, and `d`. In `mm:ss`, seconds must be 0–59
+and minutes may exceed 59. In `h:mm:ss`, minutes and seconds must be 0–59.
+Quoted values stay strings, so `duration = "10m"` does not become a number.
+For any other tag, `10m` is an ordinary string; numeric operators reject it.
+Duration literals are also accepted by `@MAX-DURATION`.
+
 ## Combining rules
 
 Plain rules are ANDed. `@OR` joins a rule to the preceding OR group, and `@NOT`
@@ -326,6 +355,32 @@ out in the expected order. Other text sorts case-insensitively. Multi-valued
 tags use their first non-empty value. `rating` uses the same raw-or-derived
 handling as filters; see [Rating](https://github.com/haplo/genplis/blob/main/docs/tags.md#rating)
 for the scale caveat.
+
+## Playlist limits
+
+Two directives constrain how many entries are selected after ordering:
+
+```text
+@LIMIT 50
+@MAX-DURATION 2h
+```
+
+`@LIMIT` takes a non-negative integer. `0` disables the count cap. The
+playlist stops after that many entries.
+
+`@MAX-DURATION` takes a duration literal or `0`. `0` disables the cap.
+Entries are added in playlist order until the next one would push the total
+over the limit. Unknown durations count as zero. If the first entry alone is
+longer than the cap, it is still included.
+
+```text
+@LIMIT 100
+@MAX-DURATION 1h30m
+rating >= 4
+```
+
+Both limits are selection constraints, not filters: they apply after ordering
+and after `@DEDUPE`, and they do not change which songs match the rules.
 
 ## Special tag names
 
