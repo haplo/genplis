@@ -19,7 +19,6 @@ from genplis.executors import (
     MAX_AUTO_WORKERS,
     MIN_PARALLEL_FILES,
     ParseItem,
-    ParseOrder,
     ParseResult,
     ParseSettings,
     ProcessExecutor,
@@ -54,15 +53,8 @@ def _run(
     root: Path,
     db_path: Path,
     jobs: int,
-    *,
-    order: ParseOrder = ParseOrder.ORDERED,
-    commit_every: int = 1,
 ) -> tuple[dict[Path, Tags], list[tuple[str, int, str]]]:
-    args = replace(
-        _make_args(root, db_path, jobs),
-        parse_order=order,
-        commit_every=commit_every,
-    )
+    args = _make_args(root, db_path, jobs)
     conn, cursor = setup_database_connection(db_path)
     try:
         create_files_table(cursor)
@@ -87,7 +79,7 @@ def test_auto_workers_caps_at_eight(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_make_executor_stays_sequential_for_one_worker() -> None:
-    executor = make_executor(1, MIN_PARALLEL_FILES, ParseOrder.ORDERED, _settings())
+    executor = make_executor(1, MIN_PARALLEL_FILES, _settings())
     try:
         assert isinstance(executor, SequentialExecutor)
     finally:
@@ -95,7 +87,7 @@ def test_make_executor_stays_sequential_for_one_worker() -> None:
 
 
 def test_make_executor_stays_sequential_for_small_runs() -> None:
-    executor = make_executor(8, MIN_PARALLEL_FILES - 1, ParseOrder.ORDERED, _settings())
+    executor = make_executor(8, MIN_PARALLEL_FILES - 1, _settings())
     try:
         assert isinstance(executor, SequentialExecutor)
     finally:
@@ -103,7 +95,7 @@ def test_make_executor_stays_sequential_for_small_runs() -> None:
 
 
 def test_make_executor_uses_processes_for_enough_work() -> None:
-    executor = make_executor(2, MIN_PARALLEL_FILES, ParseOrder.ORDERED, _settings())
+    executor = make_executor(2, MIN_PARALLEL_FILES, _settings())
     try:
         assert isinstance(executor, ProcessExecutor)
         assert executor.workers == 2
@@ -129,36 +121,6 @@ def test_ordered_process_pool_matches_sequential(
     sequential_tags, sequential_rows = _run(root, tmp_path / "seq.db", jobs=1)
     playlist = filter_file.with_suffix(".m3u").read_bytes()
     parallel_tags, parallel_rows = _run(root, tmp_path / "parallel.db", jobs=2)
-
-    assert list(parallel_tags) == list(sequential_tags)
-    assert parallel_tags == sequential_tags
-    assert filter_file.with_suffix(".m3u").read_bytes() == playlist
-    assert parallel_rows == sequential_rows
-
-
-def test_unordered_process_pool_matches_sequential(
-    tmp_path: Path,
-    file_mp3: Path,
-    file_ogg: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    root = tmp_path / "music"
-    root.mkdir()
-    for index in range(4):
-        source = file_mp3 if index % 2 == 0 else file_ogg
-        shutil.copy2(source, root / f"song-{index}.{source.suffix[1:]}")
-    filter_file = root / "favorites.m3ug"
-    filter_file.write_text('artist = "Test Artist"\n', encoding="utf-8")
-
-    monkeypatch.setattr(executors, "MIN_PARALLEL_FILES", 4)
-    sequential_tags, sequential_rows = _run(root, tmp_path / "seq.db", jobs=1)
-    playlist = filter_file.with_suffix(".m3u").read_bytes()
-    parallel_tags, parallel_rows = _run(
-        root,
-        tmp_path / "parallel.db",
-        jobs=2,
-        order=ParseOrder.UNORDERED,
-    )
 
     assert list(parallel_tags) == list(sequential_tags)
     assert parallel_tags == sequential_tags
@@ -230,44 +192,6 @@ def test_rows_are_visible_after_ordered_run(tmp_path: Path, file_mp3: Path) -> N
         conn.close()
 
 
-def test_timings_line_reports_phases(
-    tmp_path: Path,
-    file_mp3: Path,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    root = tmp_path / "music"
-    root.mkdir()
-    shutil.copy2(file_mp3, root / "song.mp3")
-    args = replace(
-        _make_args(root, tmp_path / "cache.db", jobs=1),
-        show_timings=True,
-    )
-
-    conn, cursor = setup_database_connection(tmp_path / "cache.db")
-    try:
-        create_files_table(cursor)
-        process_directory(conn, cursor, root, args)
-    finally:
-        conn.close()
-
-    output = capsys.readouterr().out
-    timing_line = next(
-        line for line in output.splitlines() if line.startswith("timings:")
-    )
-    assert "files=1" in timing_line
-    assert "pending=1" in timing_line
-    assert "workers=1" in timing_line
-    assert "order=ordered" in timing_line
-    assert "walk=" in timing_line
-    assert "lookup=" in timing_line
-    assert "parse=" in timing_line
-    assert "worker_busy=" in timing_line
-    assert "util=" in timing_line
-    assert "db=" in timing_line
-    assert "filter=" in timing_line
-    assert "playlist=" in timing_line
-
-
 def test_parallel_refreshes_only_stale_rows(
     tmp_path: Path,
     file_mp3: Path,
@@ -333,12 +257,7 @@ def test_parallel_rebuilds_tags_in_walk_order(
         mtime = song.stat().st_mtime + 10
         os.utime(song, (mtime, mtime))
 
-    tags, _ = _run(
-        root,
-        db_path,
-        jobs=2,
-        order=ParseOrder.UNORDERED,
-    )
+    tags, _ = _run(root, db_path, jobs=2)
 
     assert list(tags) == audio_order
     playlist_entries = [
@@ -395,7 +314,7 @@ def test_pipeline_caches_empty_tags_and_skips_unsupported(
     assert str(unsupported) not in {path for path, _tags in rows}
 
 
-def test_verbose_diagnostics_match_between_orders(
+def test_parallel_verbose_diagnostics_are_preserved(
     tmp_path: Path,
     file_mp3: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -408,34 +327,35 @@ def test_verbose_diagnostics_match_between_orders(
 
     monkeypatch.setattr(executors, "MIN_PARALLEL_FILES", 4)
     config = Config(tags=TagsConfig(max_size=1, ignore=frozenset({"artist"})))
-
-    diagnostics: dict[ParseOrder, Counter[str]] = {}
-    for order in (ParseOrder.ORDERED, ParseOrder.UNORDERED):
-        args = replace(
-            _make_args(root, tmp_path / f"{order}.db", jobs=2),
-            verbosity=Verbosity.VERBOSE,
-            config=config,
-            parse_order=order,
-        )
-        conn, cursor = setup_database_connection(tmp_path / f"{order}.db")
-        try:
-            create_files_table(cursor, get_cache_version(config.tags))
-            process_directory(conn, cursor, root, args)
-        finally:
-            conn.close()
-        output = capsys.readouterr().out
-        diagnostics[order] = Counter(
-            line
-            for line in output.splitlines()
-            if line.startswith(("Removing tag", "Skipping", "Updated cache"))
-        )
-
-    assert diagnostics[ParseOrder.ORDERED] == diagnostics[ParseOrder.UNORDERED]
-    assert any(
-        "configured to be ignored" in line for line in diagnostics[ParseOrder.ORDERED]
+    args = replace(
+        _make_args(root, tmp_path / "cache.db", jobs=2),
+        verbosity=Verbosity.VERBOSE,
+        config=config,
     )
-    assert any(
-        "larger than 1 UTF-8 bytes" in line for line in diagnostics[ParseOrder.ORDERED]
+
+    conn, cursor = setup_database_connection(tmp_path / "cache.db")
+    try:
+        create_files_table(cursor, get_cache_version(config.tags))
+        process_directory(conn, cursor, root, args)
+    finally:
+        conn.close()
+
+    diagnostics = Counter(
+        line
+        for line in capsys.readouterr().out.splitlines()
+        if line.startswith(("Removing tag", "Skipping", "Updated cache"))
+    )
+    assert (
+        diagnostics["Removing tag artist because it is configured to be ignored"] == 4
+    )
+    assert diagnostics["Removing tag title because it's larger than 1 UTF-8 bytes"] == 4
+    assert (
+        sum(
+            count
+            for line, count in diagnostics.items()
+            if line.startswith("Updated cache")
+        )
+        == 4
     )
 
 
@@ -445,7 +365,7 @@ class _InterruptingExecutor:
 
     def parse(self, items: Sequence[ParseItem]) -> Iterator[ParseResult]:
         item = items[0]
-        yield ParseResult(item, {"title": ["Interrupted"]}, (), 0.01)
+        yield ParseResult(item, {"title": ["Interrupted"]}, ())
         raise KeyboardInterrupt
 
     def close(self, *, cancel: bool = False) -> None:
@@ -467,10 +387,7 @@ def test_interrupt_flushes_stored_rows(
         "genplis.core.make_executor",
         lambda *_args, **_kwargs: executor,
     )
-    args = replace(
-        _make_args(root, tmp_path / "cache.db", jobs=2),
-        commit_every=0,
-    )
+    args = _make_args(root, tmp_path / "cache.db", jobs=2)
 
     conn, cursor = setup_database_connection(tmp_path / "cache.db")
     try:

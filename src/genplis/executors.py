@@ -2,11 +2,9 @@
 
 import multiprocessing
 import os
-import time
 from collections.abc import Iterator, Sequence
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
-from enum import StrEnum
 from pathlib import Path
 from typing import Protocol
 
@@ -43,18 +41,10 @@ class ParseResult:
     item: ParseItem
     tags: Tags | None
     messages: tuple[str, ...]
-    parse_seconds: float
-
-
-class ParseOrder(StrEnum):
-    """How a process pool returns parsed files."""
-
-    ORDERED = "ordered"
-    UNORDERED = "unordered"
 
 
 class ParseExecutor(Protocol):
-    """Parse pending files, in walk order or completion order."""
+    """Parse pending files in walk order."""
 
     def parse(self, items: Sequence[ParseItem]) -> Iterator[ParseResult]: ...
 
@@ -70,14 +60,12 @@ def _init_worker(settings: ParseSettings) -> None:
 
 
 def _parse_item(item: ParseItem, settings: ParseSettings) -> ParseResult:
-    start = time.perf_counter()
     tags, messages = parse_tags(
         item.path,
         max_size=settings.max_size,
         ignore=settings.ignore,
     )
-    elapsed = time.perf_counter() - start
-    return ParseResult(item, tags, messages, elapsed)
+    return ParseResult(item, tags, messages)
 
 
 def _parse_one(item: ParseItem) -> ParseResult:
@@ -124,14 +112,8 @@ class SequentialExecutor:
 class ProcessExecutor:
     """Parse files in worker processes without touching the parent's DB."""
 
-    def __init__(
-        self,
-        workers: int,
-        order: ParseOrder,
-        settings: ParseSettings,
-    ) -> None:
+    def __init__(self, workers: int, settings: ParseSettings) -> None:
         self.workers = workers
-        self._order = order
         context = multiprocessing.get_context(
             "forkserver" if os.name == "posix" else "spawn"
         )
@@ -143,13 +125,7 @@ class ProcessExecutor:
         )
 
     def parse(self, items: Sequence[ParseItem]) -> Iterator[ParseResult]:
-        chunks = list(_chunked(items))
-        if self._order is ParseOrder.UNORDERED:
-            futures = [self._pool.submit(_parse_batch, chunk) for chunk in chunks]
-            for future in as_completed(futures):
-                yield from future.result()
-            return
-        for batch in self._pool.map(_parse_batch, chunks):
+        for batch in self._pool.map(_parse_batch, list(_chunked(items))):
             yield from batch
 
     def close(self, *, cancel: bool = False) -> None:
@@ -159,11 +135,10 @@ class ProcessExecutor:
 def make_executor(
     workers: int,
     pending: int,
-    order: ParseOrder,
     settings: ParseSettings,
 ) -> ParseExecutor:
     """Return a process pool for enough work, otherwise parse inline."""
     workers = max(1, min(workers, pending))
     if workers <= 1 or pending < MIN_PARALLEL_FILES:
         return SequentialExecutor(settings)
-    return ProcessExecutor(workers, order, settings)
+    return ProcessExecutor(workers, settings)

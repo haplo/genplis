@@ -295,7 +295,6 @@ def test_write_batch_commits_every_n_writes(tmp_path: Path) -> None:
             last_modified=2,
         )
         assert _row_count(db_path) == 3
-        assert batch.seconds > 0
     finally:
         conn.close()
 

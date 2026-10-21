@@ -87,46 +87,44 @@ Invariants:
   open or receive the connection. Pool contexts are `forkserver` on POSIX and
   `spawn` on Windows, never plain `fork`, so a worker cannot inherit the
   database file descriptor.
-- **Workers only parse tags.** They return tags, verbose messages, and their
-  own parse duration. M3UG parsing, filtering, playlist generation, cache
-  reads, and cache writes stay in the main process.
+- **Workers only parse tags.** They return tags and verbose messages. M3UG
+  parsing, filtering, playlist generation, cache reads, and cache writes stay
+  in the main process.
 - **Playlist order is walk order.** Cache hits are resolved during the walk and
   misses arrive later, so `all_tags` is rebuilt from the recorded path order
-  before filtering. Completion order only affects when verbose lines and cache
-  rows are emitted, not playlist bytes.
-- **`--jobs 1` is the old inline path.** It uses the same `WriteBatch` plumbing
-  with a commit after every write, so output and cache semantics do not change.
-- **Flush points.** `WriteBatch` flushes at the end of the parse phase, on
-  errors, and on `KeyboardInterrupt`; an interrupted pool is shut down with
+  before filtering. Results are consumed in submission order, so verbose lines
+  and cache rows stay in walk order for the files that needed parsing.
+- **`--jobs 1` is the old inline path.** It uses the same `WriteBatch` plumbing,
+  so output, cache contents, and playlist bytes do not change.
+- **Flush points.** `WriteBatch` commits every `core.COMMIT_EVERY` writes
+  (currently 128) and flushes at the end of the parse phase, on errors, and on
+  `KeyboardInterrupt`; an interrupted pool is shut down with
   `cancel_futures=True` and `wait=False` so it cannot hang the process.
 
-Instrumentation is available behind the temporary hidden `--timings` flag. It
-prints one line with walk, lookup, parse, worker-busy, database, filter, and
-playlist times plus the worker utilisation. Use a database on the real
-filesystem, not a tmpfs, so commit costs are visible:
+To benchmark, use a cache database on the real filesystem, not a tmpfs, and
+compare the cold paths three times each. Checksum the playlists to confirm that
+they are byte-identical:
 
 ```bash
-rm -f ~/.cache/genplis/b-auto.db
-uv run genplis --db ~/.cache/genplis/b-auto.db --timings ~/Music
-
 rm -f ~/.cache/genplis/b-seq.db
-uv run genplis --db ~/.cache/genplis/b-seq.db --timings --jobs 1 ~/Music
+/usr/bin/time -f '%e s, %M KiB' \
+    uv run genplis --db ~/.cache/genplis/b-seq.db --jobs 1 ~/Music
+sha256sum ~/Music/*.m3u
 
-rm -f ~/.cache/genplis/b-u.db
-uv run genplis --db ~/.cache/genplis/b-u.db --timings \
-    --parse-order unordered ~/Music
+rm -f ~/.cache/genplis/b-auto.db
+/usr/bin/time -f '%e s, %M KiB' \
+    uv run genplis --db ~/.cache/genplis/b-auto.db ~/Music
+sha256sum ~/Music/*.m3u
 
-for n in 1 8 32 128 512 0; do
-    rm -f ~/.cache/genplis/b-$n.db
-    uv run genplis --db ~/.cache/genplis/b-$n.db --timings \
-        --commit-every $n ~/Music
-done
+rm -f ~/.cache/genplis/b-warm.db
+uv run genplis --db ~/.cache/genplis/b-warm.db ~/Music
+/usr/bin/time -f '%e s, %M KiB' \
+    uv run genplis --db ~/.cache/genplis/b-warm.db ~/Music
 ```
 
-Run each configuration three times and take the median. Check that playlists
-from `--jobs 1`, auto, ordered, and unordered are byte-identical. The worker
-count defaults to the CPU affinity count capped at eight; `[general] jobs` and
-`--jobs` override it.
+Run each configuration three times and take the median; first runs include
+page-cache cold effects. The worker count defaults to the CPU affinity count
+capped at eight; `[general] jobs` and `--jobs` override it.
 
 ## Running
 

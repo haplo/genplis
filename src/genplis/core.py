@@ -15,7 +15,6 @@ from .config import Config, load_config
 from .exceptions import GenplisConfigError, GenplisError
 from .executors import (
     ParseItem,
-    ParseOrder,
     ParseSettings,
     ProcessExecutor,
     auto_workers,
@@ -33,6 +32,11 @@ CACHE_STATUS_MESSAGES = {
     db.CacheStatus.HIT: "valid",
 }
 
+# Commit cache writes every N rows during a directory scan. Benchmarked on a
+# 50k-file cold scan: 128 was within 0.7% of the best median and far ahead of
+# committing after every write.
+COMMIT_EVERY = 128
+
 
 @dataclass(frozen=True, slots=True)
 class Args:
@@ -46,24 +50,6 @@ class Args:
     clean: bool = False
     config_disabled: bool = False
     jobs: int = 1
-    parse_order: ParseOrder = ParseOrder.ORDERED
-    commit_every: int = 1
-    show_timings: bool = False
-
-
-@dataclass(slots=True)
-class Timings:
-    """Phase counters for the temporary --timings output."""
-
-    walk: float = 0.0
-    lookup: float = 0.0
-    parse: float = 0.0
-    worker_busy: float = 0.0
-    db: float = 0.0
-    filter: float = 0.0
-    playlist: float = 0.0
-    pending: int = 0
-    workers: int = 1
 
 
 @dataclass(frozen=True, slots=True)
@@ -185,28 +171,6 @@ def setup_argparse() -> argparse.ArgumentParser:
         metavar="N",
     )
     parser.add_argument(
-        "--parse-order",
-        help=argparse.SUPPRESS,
-        choices=list(ParseOrder),
-        type=ParseOrder,
-        default=ParseOrder.ORDERED,
-    )
-    parser.add_argument(
-        "--commit-every",
-        help=(
-            "Commit cached tags every N writes. Use 0 to commit only when "
-            "the run finishes."
-        ),
-        type=non_negative_int,
-        default=1,
-        metavar="N",
-    )
-    parser.add_argument(
-        "--timings",
-        help=argparse.SUPPRESS,
-        action="store_true",
-    )
-    parser.add_argument(
         "--clean",
         help=(
             "Remove cache entries for files that no longer exist. With PATH, "
@@ -304,9 +268,6 @@ def resolve_args(args: argparse.Namespace, config: Config) -> Args:
         clean=args.clean,
         config_disabled=args.no_config,
         jobs=_resolve_jobs(args, config),
-        parse_order=args.parse_order,
-        commit_every=args.commit_every,
-        show_timings=args.timings,
     )
 
 
@@ -407,7 +368,6 @@ def process_directory(
         )
 
     start_time = timer()
-    timings = Timings()
 
     all_filters: dict[Path, list[RuleNode]] = {}
     path_order: list[Path] = []
@@ -418,8 +378,7 @@ def process_directory(
         ignore=args.config.tags.ignore,
         verbosity=args.verbosity,
     )
-    batch = db.WriteBatch(conn, every=args.commit_every)
-    walk_start = timer()
+    batch = db.WriteBatch(conn, every=COMMIT_EVERY)
     try:
         for current_dir, dirnames, filenames in directory.walk():
             current = Path(current_dir)
@@ -448,12 +407,7 @@ def process_directory(
                 path_order.append(file)
                 if args.jobs <= 1:
                     tags, filters, _ = process_file(
-                        conn,
-                        cursor,
-                        file,
-                        args,
-                        batch=batch,
-                        timings=timings,
+                        conn, cursor, file, args, batch=batch
                     )
                     if tags is not None:
                         tags_by_path[file] = tags
@@ -466,7 +420,6 @@ def process_directory(
                     all_filters[file] = filters
                     continue
 
-                lookup_start = timer()
                 last_modified = db.get_last_modified(file)
                 cache_status = db.get_cache_status(cursor, file, last_modified)
                 if cache_status is db.CacheStatus.HIT:
@@ -479,76 +432,49 @@ def process_directory(
                             last_modified=last_modified,
                         )
                     )
-                timings.lookup += timer() - lookup_start
-
-        walk_elapsed = timer() - walk_start
-        timings.walk = max(
-            0.0,
-            walk_elapsed - timings.lookup - (timings.parse if args.jobs <= 1 else 0.0),
-        )
 
         if args.jobs <= 1:
             all_tags = tags_by_path
         else:
-            executor = make_executor(
-                args.jobs,
-                len(pending),
-                args.parse_order,
-                settings,
-            )
-            timings.pending = len(pending)
-            timings.workers = (
-                executor.workers if isinstance(executor, ProcessExecutor) else 1
-            )
+            executor = make_executor(args.jobs, len(pending), settings)
             if isinstance(executor, ProcessExecutor) and args.verbosity.is_verbose:
                 print(f"Parsing with {executor.workers} worker processes")
-            parse_start = timer()
             try:
-                try:
-                    for result in executor.parse(pending):
-                        timings.worker_busy += result.parse_seconds
-                        if args.verbosity.is_verbose:
-                            for message in result.messages:
-                                print(message)
-                        if result.tags is None:
-                            continue
-                        batch.store(
-                            cursor,
-                            result.item.path,
-                            result.tags,
-                            last_modified=result.item.last_modified,
-                            verbosity=args.verbosity,
-                        )
-                        tags_by_path[result.item.path] = result.tags
-                except BaseException:
-                    executor.close(cancel=True)
-                    raise
-                else:
-                    executor.close()
-            finally:
-                timings.parse += timer() - parse_start
+                for result in executor.parse(pending):
+                    if args.verbosity.is_verbose:
+                        for message in result.messages:
+                            print(message)
+                    if result.tags is None:
+                        continue
+                    batch.store(
+                        cursor,
+                        result.item.path,
+                        result.tags,
+                        last_modified=result.item.last_modified,
+                        verbosity=args.verbosity,
+                    )
+                    tags_by_path[result.item.path] = result.tags
+            except BaseException:
+                executor.close(cancel=True)
+                raise
+            else:
+                executor.close()
 
             # Hits were resolved during the walk and misses arrive later, so
             # rebuild the mapping in walk order before filtering.
             all_tags = {p: tags_by_path[p] for p in path_order if p in tags_by_path}
     finally:
         batch.flush()
-    timings.db = batch.seconds
-    if args.jobs <= 1:
-        timings.walk = max(0.0, timings.walk - timings.db)
 
     # Apply each filter to all songs to generate playlists
     for filter_file, rules in all_filters.items():
-        filter_start = timer()
         files = filter_songs(all_tags, filter_file, rules, args.verbosity)
-        timings.filter += timer() - filter_start
         if args.verbosity.shows_progress:
             print(f"Filter file {filter_file} matched {len(files)} songs")
         if len(files) > 0:
             playlist_file = filter_file.with_suffix(".m3u")
             if args.verbosity.shows_progress:
                 print(f"Creating playlist {playlist_file}")
-            playlist_start = timer()
             comments: list[str] = []
             if args.include_source:
                 source = filter_file.read_text(encoding="utf-8-sig")
@@ -564,7 +490,6 @@ def process_directory(
                 overwrite=args.overwrite,
                 verbosity=args.verbosity,
             )
-            timings.playlist += timer() - playlist_start
 
     end_time = timer()
     process_time = end_time - start_time
@@ -572,18 +497,6 @@ def process_directory(
     if args.verbosity.shows_normal_output:
         print(f"Processed {len(all_tags)} files in {process_time:.3f} seconds")
         print(f"Total RAM usage: {used_memory} MiB")
-    if args.show_timings:
-        util = 0.0
-        if timings.parse > 0:
-            util = timings.worker_busy / (timings.parse * max(1, timings.workers)) * 100
-        print(
-            f"timings: files={len(all_tags)} pending={timings.pending} "
-            f"workers={timings.workers} order={args.parse_order.value} "
-            f"walk={timings.walk:.2f}s lookup={timings.lookup:.2f}s "
-            f"parse={timings.parse:.2f}s worker_busy={timings.worker_busy:.2f}s "
-            f"util={util:.0f}% db={timings.db:.2f}s "
-            f"filter={timings.filter:.2f}s playlist={timings.playlist:.2f}s"
-        )
 
     return all_tags, all_filters
 
@@ -595,7 +508,6 @@ def process_file(
     args: Args,
     *,
     batch: db.WriteBatch | None = None,
-    timings: Timings | None = None,
 ) -> tuple[Tags | None, list[RuleNode], db.CacheStatus]:
     """Process a single file.
 
@@ -627,30 +539,19 @@ def process_file(
         rules = parse_m3ug(content, str(file), args.verbosity)
         return None, rules, db.CacheStatus.MISS
 
-    lookup_start = timer()
     last_modified = db.get_last_modified(file)
     cache_status = db.get_cache_status(cursor, file, last_modified)
     if cache_status is db.CacheStatus.HIT:
         # reuse cached tags from DB instead of parsing them again
         cached_tags = db.get_cached_tags(cursor, file)
-        if timings is not None:
-            timings.lookup += timer() - lookup_start
         return cached_tags, [], cache_status
-    if timings is not None:
-        timings.lookup += timer() - lookup_start
-        timings.pending += 1
 
-    parse_start = timer()
     tags = get_tags(
         file,
         args.verbosity,
         max_size=args.config.tags.max_size,
         ignore=args.config.tags.ignore,
     )
-    if timings is not None:
-        parse_seconds = timer() - parse_start
-        timings.parse += parse_seconds
-        timings.worker_busy += parse_seconds
     if tags is None:
         return None, [], cache_status
     # Cache supported files even when every tag was filtered out, so an empty
