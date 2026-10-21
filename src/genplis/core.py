@@ -1,9 +1,10 @@
 import argparse
 import os
+import random
 import re
 import sqlite3
 import sys
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from functools import cmp_to_key
 from pathlib import Path
@@ -30,7 +31,6 @@ from .m3ug import (
     parse_m3ug,
 )
 from .sorting import (
-    SortKey,
     SortSpec,
     SortValue,
     SortValues,
@@ -391,6 +391,20 @@ def matches_rules(tags: Mapping[str, TagValue], expression: FilterNode | None) -
     return expression is None or expression.apply(tags)
 
 
+def _tag_values(
+    file: Path, tags: Mapping[str, TagValue], names: Sequence[str]
+) -> SortValues:
+    """Resolve normalized values for tag names and the filename pseudo-tag."""
+    values: list[SortValue | None] = []
+    for name in names:
+        if name.lower() == "filename":
+            raw: TagValue = os.path.abspath(file)
+        else:
+            _, raw = NameNode(name).find(tags)
+        values.append(normalize_sort_value(raw))
+    return tuple(values)
+
+
 def _sort_values(
     file: Path, tags: Mapping[str, TagValue], spec: SortSpec
 ) -> SortValues:
@@ -400,14 +414,8 @@ def _sort_values(
     the cached tag value. Other keys use normal M3UG tag lookup, including the
     special handling for ``rating``.
     """
-    values: list[SortValue | None] = []
-    for key in spec:
-        if key.name.lower() == "filename":
-            raw: TagValue = os.path.abspath(file)
-        else:
-            _, raw = NameNode(key.name).find(tags)
-        values.append(normalize_sort_value(raw))
-    return tuple(values)
+    names = [key.name for key in spec if not key.is_random]
+    return _tag_values(file, tags, names)
 
 
 def _compare_matches(first: Match, second: Match, spec: SortSpec) -> int:
@@ -423,13 +431,38 @@ def _compare_matches(first: Match, second: Match, spec: SortSpec) -> int:
 
 
 def _sort_matches(matched: list[Match], spec: SortSpec) -> None:
-    """Sort matches in place, preserving walk order for an empty spec."""
-    if spec:
+    """Sort matches in place, then shuffle random runs when requested."""
+    random_key = spec[-1] if spec and spec[-1].is_random else None
+    prefix = spec[:-1] if random_key is not None else spec
+    if prefix:
         matched.sort(
-            key=cmp_to_key(lambda first, second: _compare_matches(first, second, spec))
+            key=cmp_to_key(
+                lambda first, second: _compare_matches(first, second, prefix)
+            )
         )
     else:
         matched.sort(key=lambda item: item.order)
+
+    if random_key is None:
+        return
+    rng = random.Random(random_key.seed)  # noqa: S311 - playlist order is not secret
+    if not prefix:
+        rng.shuffle(matched)
+        return
+
+    start = 0
+    while start < len(matched):
+        end = start + 1
+        while (
+            end < len(matched)
+            and matched[end].sort_values == matched[start].sort_values
+        ):
+            end += 1
+        if end - start > 1:
+            run = matched[start:end]
+            rng.shuffle(run)
+            matched[start:end] = run
+        start = end
 
 
 def _dedupe_matches(matched: list[Match]) -> list[Match]:
@@ -561,10 +594,10 @@ def _record_matches(
             dedupe_values: SortValues = ()
             if parsed.dedupe:
                 if parsed.dedupe not in dedupe_cache:
-                    dedupe_cache[parsed.dedupe] = _sort_values(
+                    dedupe_cache[parsed.dedupe] = _tag_values(
                         file,
                         tags,
-                        tuple(SortKey(name) for name in parsed.dedupe),
+                        parsed.dedupe,
                     )
                 dedupe_values = dedupe_cache[parsed.dedupe]
             matches[filter_file].append(

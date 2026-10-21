@@ -164,6 +164,18 @@ def test_load_output_sort(tmp_path: Path) -> None:
     )
 
 
+def test_load_output_sort_with_random(tmp_path: Path) -> None:
+    config_file = tmp_path / "config.ini"
+    config_file.write_text("[output]\nsort = artist, random 42\n")
+
+    config = load_config(config_file)
+
+    assert config.output.sort == (
+        SortKey("artist"),
+        SortKey("random", seed=42),
+    )
+
+
 def test_empty_output_sort_disables_ordering(tmp_path: Path) -> None:
     config_file = tmp_path / "config.ini"
     config_file.write_text("[output]\nsort =\n")

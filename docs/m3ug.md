@@ -325,6 +325,34 @@ one line.
 into the playlist. `year` and `original_year` are the release-date tags
 available from tinytag; there is no separate `date` tag.
 
+### Random order
+
+`random` is a sort key that shuffles entries. It must be the last key and
+cannot take `asc` or `desc`:
+
+```text
+# Shuffle every matching song
+@sort random
+
+# Reproducible shuffle with a fixed seed
+@sort random 42
+
+# Shuffle within each artist, keeping artists in order
+@sort artist, random 7
+```
+
+With preceding keys, genplis sorts by those keys and then shuffles equal-key
+runs. With only `random`, it shuffles everything. Without a seed the order
+changes every run; a seed makes it reproducible. Each playlist gets its own
+random generator.
+
+`@sort` with no keys means directory-walk order and overrides both included
+and configured defaults:
+
+```text
+@sort
+```
+
 ### Missing values
 
 A missing value sorts after every present value **for that key only**. It does

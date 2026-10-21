@@ -1,6 +1,7 @@
 import gc
 import json
 import os
+import random
 import re
 import shutil
 import sqlite3
@@ -553,6 +554,107 @@ def test_process_dir_sort_keeps_walk_order_for_ties(
         monkeypatch,
         tracks,
         "@sort artist\n",
+    )
+
+    assert entries == [path.name for path in walk_order]
+
+
+def test_process_dir_random_sort_with_seed_is_reproducible(
+    genplis_db: sqlite3.Connection,
+    make_args: Callable[..., Args],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tracks: dict[str, Tags] = {
+        "a.mp3": {"artist": ["A"]},
+        "b.mp3": {"artist": ["A"]},
+        "c.mp3": {"artist": ["A"]},
+        "d.mp3": {"artist": ["A"]},
+    }
+
+    first = _run_sort_test(
+        genplis_db,
+        make_args,
+        tmp_path,
+        monkeypatch,
+        tracks,
+        "@sort random 42\nartist = A\n",
+    )
+    walk_order = [
+        Path(current) / name
+        for current, _dirs, names in tmp_path.walk()
+        for name in names
+        if name.endswith(".mp3")
+    ]
+    expected = [path.name for path in walk_order]
+    random.Random(42).shuffle(expected)  # noqa: S311 - matching playlist shuffle
+    second = _run_sort_test(
+        genplis_db,
+        make_args,
+        tmp_path,
+        monkeypatch,
+        tracks,
+        "@sort random 42\nartist = A\n",
+    )
+
+    assert first == expected
+    assert second == expected
+
+
+def test_process_dir_random_shuffles_equal_prefix_runs(
+    genplis_db: sqlite3.Connection,
+    make_args: Callable[..., Args],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tracks: dict[str, Tags] = {
+        "a1.mp3": {"artist": ["A"]},
+        "b1.mp3": {"artist": ["B"]},
+        "a2.mp3": {"artist": ["A"]},
+        "b2.mp3": {"artist": ["B"]},
+        "a3.mp3": {"artist": ["A"]},
+    }
+
+    entries = _run_sort_test(
+        genplis_db,
+        make_args,
+        tmp_path,
+        monkeypatch,
+        tracks,
+        "@sort artist, random 7\nartist = A\n@OR artist = B\n",
+    )
+
+    assert set(entries[:3]) == {"a1.mp3", "a2.mp3", "a3.mp3"}
+    assert set(entries[3:]) == {"b1.mp3", "b2.mp3"}
+
+
+def test_process_dir_sort_without_keys_uses_walk_order(
+    genplis_db: sqlite3.Connection,
+    make_args: Callable[..., Args],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tracks: dict[str, Tags] = {
+        "c.mp3": {"artist": ["A"]},
+        "b.mp3": {"artist": ["A"]},
+        "a.mp3": {"artist": ["A"]},
+    }
+    for name in tracks:
+        (tmp_path / name).write_bytes(b"")
+    walk_order = [
+        Path(current) / name
+        for current, _dirs, names in tmp_path.walk()
+        for name in names
+        if name.endswith(".mp3")
+    ]
+
+    entries = _run_sort_test(
+        genplis_db,
+        make_args,
+        tmp_path,
+        monkeypatch,
+        tracks,
+        "@sort\nartist = A\n",
     )
 
     assert entries == [path.name for path in walk_order]

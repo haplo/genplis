@@ -889,12 +889,9 @@ class M3UGFile:
 
 def _parse_sort_directive(raw_value: str, filename: str, line: int) -> SortSpec:
     try:
-        sort_spec = parse_sort_spec(raw_value)
+        return parse_sort_spec(raw_value)
     except SortSpecError as exc:
         raise GenplisM3UGException(str(exc), filename, line) from exc
-    if not sort_spec:
-        raise GenplisM3UGException("@sort needs at least one tag", filename, line)
-    return sort_spec
 
 
 def parse_m3ug(

@@ -52,6 +52,34 @@ def test_format_sort_spec() -> None:
     )
 
 
+def test_parse_sort_spec_accepts_random_last() -> None:
+    assert parse_sort_spec("random") == (SortKey("random"),)
+    assert parse_sort_spec("artist, random 42") == (
+        SortKey("artist"),
+        SortKey("random", seed=42),
+    )
+    assert format_sort_spec(parse_sort_spec("artist, random 42")) == (
+        "artist, random 42"
+    )
+
+
+@pytest.mark.parametrize(
+    "spec",
+    [
+        "random desc",
+        "random asc",
+        "random 1.5",
+        "random -1",
+        "random, artist",
+        "random, random",
+        "random, artist, random",
+    ],
+)
+def test_parse_sort_spec_rejects_invalid_random_keys(spec: str) -> None:
+    with pytest.raises(SortSpecError):
+        parse_sort_spec(spec)
+
+
 def test_normalize_sort_value() -> None:
     assert normalize_sort_value(None) is None
     assert normalize_sort_value("") is None

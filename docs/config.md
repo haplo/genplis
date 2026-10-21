@@ -241,6 +241,15 @@ directory-walk order for playlists without `@sort`:
 sort =
 ```
 
+The `random` key accepts the same syntax as `@sort`: it must be last and may
+take an optional integer seed. With preceding keys it shuffles equal-key runs;
+on its own it shuffles the whole playlist.
+
+```ini
+[output]
+sort = artist, random 42
+```
+
 Missing values sort after present values for that key; lower-priority keys
 still break ties (including when both entries are missing the same key), and
 equal keys keep directory-walk order. Numeric-looking values sort numerically,

@@ -24,8 +24,16 @@ class SortKey:
 
     name: str
     descending: bool = False
+    seed: int | None = None
+
+    @property
+    def is_random(self) -> bool:
+        """Return whether this key shuffles entries instead of comparing them."""
+        return self.name == "random"
 
     def __str__(self) -> str:
+        if self.is_random:
+            return "random" if self.seed is None else f"random {self.seed}"
         if self.descending:
             return f"{self.name} desc"
         return self.name
@@ -40,21 +48,42 @@ def parse_sort_spec(text: str) -> SortSpec:
     """Parse a comma-separated sort specification.
 
     Each key is a tag name followed by an optional ``asc`` or ``desc``
-    direction. An empty or whitespace-only specification means no ordering,
+    direction. The special key ``random`` must be last and accepts an optional
+    integer seed. An empty or whitespace-only specification means no ordering,
     which lets configuration disable the default sort.
     """
     if not text.strip():
         return ()
 
     keys: list[SortKey] = []
+    random_seen = False
     for part in text.split(","):
         item = part.strip()
         if not item:
             raise SortSpecError("sort key must not be empty")
         components = item.split()
+        name = components[0].lower()
+
+        if random_seen:
+            raise SortSpecError("random must be the last sort key")
+
+        if name == "random":
+            if len(components) > 2:
+                raise SortSpecError(f"invalid random sort key: {item!r}")
+            seed = None
+            if len(components) == 2:
+                seed_text = components[1]
+                if not INT_RE.match(seed_text):
+                    raise SortSpecError(
+                        "random accepts only an optional non-negative integer seed"
+                    )
+                seed = int(seed_text)
+            keys.append(SortKey("random", seed=seed))
+            random_seen = True
+            continue
+
         if len(components) > 2:
             raise SortSpecError(f"invalid sort key: {item!r}")
-        name = components[0].lower()
         if len(components) == 2:
             direction = components[1].lower()
             if direction not in {"asc", "desc"}:

@@ -128,7 +128,8 @@ Both forms also warn when the file matches the current exclude configuration.
 - Only songs that match **all** rules are included.
 - Entry order comes from the file's `@sort` directive. Without one,
   `[output] sort` applies; its default is `filename`, the absolute path.
-  Equal keys keep directory-walk order. See
+  Equal keys keep directory-walk order. `@sort random` (optionally with an
+  integer seed) shuffles entries. See
   [Ordering](https://github.com/haplo/genplis/blob/main/docs/m3ug.md#ordering).
 - `@DEDUPE` keeps the first entry for each key after ordering; entries missing
   a key are always kept. `@LIMIT` caps the number of entries and

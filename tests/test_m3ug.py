@@ -993,9 +993,35 @@ def test_duplicate_sort_directive_is_an_error() -> None:
         parse_m3ug("@sort artist\n@sort album\n", "favorites.m3ug")
 
 
-def test_sort_directive_needs_a_tag() -> None:
-    with pytest.raises(GenplisM3UGException, match="@sort needs at least one tag"):
-        parse_m3ug("@sort\n", "favorites.m3ug")
+def test_sort_directive_without_keys_means_walk_order() -> None:
+    parsed = parse_m3ug("@sort\n", "favorites.m3ug")
+
+    assert parsed.sort == ()
+
+
+def test_sort_random_directive() -> None:
+    assert parse_m3ug("@sort random\n").sort == (SortKey("random"),)
+    assert parse_m3ug("@sort random 42\n").sort == (SortKey("random", seed=42),)
+    assert parse_m3ug("@sort artist, random 7\n").sort == (
+        SortKey("artist"),
+        SortKey("random", seed=7),
+    )
+
+
+@pytest.mark.parametrize(
+    "spec",
+    [
+        "random desc",
+        "random asc",
+        "random -1",
+        "random 1.5",
+        "random 1, artist",
+        "random, random",
+    ],
+)
+def test_invalid_random_sort_keys_are_errors(spec: str) -> None:
+    with pytest.raises(GenplisM3UGException):
+        parse_m3ug(f"@sort {spec}\n", "favorites.m3ug")
 
 
 def test_invalid_sort_direction_is_an_error() -> None:
