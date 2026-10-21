@@ -76,10 +76,13 @@ Rules are ANDed: `core.filter_songs` stops at the first failing rule. Each
 ## Parallel parsing
 
 `core.process_directory` walks and checks the cache in the main process. With
-`--jobs 1`, or when fewer than `executors.MIN_PARALLEL_FILES` files need
-parsing, it calls `core.process_file` inline and keeps today's verbose order.
-Otherwise it sends `ParseItem` batches to `executors.ProcessExecutor` and
-collects `ParseResult` objects.
+`--jobs 1`, it calls `core.process_file` inline during the walk and keeps the
+old per-file verbose order. With more workers it resolves cache hits during
+the walk and queues misses and stale files. If fewer than
+`executors.MIN_PARALLEL_FILES` files are queued, `SequentialExecutor` parses
+them in the main process after the walk; otherwise `ProcessExecutor` sends
+`ParseItem` batches to worker processes. In both `--jobs > 1` cases the
+miss/stale diagnostics are printed after the walk.
 
 Invariants:
 
