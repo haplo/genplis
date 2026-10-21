@@ -372,6 +372,13 @@ class _InterruptingExecutor:
         self.cancelled = cancel
 
 
+class _FailingExecutor(_InterruptingExecutor):
+    def parse(self, items: Sequence[ParseItem]) -> Iterator[ParseResult]:
+        item = items[0]
+        yield ParseResult(item, {"title": ["Failed"]}, ())
+        raise RuntimeError("parse failed")
+
+
 def test_interrupt_flushes_stored_rows(
     tmp_path: Path,
     file_mp3: Path,
@@ -393,6 +400,39 @@ def test_interrupt_flushes_stored_rows(
     try:
         create_files_table(cursor)
         with pytest.raises(KeyboardInterrupt):
+            process_directory(conn, cursor, root, args)
+    finally:
+        conn.close()
+
+    assert executor.cancelled
+    conn, cursor = setup_database_connection(tmp_path / "cache.db")
+    try:
+        assert cursor.execute("SELECT path FROM files").fetchall() == [(str(song),)]
+    finally:
+        conn.close()
+
+
+def test_error_flushes_stored_rows(
+    tmp_path: Path,
+    file_mp3: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "music"
+    root.mkdir()
+    song = root / "song.mp3"
+    shutil.copy2(file_mp3, song)
+
+    executor = _FailingExecutor()
+    monkeypatch.setattr(
+        "genplis.core.make_executor",
+        lambda *_args, **_kwargs: executor,
+    )
+    args = _make_args(root, tmp_path / "cache.db", jobs=2)
+
+    conn, cursor = setup_database_connection(tmp_path / "cache.db")
+    try:
+        create_files_table(cursor)
+        with pytest.raises(RuntimeError, match="parse failed"):
             process_directory(conn, cursor, root, args)
     finally:
         conn.close()
