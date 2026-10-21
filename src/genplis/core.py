@@ -36,6 +36,7 @@ class Args:
     config: Config
     include_source: bool = True
     clean: bool = False
+    config_disabled: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -220,6 +221,7 @@ def resolve_args(args: argparse.Namespace, config: Config) -> Args:
         config=config,
         include_source=include_source,
         clean=args.clean,
+        config_disabled=args.no_config,
     )
 
 
@@ -517,7 +519,9 @@ def clean_database(
 def _run(args: Args) -> None:
     """Run genplis with resolved arguments."""
     if args.verbosity.is_verbose:
-        if args.config.source is not None:
+        if args.config_disabled:
+            print("Configuration disabled with --no-config")
+        elif args.config.source is not None:
             print(f"Using config file {args.config.source}")
         else:
             print("No config file found; using defaults")

@@ -1213,6 +1213,27 @@ def test_main_rejects_quiet_and_verbose_together(
     assert "--quiet cannot be combined with --verbose" in captured.err
 
 
+def test_verbose_reports_no_config_flag(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    music = tmp_path / "music"
+    music.mkdir()
+    db_path = tmp_path / "genplis.db"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["genplis", "-v", "--no-config", "--db", str(db_path), str(music)],
+    )
+
+    main()
+
+    output = capsys.readouterr().out
+    assert "Configuration disabled with --no-config" in output
+    assert "No config file found; using defaults" not in output
+
+
 def test_main_closes_database_connection(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
