@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import logging
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from pathlib import Path
 from typing import ClassVar, Literal, Protocol, Self, TypeGuard
 
 from .exceptions import GenplisM3UGException
@@ -872,6 +873,40 @@ def format_expression(node: FilterNode | None) -> str:
 
 
 @dataclass(frozen=True, slots=True)
+class _Unset:
+    """Marker for a directive that a file did not set."""
+
+
+UNSET = _Unset()
+
+
+@dataclass(frozen=True, slots=True)
+class Directives:
+    """Directive values with unset markers for include merging."""
+
+    sort: SortSpec | _Unset = UNSET
+    limit: int | _Unset = UNSET
+    dedupe: tuple[str, ...] | _Unset = UNSET
+    max_duration: float | _Unset = UNSET
+
+
+def _merge_directives(base: Directives, override: Directives) -> Directives:
+    """Return base with every directive set by override applied."""
+    return Directives(
+        sort=base.sort if isinstance(override.sort, _Unset) else override.sort,
+        limit=base.limit if isinstance(override.limit, _Unset) else override.limit,
+        dedupe=(
+            base.dedupe if isinstance(override.dedupe, _Unset) else override.dedupe
+        ),
+        max_duration=(
+            base.max_duration
+            if isinstance(override.max_duration, _Unset)
+            else override.max_duration
+        ),
+    )
+
+
+@dataclass(frozen=True, slots=True)
 class M3UGFile:
     """A parsed M3UG file: a filter expression and playlist settings."""
 
@@ -894,18 +929,87 @@ def _parse_sort_directive(raw_value: str, filename: str, line: int) -> SortSpec:
         raise GenplisM3UGException(str(exc), filename, line) from exc
 
 
-def parse_m3ug(
-    content: str, filename: str = "N/A", verbosity: Verbosity = Verbosity.NORMAL
-) -> M3UGFile:
+MAX_INCLUDE_DEPTH = 32
+
+type IncludeLoader = Callable[[Path], str]
+
+
+def _and_expressions(expressions: list[FilterNode | None]) -> FilterNode | None:
+    """Combine expressions with AND, flattening nested conjunctions."""
+    nodes: list[FilterNode] = []
+    for expression in expressions:
+        if expression is None:
+            continue
+        if isinstance(expression, AndNode):
+            nodes.extend(expression.nodes)
+        else:
+            nodes.append(expression)
+    if not nodes:
+        return None
+    if len(nodes) == 1:
+        return nodes[0]
+    return AndNode(tuple(nodes))
+
+
+def _resolve_include_path(raw_path: str, filename: str, line: int) -> Path:
+    value = raw_path.strip()
+    if not value:
+        raise GenplisM3UGException("@INCLUDE needs a path", filename, line)
+    if _is_quoted(value):
+        value = _unescape_quoted(value[1:-1])
+    path = Path(value).expanduser()
+    if path.is_absolute():
+        return path
+    base = Path.cwd() if filename == "N/A" else Path(filename).expanduser().parent
+    return base / path
+
+
+def _read_include(
+    target: Path,
+    raw_path: str,
+    filename: str,
+    line: int,
+    include_loader: IncludeLoader | None,
+) -> str:
+    try:
+        if include_loader is not None:
+            return include_loader(target)
+        if not target.exists():
+            raise FileNotFoundError(target)
+        if target.is_dir():
+            raise IsADirectoryError(target)
+        return target.read_text(encoding="utf-8-sig")
+    except FileNotFoundError as exc:
+        raise GenplisM3UGException(
+            f'cannot include "{raw_path}": file not found', filename, line
+        ) from exc
+    except IsADirectoryError as exc:
+        raise GenplisM3UGException(
+            f'cannot include "{raw_path}": path is a directory', filename, line
+        ) from exc
+    except OSError as exc:
+        raise GenplisM3UGException(
+            f'cannot include "{raw_path}": cannot read file: {exc}', filename, line
+        ) from exc
+
+
+def _parse_m3ug_file(
+    content: str,
+    filename: str,
+    verbosity: Verbosity,
+    include_loader: IncludeLoader | None,
+    stack: tuple[Path, ...],
+    depth: int,
+) -> tuple[M3UGFile, Directives]:
     and_groups: list[list[FilterNode]] = []
     current_group: list[FilterNode] | None = None
-    sort_spec: SortSpec | None = None
-    limit_spec: int | None = None
-    max_duration_spec: float | None = None
-    dedupe_spec: tuple[str, ...] | None = None
-    limit_seen = False
-    max_duration_seen = False
-    dedupe_seen = False
+    own_sort: SortSpec | _Unset = UNSET
+    own_limit: int | _Unset = UNSET
+    own_max_duration: float | _Unset = UNSET
+    own_dedupe: tuple[str, ...] | _Unset = UNSET
+    included_directives: list[Directives] = []
+    included_expressions: list[FilterNode | None] = []
+
     if verbosity.is_verbose:
         print(f"Parsing M3UG file {filename}:")
         print("----------------")
@@ -960,15 +1064,15 @@ def parse_m3ug(
                     raise GenplisM3UGException(
                         "Directives cannot use rule modifiers", filename, n
                     )
-                if sort_spec is not None:
+                if not isinstance(own_sort, _Unset):
                     raise GenplisM3UGException(
                         "Duplicate @sort directive; combine all keys on one line",
                         filename,
                         n,
                     )
-                sort_spec = _parse_sort_directive(rest, filename, n)
+                own_sort = _parse_sort_directive(rest, filename, n)
                 if verbosity.is_verbose:
-                    print(f"Parsed sort: {format_sort_spec(sort_spec)}")
+                    print(f"Parsed sort: {format_sort_spec(own_sort)}")
                 is_directive = True
                 break
             if modifier == "@limit":
@@ -976,7 +1080,7 @@ def parse_m3ug(
                     raise GenplisM3UGException(
                         "Directives cannot use rule modifiers", filename, n
                     )
-                if limit_seen:
+                if not isinstance(own_limit, _Unset):
                     raise GenplisM3UGException(
                         "Duplicate @LIMIT directive", filename, n
                     )
@@ -987,10 +1091,9 @@ def parse_m3ug(
                         filename,
                         n,
                     )
-                limit_spec = int(raw_limit)
-                limit_seen = True
+                own_limit = int(raw_limit)
                 if verbosity.is_verbose:
-                    print(f"Parsed limit: {limit_spec}")
+                    print(f"Parsed limit: {own_limit}")
                 is_directive = True
                 break
             if modifier == "@max-duration":
@@ -998,7 +1101,7 @@ def parse_m3ug(
                     raise GenplisM3UGException(
                         "Directives cannot use rule modifiers", filename, n
                     )
-                if max_duration_seen:
+                if not isinstance(own_max_duration, _Unset):
                     raise GenplisM3UGException(
                         "Duplicate @MAX-DURATION directive", filename, n
                     )
@@ -1010,10 +1113,9 @@ def parse_m3ug(
                         filename,
                         n,
                     )
-                max_duration_spec = duration
-                max_duration_seen = True
+                own_max_duration = duration
                 if verbosity.is_verbose:
-                    print(f"Parsed max duration: {max_duration_spec}")
+                    print(f"Parsed max duration: {own_max_duration}")
                 is_directive = True
                 break
             if modifier == "@dedupe":
@@ -1021,7 +1123,7 @@ def parse_m3ug(
                     raise GenplisM3UGException(
                         "Directives cannot use rule modifiers", filename, n
                     )
-                if dedupe_seen:
+                if not isinstance(own_dedupe, _Unset):
                     raise GenplisM3UGException(
                         "Duplicate @DEDUPE directive", filename, n
                     )
@@ -1037,10 +1139,63 @@ def parse_m3ug(
                                 f"Duplicate @DEDUPE key: {key}", filename, n
                             )
                         keys.append(key)
-                dedupe_spec = tuple(keys)
-                dedupe_seen = True
+                own_dedupe = tuple(keys)
                 if verbosity.is_verbose:
-                    print(f"Parsed dedupe: {', '.join(dedupe_spec) or 'disabled'}")
+                    print(f"Parsed dedupe: {', '.join(own_dedupe) or 'disabled'}")
+                is_directive = True
+                break
+            if modifier == "@include":
+                if or_modifier or not_modifier:
+                    raise GenplisM3UGException(
+                        "@INCLUDE cannot be used under @OR or @NOT", filename, n
+                    )
+                if case_sensitive:
+                    raise GenplisM3UGException(
+                        "Directives cannot use rule modifiers", filename, n
+                    )
+                raw_path = rest.strip()
+                if not raw_path:
+                    raise GenplisM3UGException("@INCLUDE needs a path", filename, n)
+                target = _resolve_include_path(raw_path, filename, n)
+                resolved = target.resolve()
+                if resolved in stack:
+                    cycle_start = stack.index(resolved)
+                    chain = (*stack[cycle_start:], resolved)
+                    raise GenplisM3UGException(
+                        "include cycle: " + " -> ".join(path.name for path in chain),
+                        filename,
+                        n,
+                    )
+                if depth + 1 > MAX_INCLUDE_DEPTH:
+                    raise GenplisM3UGException(
+                        f"include depth exceeded (maximum {MAX_INCLUDE_DEPTH})",
+                        filename,
+                        n,
+                    )
+                display_path = (
+                    _unescape_quoted(raw_path[1:-1])
+                    if _is_quoted(raw_path)
+                    else raw_path
+                )
+                included_content = _read_include(
+                    resolved,
+                    display_path,
+                    filename,
+                    n,
+                    include_loader,
+                )
+                included_file, included_directive_values = _parse_m3ug_file(
+                    included_content,
+                    str(target),
+                    verbosity,
+                    include_loader,
+                    (*stack, resolved),
+                    depth + 1,
+                )
+                included_directives.append(included_directive_values)
+                included_expressions.append(included_file.expression)
+                if verbosity.is_verbose:
+                    print(f"Included {target}")
                 is_directive = True
                 break
             raise GenplisM3UGException(f"Unrecognized directive: {first}", filename, n)
@@ -1114,16 +1269,55 @@ def parse_m3ug(
     groups = tuple(
         group[0] if len(group) == 1 else OrNode(tuple(group)) for group in and_groups
     )
-    expression = AndNode(groups) if groups else None
+    own_expression = AndNode(groups) if groups else None
+    own_directives = Directives(
+        sort=own_sort,
+        limit=own_limit,
+        dedupe=own_dedupe,
+        max_duration=own_max_duration,
+    )
+    merged = Directives()
+    for included in included_directives:
+        merged = _merge_directives(merged, included)
+    merged = _merge_directives(merged, own_directives)
+
+    if included_expressions:
+        expression = _and_expressions([*included_expressions, own_expression])
+    else:
+        expression = own_expression
     if verbosity.is_verbose:
         print("Parsed rules:")
         print(format_expression(expression))
         print()
 
-    return M3UGFile(
-        expression,
-        sort_spec,
-        limit_spec,
-        max_duration_spec,
-        dedupe_spec,
+    parsed = M3UGFile(
+        expression=expression,
+        sort=None if isinstance(merged.sort, _Unset) else merged.sort,
+        limit=None if isinstance(merged.limit, _Unset) else merged.limit,
+        max_duration=(
+            None if isinstance(merged.max_duration, _Unset) else merged.max_duration
+        ),
+        dedupe=None if isinstance(merged.dedupe, _Unset) else merged.dedupe,
     )
+    return parsed, merged
+
+
+def parse_m3ug(
+    content: str,
+    filename: str = "N/A",
+    verbosity: Verbosity = Verbosity.NORMAL,
+    *,
+    include_loader: IncludeLoader | None = None,
+) -> M3UGFile:
+    stack: tuple[Path, ...] = ()
+    if filename != "N/A":
+        stack = (Path(filename).expanduser().resolve(),)
+    parsed, _ = _parse_m3ug_file(
+        content,
+        filename,
+        verbosity,
+        include_loader,
+        stack,
+        0,
+    )
+    return parsed

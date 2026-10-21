@@ -230,6 +230,9 @@ command-line verbosity flag overrides the configured one.
 - Configuration problems and other fatal errors are reported to standard
   error as `genplis: error: ...` with status 1.
 - An invalid `.m3ug` file stops the run with an error describing the problem.
+  The same applies to `@INCLUDE` problems: a missing, unreadable, or cyclic
+  include, a directory, excessive include depth, or invalid syntax in an
+  included file.
 - A playlist that exists and cannot be overwritten because of
   `--no-overwrite` produces a warning, not an error. The warning is
   suppressed by `-q`.

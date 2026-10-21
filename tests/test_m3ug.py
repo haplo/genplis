@@ -1034,6 +1034,230 @@ def test_unknown_directive_is_an_error() -> None:
         parse_m3ug("@group artist\n", "favorites.m3ug")
 
 
+def test_include_adds_its_rules_as_a_separate_and_group(tmp_path: Path) -> None:
+    main = tmp_path / "Main.m3ug"
+    base = tmp_path / "Base.m3ug"
+    base.write_text("genre = Metal\n", encoding="utf-8")
+    main.write_text("@INCLUDE Base.m3ug\nrating >= 4\n", encoding="utf-8")
+
+    parsed = parse_m3ug(main.read_text(), str(main))
+
+    assert parsed.expression is not None
+    assert parsed.expression.apply({"genre": "Metal", "rating": 4})
+    assert not parsed.expression.apply({"genre": "Rock", "rating": 4})
+    assert not parsed.expression.apply({"genre": "Metal", "rating": 3})
+    assert len(parsed.rules) == 2
+
+
+def test_include_does_not_join_the_current_or_group(tmp_path: Path) -> None:
+    main = tmp_path / "Main.m3ug"
+    base = tmp_path / "Base.m3ug"
+    base.write_text("artist = X\n", encoding="utf-8")
+    main.write_text(
+        "genre = Metal\n@INCLUDE Base.m3ug\n@OR genre = Rock\n",
+        encoding="utf-8",
+    )
+
+    parsed = parse_m3ug(main.read_text(), str(main))
+
+    assert parsed.expression is not None
+    assert parsed.expression.apply({"artist": "X", "genre": "Rock"})
+    assert not parsed.expression.apply({"genre": "Rock"})
+
+
+def test_include_directive_precedence(tmp_path: Path) -> None:
+    first = tmp_path / "First.m3ug"
+    second = tmp_path / "Second.m3ug"
+    main = tmp_path / "Main.m3ug"
+    first.write_text(
+        "@SORT artist\n@LIMIT 5\n@DEDUPE title\n@MAX-DURATION 1h\ngenre = Metal\n",
+        encoding="utf-8",
+    )
+    second.write_text("@SORT album\n@MAX-DURATION 2h\n", encoding="utf-8")
+    main.write_text(
+        "@INCLUDE First.m3ug\n@INCLUDE Second.m3ug\n@LIMIT 2\nrating >= 4\n",
+        encoding="utf-8",
+    )
+
+    parsed = parse_m3ug(main.read_text(), str(main))
+
+    assert parsed.sort == (SortKey("album"),)
+    assert parsed.limit == 2
+    assert parsed.dedupe == ("title",)
+    assert parsed.max_duration == 7200
+
+
+def test_current_file_directive_wins_regardless_of_position(tmp_path: Path) -> None:
+    base = tmp_path / "Base.m3ug"
+    main = tmp_path / "Main.m3ug"
+    base.write_text("@LIMIT 5\n@SORT artist\n", encoding="utf-8")
+    main.write_text(
+        "@LIMIT 1\n@INCLUDE Base.m3ug\n@SORT title\n",
+        encoding="utf-8",
+    )
+
+    parsed = parse_m3ug(main.read_text(), str(main))
+
+    assert parsed.limit == 1
+    assert parsed.sort == (SortKey("title"),)
+
+
+def test_nested_include_merges_depth_first(tmp_path: Path) -> None:
+    deepest = tmp_path / "Deepest.m3ug"
+    middle = tmp_path / "Middle.m3ug"
+    main = tmp_path / "Main.m3ug"
+    deepest.write_text("@LIMIT 5\n@DEDUPE title\ngenre = Metal\n", encoding="utf-8")
+    middle.write_text(
+        "@INCLUDE Deepest.m3ug\n@LIMIT 3\nrating >= 4\n", encoding="utf-8"
+    )
+    main.write_text("@INCLUDE Middle.m3ug\n@DEDUPE album\n", encoding="utf-8")
+
+    parsed = parse_m3ug(main.read_text(), str(main))
+
+    assert parsed.limit == 3
+    assert parsed.dedupe == ("album",)
+    assert parsed.expression is not None
+    assert parsed.expression.apply({"genre": "Metal", "rating": 4})
+    assert not parsed.expression.apply({"genre": "Metal", "rating": 3})
+    assert len(parsed.rules) == 2
+
+
+def test_include_paths_are_relative_to_the_containing_file(tmp_path: Path) -> None:
+    subdirectory = tmp_path / "sub"
+    subdirectory.mkdir()
+    base = subdirectory / "Base file.m3ug"
+    main = tmp_path / "Main.m3ug"
+    base.write_text("genre = Metal\n", encoding="utf-8")
+    main.write_text('@INCLUDE "sub/Base file.m3ug"\n', encoding="utf-8")
+
+    parsed = parse_m3ug(main.read_text(), str(main))
+
+    assert parsed.expression is not None
+    assert parsed.expression.apply({"genre": "Metal"})
+
+
+def test_include_expands_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    base = tmp_path / "Base.m3ug"
+    base.write_text("genre = Metal\n", encoding="utf-8")
+    main = tmp_path / "Main.m3ug"
+    main.write_text("@INCLUDE ~/Base.m3ug\n", encoding="utf-8")
+
+    parsed = parse_m3ug(main.read_text(), str(main))
+
+    assert parsed.expression is not None
+    assert parsed.expression.apply({"genre": "Metal"})
+
+
+def test_include_loader_callback(tmp_path: Path) -> None:
+    main = tmp_path / "Main.m3ug"
+    base = (tmp_path / "Base.m3ug").resolve()
+    main.write_text("@INCLUDE Base.m3ug\n", encoding="utf-8")
+    loaded: list[Path] = []
+
+    def loader(path: Path) -> str:
+        loaded.append(path)
+        return "genre = Metal\n"
+
+    parsed = parse_m3ug(main.read_text(), str(main), include_loader=loader)
+
+    assert loaded == [base]
+    assert parsed.expression is not None
+    assert parsed.expression.apply({"genre": "Metal"})
+
+
+def test_missing_include_is_fatal(tmp_path: Path) -> None:
+    main = tmp_path / "Metal.m3ug"
+    main.write_text("@INCLUDE Base.m3ug\n", encoding="utf-8")
+
+    with pytest.raises(
+        GenplisM3UGException,
+        match=r'cannot include "Base\.m3ug": file not found',
+    ):
+        parse_m3ug(main.read_text(), str(main))
+
+
+def test_include_directory_is_fatal(tmp_path: Path) -> None:
+    main = tmp_path / "Metal.m3ug"
+    (tmp_path / "Base.m3ug").mkdir()
+    main.write_text("@INCLUDE Base.m3ug\n", encoding="utf-8")
+
+    with pytest.raises(
+        GenplisM3UGException,
+        match=r'cannot include "Base\.m3ug": path is a directory',
+    ):
+        parse_m3ug(main.read_text(), str(main))
+
+
+def test_unreadable_include_is_fatal(tmp_path: Path) -> None:
+    main = tmp_path / "Metal.m3ug"
+    main.write_text("@INCLUDE Base.m3ug\n", encoding="utf-8")
+
+    def loader(path: Path) -> str:
+        raise PermissionError(path)
+
+    with pytest.raises(GenplisM3UGException, match="cannot read file"):
+        parse_m3ug(main.read_text(), str(main), include_loader=loader)
+
+
+def test_include_cycle_reports_the_chain(tmp_path: Path) -> None:
+    first = tmp_path / "Metal.m3ug"
+    second = tmp_path / "Base.m3ug"
+    first.write_text("@INCLUDE Base.m3ug\n", encoding="utf-8")
+    second.write_text("@INCLUDE Metal.m3ug\n", encoding="utf-8")
+
+    with pytest.raises(
+        GenplisM3UGException,
+        match=r"include cycle: Metal\.m3ug -> Base\.m3ug -> Metal\.m3ug",
+    ):
+        parse_m3ug(first.read_text(), str(first))
+
+
+def test_include_depth_is_limited(tmp_path: Path) -> None:
+    for index in range(34):
+        content = f"@INCLUDE file-{index + 1}.m3ug\n"
+        (tmp_path / f"file-{index}.m3ug").write_text(content, encoding="utf-8")
+    (tmp_path / "file-34.m3ug").write_text("genre = Metal\n", encoding="utf-8")
+    first = tmp_path / "file-0.m3ug"
+
+    with pytest.raises(GenplisM3UGException, match="include depth exceeded"):
+        parse_m3ug(first.read_text(), str(first))
+
+
+def test_invalid_included_syntax_reports_the_included_file(tmp_path: Path) -> None:
+    main = tmp_path / "Metal.m3ug"
+    base = tmp_path / "Base.m3ug"
+    base.write_text("invalid\n", encoding="utf-8")
+    main.write_text("@INCLUDE Base.m3ug\n", encoding="utf-8")
+
+    with pytest.raises(
+        GenplisM3UGException,
+        match=r"Base\.m3ug:1: Invalid filter syntax",
+    ):
+        parse_m3ug(main.read_text(), str(main))
+
+
+def test_include_needs_a_path(tmp_path: Path) -> None:
+    main = tmp_path / "Metal.m3ug"
+    main.write_text("@INCLUDE\n", encoding="utf-8")
+
+    with pytest.raises(GenplisM3UGException, match="@INCLUDE needs a path"):
+        parse_m3ug(main.read_text(), str(main))
+
+
+def test_include_cannot_be_used_with_rule_modifiers(tmp_path: Path) -> None:
+    main = tmp_path / "Metal.m3ug"
+    base = tmp_path / "Base.m3ug"
+    base.write_text("genre = Metal\n", encoding="utf-8")
+    main.write_text("@OR @INCLUDE Base.m3ug\n", encoding="utf-8")
+
+    with pytest.raises(
+        GenplisM3UGException,
+        match="@INCLUDE cannot be used under @OR or @NOT",
+    ):
+        parse_m3ug(main.read_text(), str(main))
+
+
 def test_examples_parse() -> None:
     """Every shipped example filter must remain valid."""
     examples_dir = Path(__file__).resolve().parent.parent / "examples"

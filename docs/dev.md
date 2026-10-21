@@ -31,7 +31,7 @@ src/genplis/
     config.py       INI loading and validation
     db.py           SQLite cache
     tags.py         tag extraction and calculated properties
-    m3ug.py         filter and @sort parser, rule nodes
+    m3ug.py         filter, directive and @sort parser, rule nodes
     sorting.py      sort specs, value normalization, comparison
     m3u.py          playlist writer
     files.py        modification-time helper
@@ -79,6 +79,14 @@ a `NotNode`. Each leaf `RuleNode` looks up its tag, normalizes multi-value
 tags, and calls its own `check()`. `M3UGFile.rules` flattens the leaf rules for
 diagnostics; matching always uses `M3UGFile.expression`. Directives are parsed
 separately and never participate in filtering.
+
+`@INCLUDE` is resolved recursively in the main process. Each file produces a
+`Directives` value with `UNSET` markers, merges its includes in include order,
+then applies its own directives last. Included expressions become separate
+AND groups. Cycles are detected by resolved path, depth is capped at 32, and
+missing, unreadable, directory, cyclic, too-deep, or invalid includes raise
+`GenplisM3UGException` with the including file and line. `include_loader` on
+`parse_m3ug` lets tests supply file contents without touching the filesystem.
 
 Tags are not retained across files in a normal run. `process_directory` only
 keeps matching `Match` records (the playlist entry, walk order, and normalized
@@ -399,7 +407,7 @@ pending; see the roadmap.
   - [ ] "Starts/ends with" operator
   - [ ] Regex operator
   - [ ] Duration formats (`mm:ss`, `<n>m`)
-  - [ ] Include other M3UG
+  - [x] Include other M3UG
   - [ ] Abstract M3UG (doesn't generate an M3U, meant for include)
 - [x] Command for DB cleaning
 - [x] Optimize memory usage

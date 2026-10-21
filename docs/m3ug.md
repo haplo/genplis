@@ -429,6 +429,68 @@ Dedupe runs before `@LIMIT` and `@MAX-DURATION`, so duplicate entries do not
 consume either cap. `@DEDUPE` with no tags disables dedupe; this is useful when
 an included file supplies a default set of keys (see `@INCLUDE`).
 
+## Including other files
+
+`@INCLUDE` loads rules and default directives from another file:
+
+```text
+@INCLUDE Base.m3ug
+@INCLUDE "shared/Short songs.m3ug"
+```
+
+The rest of the line is the path. Matching quotes are stripped, `~` is
+expanded, and relative paths resolve from the directory of the file containing
+the `@INCLUDE`. Absolute paths work too. Any readable file may be included;
+the `.m3ug` extension is only a convention. Includes may nest up to 32 levels
+deep.
+
+Included rules are ANDed with the current file's rules as separate groups.
+`@OR` and `@NOT` only apply within the file that writes them:
+
+```text
+# Base.m3ug
+genre = Metal
+
+# Main.m3ug
+@INCLUDE Base.m3ug
+rating >= 4
+@OR rating = 5
+```
+
+This matches metal songs rated 4 or 5; the included `genre = Metal` is not
+part of the `rating` OR group. `@INCLUDE` cannot be used under `@OR` or
+`@NOT`.
+
+### Directive merging
+
+Included files provide defaults, and the current file's directives override
+them regardless of where the `@INCLUDE` line or the directive appears:
+
+```text
+# Base.m3ug
+@SORT artist
+@LIMIT 10
+@DEDUPE title
+
+# Main.m3ug
+@LIMIT 5
+@INCLUDE Base.m3ug
+```
+
+The resulting playlist sorts by `artist`, dedupes by title, and keeps at most
+5 entries. When a file includes several files, later includes win per
+directive. Nested includes resolve depth-first, so each file's own directives
+override its includes before the result is passed to its parent.
+
+All include problems are fatal and name the including file, line, and path:
+missing files, unreadable files, directories, cycles, excessive depth, and
+invalid syntax in an included file. For example:
+
+```text
+Metal.m3ug:3: cannot include "Base.m3ug": file not found
+Metal.m3ug:3: include cycle: Metal.m3ug -> Base.m3ug -> Metal.m3ug
+```
+
 ## Special tag names
 
 Tag names are matched case-insensitively, so `Artist`, `artist`, and `ARTIST`
