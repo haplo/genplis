@@ -92,11 +92,6 @@ def load_config(path: Path | None = None) -> Config:
     except OSError as exc:
         raise GenplisConfigError(f"{config_path}: cannot read file: {exc}") from exc
 
-    if parser.defaults():
-        raise GenplisConfigError(
-            f"{config_path}: the [DEFAULT] section is not supported"
-        )
-
     sections = _section_names(parser, config_path)
     _validate_sections(parser, sections, config_path)
 

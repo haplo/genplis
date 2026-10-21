@@ -47,7 +47,6 @@ The file is standard INI syntax with a few strict rules:
 - **Unknown names are errors.** Unknown sections and unknown options make
   genplis exit with an error instead of being ignored, which catches typos.
 - **Duplicate sections are errors**, even when only the case differs.
-- **`[DEFAULT]` is not supported.** Put settings in the sections below.
 - **No interpolation.** The percent sign is an ordinary character, so regexes
   such as `/100%/` work as written.
 - **Lists are one entry per line.** For `exclude` and `ignore`, each non-empty

@@ -182,7 +182,6 @@ def test_percent_sign_is_literal(tmp_path: Path) -> None:
         ("[output]\ninclude_source = maybe\n", "expected a boolean"),
         ("[collection]\nexclude = [\n", "invalid regular expression"),
         ("[collection\npath = /music\n", "invalid INI"),
-        ("[DEFAULT]\npath = /music\n", "DEFAULT"),
         (
             "[tags]\nmax_size = 1\n[Tags]\nmax_size = 2\n",
             "duplicate section",
