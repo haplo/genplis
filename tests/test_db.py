@@ -7,6 +7,7 @@ import genplis.db as db
 from genplis.config import TagsConfig
 from genplis.db import (
     CacheStatus,
+    WriteBatch,
     cache_tags_for_file,
     create_files_table,
     get_cache_status,
@@ -260,6 +261,99 @@ def test_get_cached_tags_success(genplis_db: sqlite3.Connection) -> None:
     )
     tags = get_cached_tags(genplis_db.cursor(), Path("/some/path"))
     assert tags == {"a": "b"}
+
+
+def _row_count(db_path: Path) -> int:
+    conn, cursor = setup_database_connection(db_path)
+    try:
+        return cursor.execute("SELECT count(*) FROM files").fetchone()[0]
+    finally:
+        conn.close()
+
+
+def test_write_batch_commits_every_n_writes(tmp_path: Path) -> None:
+    db_path = tmp_path / "batch.db"
+    conn, cursor = setup_database_connection(db_path)
+    try:
+        create_files_table(cursor)
+        conn.commit()
+        batch = WriteBatch(conn, every=3)
+
+        for index in range(2):
+            batch.store(
+                cursor,
+                tmp_path / f"song-{index}.mp3",
+                {"title": [str(index)]},
+                last_modified=index,
+            )
+        assert _row_count(db_path) == 0
+
+        batch.store(
+            cursor,
+            tmp_path / "song-2.mp3",
+            {"title": ["2"]},
+            last_modified=2,
+        )
+        assert _row_count(db_path) == 3
+        assert batch.seconds > 0
+    finally:
+        conn.close()
+
+
+def test_write_batch_with_zero_commits_only_on_flush(tmp_path: Path) -> None:
+    db_path = tmp_path / "batch.db"
+    conn, cursor = setup_database_connection(db_path)
+    try:
+        create_files_table(cursor)
+        conn.commit()
+        batch = WriteBatch(conn, every=0)
+
+        for index in range(5):
+            batch.store(
+                cursor,
+                tmp_path / f"song-{index}.mp3",
+                {},
+                last_modified=index,
+            )
+        assert _row_count(db_path) == 0
+
+        batch.flush()
+        assert _row_count(db_path) == 5
+    finally:
+        conn.close()
+
+
+def test_write_batch_ignores_cache_hits(tmp_path: Path) -> None:
+    db_path = tmp_path / "batch.db"
+    conn, cursor = setup_database_connection(db_path)
+    try:
+        create_files_table(cursor)
+        conn.commit()
+        batch = WriteBatch(conn, every=3)
+
+        for index in range(10):
+            assert (
+                get_cache_status(
+                    cursor,
+                    tmp_path / f"song-{index}.mp3",
+                    last_modified=index,
+                )
+                is CacheStatus.MISS
+            )
+
+        for index in range(2):
+            batch.store(
+                cursor,
+                tmp_path / f"song-{index}.mp3",
+                {},
+                last_modified=index,
+            )
+        assert _row_count(db_path) == 0
+
+        batch.flush()
+        assert _row_count(db_path) == 2
+    finally:
+        conn.close()
 
 
 def test_get_cached_tags_error_if_missing(genplis_db: sqlite3.Connection) -> None:

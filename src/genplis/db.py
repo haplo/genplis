@@ -1,6 +1,7 @@
 import json
 import os
 import sqlite3
+import time
 from enum import StrEnum
 from pathlib import Path
 from typing import cast
@@ -195,6 +196,12 @@ class WriteBatch:
         self._conn = conn
         self._every = every
         self._pending = 0
+        self._seconds = 0.0
+
+    @property
+    def seconds(self) -> float:
+        """Return the time spent writing rows and committing."""
+        return self._seconds
 
     def store(
         self,
@@ -206,19 +213,30 @@ class WriteBatch:
         verbosity: Verbosity = Verbosity.NORMAL,
     ) -> None:
         """Write one cache row and commit when the batch is full."""
-        cache_tags_for_file(
-            cursor,
-            file_path,
-            tags,
-            last_modified=last_modified,
-            verbosity=verbosity,
-        )
-        self._pending += 1
-        if self._every and self._pending >= self._every:
-            self.flush()
+        start = time.perf_counter()
+        try:
+            cache_tags_for_file(
+                cursor,
+                file_path,
+                tags,
+                last_modified=last_modified,
+                verbosity=verbosity,
+            )
+            self._pending += 1
+            if self._every and self._pending >= self._every:
+                self._commit()
+        finally:
+            self._seconds += time.perf_counter() - start
 
     def flush(self) -> None:
         """Commit any pending writes and reset the counter."""
+        start = time.perf_counter()
+        try:
+            self._commit()
+        finally:
+            self._seconds += time.perf_counter() - start
+
+    def _commit(self) -> None:
         self._conn.commit()
         self._pending = 0
 

@@ -39,6 +39,7 @@ from genplis.db import (
     setup_database_connection,
 )
 from genplis.exceptions import GenplisConfigError, GenplisError
+from genplis.executors import ParseOrder
 from genplis.m3ug import (
     ContainsRuleNode,
     EqualRuleNode,
@@ -1009,6 +1010,26 @@ def test_setup_argparse_rejects_negative_jobs() -> None:
         setup_argparse().parse_args(["--jobs", "-1", "/music"])
 
     assert exc_info.value.code == 2
+
+
+def test_resolve_args_prototype_options() -> None:
+    args = resolve_args(
+        setup_argparse().parse_args(
+            [
+                "--parse-order",
+                "unordered",
+                "--commit-every",
+                "8",
+                "--timings",
+                "/music",
+            ]
+        ),
+        Config(),
+    )
+
+    assert args.parse_order is ParseOrder.UNORDERED
+    assert args.commit_every == 8
+    assert args.show_timings is True
 
 
 def test_resolve_args_uses_include_source_from_config() -> None:

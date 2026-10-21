@@ -1,5 +1,6 @@
 import os
 import shutil
+from collections.abc import Iterator, Sequence
 from dataclasses import replace
 from pathlib import Path
 
@@ -12,7 +13,9 @@ from genplis.db import create_files_table, setup_database_connection
 from genplis.executors import (
     MAX_AUTO_WORKERS,
     MIN_PARALLEL_FILES,
+    ParseItem,
     ParseOrder,
+    ParseResult,
     ParseSettings,
     ProcessExecutor,
     SequentialExecutor,
@@ -46,13 +49,19 @@ def _run(
     root: Path,
     db_path: Path,
     jobs: int,
+    *,
+    order: ParseOrder = ParseOrder.ORDERED,
+    commit_every: int = 1,
 ) -> tuple[dict[Path, Tags], list[tuple[str, int, str]]]:
+    args = replace(
+        _make_args(root, db_path, jobs),
+        parse_order=order,
+        commit_every=commit_every,
+    )
     conn, cursor = setup_database_connection(db_path)
     try:
         create_files_table(cursor)
-        all_tags, _ = process_directory(
-            conn, cursor, root, _make_args(root, db_path, jobs)
-        )
+        all_tags, _ = process_directory(conn, cursor, root, args)
         rows = cursor.execute(
             "SELECT path, last_modified, tags FROM files ORDER BY path"
         ).fetchall()
@@ -122,6 +131,36 @@ def test_ordered_process_pool_matches_sequential(
     assert parallel_rows == sequential_rows
 
 
+def test_unordered_process_pool_matches_sequential(
+    tmp_path: Path,
+    file_mp3: Path,
+    file_ogg: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "music"
+    root.mkdir()
+    for index in range(4):
+        source = file_mp3 if index % 2 == 0 else file_ogg
+        shutil.copy2(source, root / f"song-{index}.{source.suffix[1:]}")
+    filter_file = root / "favorites.m3ug"
+    filter_file.write_text('artist = "Test Artist"\n', encoding="utf-8")
+
+    monkeypatch.setattr(executors, "MIN_PARALLEL_FILES", 4)
+    sequential_tags, sequential_rows = _run(root, tmp_path / "seq.db", jobs=1)
+    playlist = filter_file.with_suffix(".m3u").read_bytes()
+    parallel_tags, parallel_rows = _run(
+        root,
+        tmp_path / "parallel.db",
+        jobs=2,
+        order=ParseOrder.UNORDERED,
+    )
+
+    assert list(parallel_tags) == list(sequential_tags)
+    assert parallel_tags == sequential_tags
+    assert filter_file.with_suffix(".m3u").read_bytes() == playlist
+    assert parallel_rows == sequential_rows
+
+
 def test_ordered_process_pool_reports_worker_count(
     tmp_path: Path,
     file_mp3: Path,
@@ -182,5 +221,92 @@ def test_rows_are_visible_after_ordered_run(tmp_path: Path, file_mp3: Path) -> N
     conn, cursor = setup_database_connection(tmp_path / "cache.db")
     try:
         assert cursor.execute("SELECT count(*) FROM files").fetchone() == (1,)
+    finally:
+        conn.close()
+
+
+def test_timings_line_reports_phases(
+    tmp_path: Path,
+    file_mp3: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    root = tmp_path / "music"
+    root.mkdir()
+    shutil.copy2(file_mp3, root / "song.mp3")
+    args = replace(
+        _make_args(root, tmp_path / "cache.db", jobs=1),
+        show_timings=True,
+    )
+
+    conn, cursor = setup_database_connection(tmp_path / "cache.db")
+    try:
+        create_files_table(cursor)
+        process_directory(conn, cursor, root, args)
+    finally:
+        conn.close()
+
+    output = capsys.readouterr().out
+    timing_line = next(
+        line for line in output.splitlines() if line.startswith("timings:")
+    )
+    assert "files=1" in timing_line
+    assert "pending=1" in timing_line
+    assert "workers=1" in timing_line
+    assert "order=ordered" in timing_line
+    assert "walk=" in timing_line
+    assert "lookup=" in timing_line
+    assert "parse=" in timing_line
+    assert "worker_busy=" in timing_line
+    assert "util=" in timing_line
+    assert "db=" in timing_line
+    assert "filter=" in timing_line
+    assert "playlist=" in timing_line
+
+
+class _InterruptingExecutor:
+    def __init__(self) -> None:
+        self.cancelled = False
+
+    def parse(self, items: Sequence[ParseItem]) -> Iterator[ParseResult]:
+        item = items[0]
+        yield ParseResult(item, {"title": ["Interrupted"]}, (), 0.01)
+        raise KeyboardInterrupt
+
+    def close(self, *, cancel: bool = False) -> None:
+        self.cancelled = cancel
+
+
+def test_interrupt_flushes_stored_rows(
+    tmp_path: Path,
+    file_mp3: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "music"
+    root.mkdir()
+    song = root / "song.mp3"
+    shutil.copy2(file_mp3, song)
+
+    executor = _InterruptingExecutor()
+    monkeypatch.setattr(
+        "genplis.core.make_executor",
+        lambda *_args, **_kwargs: executor,
+    )
+    args = replace(
+        _make_args(root, tmp_path / "cache.db", jobs=2),
+        commit_every=0,
+    )
+
+    conn, cursor = setup_database_connection(tmp_path / "cache.db")
+    try:
+        create_files_table(cursor)
+        with pytest.raises(KeyboardInterrupt):
+            process_directory(conn, cursor, root, args)
+    finally:
+        conn.close()
+
+    assert executor.cancelled
+    conn, cursor = setup_database_connection(tmp_path / "cache.db")
+    try:
+        assert cursor.execute("SELECT path FROM files").fetchall() == [(str(song),)]
     finally:
         conn.close()
