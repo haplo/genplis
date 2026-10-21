@@ -245,6 +245,129 @@ def test_text_operators_use_string_values_for_numbers() -> None:
     assert rule.apply({"title": "Songs from 1980"})
 
 
+def test_multi_tag_and_multi_value_sets_are_existential() -> None:
+    parsed = parse_m3ug("[genre | style] = [Metal | Rock]")
+
+    assert parsed.rules == (
+        EqualRuleNode(NameNode("genre"), ValueNode("Metal")),
+        EqualRuleNode(NameNode("genre"), ValueNode("Rock")),
+        EqualRuleNode(NameNode("style"), ValueNode("Metal")),
+        EqualRuleNode(NameNode("style"), ValueNode("Rock")),
+    )
+    assert parsed.expression is not None
+    assert parsed.expression.apply({"genre": "Rock"})
+    assert parsed.expression.apply({"style": "Metal"})
+    assert not parsed.expression.apply({"genre": "Pop"})
+    assert not parsed.expression.apply({})
+
+
+def test_multi_value_text_operators() -> None:
+    rule = parse_m3ug("[filename | comment] ~ [Live | Bootleg]").expression
+    assert rule is not None
+    assert rule.apply({"filename": "/music/Live at Wembley.mp3"})
+    assert rule.apply({"comment": ["studio", "bootleg recording"]})
+    assert not rule.apply({"comment": "studio"})
+
+
+def test_not_equal_set_is_universal_non_membership() -> None:
+    rule = parse_m3ug("[genre | style] != [Pop | Rap]").expression
+    assert rule is not None
+    assert rule.apply({"genre": "Metal", "style": "Rock"})
+    assert not rule.apply({"genre": "Pop"})
+    assert not rule.apply({"style": "Rap"})
+    assert not rule.apply({"genre": ["Metal", "Pop"]})
+    assert rule.apply({})
+
+
+def test_multi_tag_comparisons_are_existential() -> None:
+    rule = parse_m3ug("[year | original_year] >= 1980").expression
+    assert rule is not None
+    assert rule.apply({"year": 1970, "original_year": 1985})
+    assert not rule.apply({"year": 1970, "original_year": 1975})
+    assert not rule.apply({})
+
+
+def test_comparison_rejects_multiple_values() -> None:
+    with pytest.raises(
+        GenplisM3UGException,
+        match="comparison operators take exactly one value; use @OR",
+    ):
+        parse_m3ug("rating > [3 | 4]", "favorites.m3ug")
+
+
+def test_quoted_pipes_and_bracket_literals() -> None:
+    assert parse_m3ug('title = "[Intro | Outro]"').rules == (
+        EqualRuleNode(NameNode("title"), ValueNode("[Intro | Outro]")),
+    )
+    assert parse_m3ug("title = [Untitled]").rules == (
+        EqualRuleNode(NameNode("title"), ValueNode("[Untitled]")),
+    )
+    assert parse_m3ug("title = []").rules == (
+        EqualRuleNode(NameNode("title"), ValueNode("[]")),
+    )
+
+    rule = parse_m3ug('artist = ["AC|DC" | "A|B"]').expression
+    assert rule is not None
+    assert rule.apply({"artist": "AC|DC"})
+    assert rule.apply({"artist": "A|B"})
+    assert not rule.apply({"artist": "AC"})
+
+
+def test_empty_and_nested_set_elements_are_errors() -> None:
+    for content in (
+        "[genre | ] = Metal",
+        "[genre | style] = [Metal | ]",
+        "[genre | [style]] = Metal",
+        "title = [Metal | [Rock]]",
+    ):
+        with pytest.raises(GenplisM3UGException):
+            parse_m3ug(content, "favorites.m3ug")
+
+
+def test_tag_set_elements_must_be_bare_names() -> None:
+    with pytest.raises(GenplisM3UGException, match="Invalid tag name in set"):
+        parse_m3ug('[genre | "style"] = Metal', "favorites.m3ug")
+    with pytest.raises(GenplisM3UGException, match="Invalid tag name in set"):
+        parse_m3ug("[genre | album style] = Metal", "favorites.m3ug")
+
+
+def test_case_modifier_applies_to_every_set_pair() -> None:
+    parsed = parse_m3ug("@CASE [artist | albumartist] = [X | Y]")
+    assert parsed.expression is not None
+    assert parsed.expression.apply({"artist": "X", "albumartist": "Y"})
+    assert not parsed.expression.apply({"artist": "x"})
+    assert all(rule.case_sensitive for rule in parsed.rules)
+
+
+def test_boolean_values_in_sets() -> None:
+    rule = parse_m3ug("[is_lossless | is_vbr] = [true | false]").expression
+    assert rule is not None
+    assert rule.apply({"is_lossless": True})
+    assert rule.apply({"is_vbr": False})
+    assert not rule.apply({"is_lossless": "true"})
+
+
+def test_multi_tag_missing_values_follow_operator_rules() -> None:
+    equal = parse_m3ug("[genre | style] = Metal").expression
+    not_equal = parse_m3ug("[genre | style] != Metal").expression
+    assert equal is not None and not_equal is not None
+    assert not equal.apply({})
+    assert not_equal.apply({})
+    assert equal.apply({"style": "Metal"})
+
+
+def test_multi_value_sets_combine_with_tag_value_lists() -> None:
+    rule = parse_m3ug("genre = [Metal | Rock]").expression
+    assert rule is not None
+    assert rule.apply({"genre": ["Pop", "Rock"]})
+    assert not rule.apply({"genre": ["Pop", "Jazz"]})
+
+    not_rule = parse_m3ug("genre != [Metal | Rock]").expression
+    assert not_rule is not None
+    assert not_rule.apply({"genre": ["Pop", "Jazz"]})
+    assert not not_rule.apply({"genre": ["Pop", "Rock"]})
+
+
 def test_equal_rule_string_value() -> None:
     rules = parse_rules("genre = Synthwave")
     assert rules == [

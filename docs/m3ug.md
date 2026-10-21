@@ -164,6 +164,53 @@ other operator not in this table are rejected with `Unrecognized operator`.
   per second, `samplerate` in hertz. See
   [Tags](https://github.com/haplo/genplis/blob/main/docs/tags.md).
 
+### Multi-value rules
+
+Square brackets make a set on either side of a rule:
+
+```text
+[genre | style] = [Metal | Rock]
+[artist | albumartist] = ["DANCE WITH THE DEAD" | Perturbator]
+[filename | comment] ~ [Live | Bootleg]
+[artist | albumartist] % ["^A" | "^B"]
+```
+
+A bracketed token is a set only when it is unquoted, starts with `[`, ends
+with `]`, and contains at least one top-level `|`. The scanner respects
+quotes and escapes:
+
+```text
+title = [Untitled]         # literal string "[Untitled]"
+title = [Intro | Outro]    # two-value set
+title = "[Intro | Outro]"  # literal string
+artist = ["AC|DC" | "A|B"] # pipes inside quotes are data
+```
+
+Tag-set elements are bare tag names: no quotes and no spaces. Value-set
+elements are normal values, so numbers, quoted strings, and booleans work as
+they do in a single-value rule. Empty elements and nested unquoted brackets
+are errors.
+
+Let `L` be the tag set and `R` the value set. Positive operators match when
+**any** pair from a tag in `L` and a value in `R` matches. `!=` is set
+non-membership: it matches only when **no** pair is equal. Missing tags
+contribute no pairs, so positive operators are false and `!=` is true.
+
+```text
+[genre | style] != [Pop | Rap]
+```
+
+is false when either tag has `Pop` or `Rap`. Comparison operators accept
+exactly one value on the right, but they can still use multiple tags:
+
+```text
+rating > [3 | 4]               # parse error
+rating > 4                     # valid
+[year | original_year] >= 1980 # valid
+```
+
+`@CASE` applies to every pair of a set rule.
+
 ### Missing values
 
 A tag that is absent is treated as missing. Zero and false are real values,

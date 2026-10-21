@@ -188,6 +188,124 @@ def _split_first_word(text: str) -> tuple[str, str]:
     return parts[0], parts[1]
 
 
+def _set_elements(token: str, filename: str, line: int) -> list[str] | None:
+    """Return the top-level elements of a bracketed set, or None.
+
+    A token is a set only when it is unquoted, starts with ``[``, ends with
+    ``]``, and contains at least one top-level ``|``. Empty elements and
+    nested unquoted brackets are errors.
+    """
+    token = token.strip()
+    if len(token) < 2 or token[0] != "[" or token[-1] != "]" or _is_quoted(token):
+        return None
+
+    elements: list[str] = []
+    buffer: list[str] = []
+    quote: str | None = None
+    escaped = False
+    for character in token[1:-1]:
+        if quote is not None:
+            buffer.append(character)
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == quote:
+                quote = None
+            continue
+        if character in {'"', "'"}:
+            quote = character
+            buffer.append(character)
+        elif escaped:
+            buffer.append(character)
+            escaped = False
+        elif character == "\\":
+            buffer.append(character)
+            escaped = True
+        elif character == "[":
+            raise GenplisM3UGException(
+                "Nested unquoted brackets are not allowed", filename, line
+            )
+        elif character == "]":
+            raise GenplisM3UGException(
+                "Nested unquoted brackets are not allowed", filename, line
+            )
+        elif character == "|":
+            elements.append("".join(buffer))
+            buffer = []
+        else:
+            buffer.append(character)
+    elements.append("".join(buffer))
+
+    if len(elements) == 1:
+        return None
+
+    for element in elements:
+        if not element.strip():
+            raise GenplisM3UGException("Empty set element", filename, line)
+    return elements
+
+
+def _parse_tag_names(
+    token: str, filename: str, line: int
+) -> tuple[NameNode, ...] | None:
+    elements = _set_elements(token, filename, line)
+    if elements is None:
+        return None
+    names: list[NameNode] = []
+    for element in elements:
+        name = element.strip()
+        if (
+            not name
+            or any(character.isspace() for character in name)
+            or any(character in "[]\"'" for character in name)
+        ):
+            raise GenplisM3UGException(
+                f"Invalid tag name in set: {element!r}", filename, line
+            )
+        names.append(NameNode.build(name, filename, line))
+    return tuple(names)
+
+
+def _parse_value_set(
+    token: str, mode: ValueMode, filename: str, line: int
+) -> tuple[ValueNode, ...] | None:
+    elements = _set_elements(token, filename, line)
+    if elements is None:
+        return None
+    return tuple(ValueNode.parse(element, mode, filename, line) for element in elements)
+
+
+def _build_rule_set(
+    operator: str,
+    names: tuple[NameNode, ...],
+    values: tuple[ValueNode, ...],
+    filename: str,
+    line: int,
+    case_sensitive: bool,
+) -> FilterNode:
+    """Build existentially or universally quantified rules for a set."""
+    warning_state = [False]
+    leaves = tuple(
+        RuleNode.build(
+            operator,
+            name,
+            value,
+            filename,
+            line,
+            case_sensitive,
+            warning_state=warning_state,
+        )
+        for name in names
+        for value in values
+    )
+    if len(leaves) == 1:
+        return leaves[0]
+    if operator == "!=":
+        return AndNode(leaves)
+    return OrNode(leaves)
+
+
 def _normalize_inline_flags(pattern: str) -> str:
     """Turn ``(?-i)`` into a scoped group for Python's regex engine.
 
@@ -362,6 +480,8 @@ class RuleNode:
         filename: str,
         line: int,
         case_sensitive: bool = False,
+        *,
+        warning_state: list[bool] | None = None,
     ) -> RuleNode:
         rule_cls: type[RuleNode]
         if operator == "=":
@@ -390,7 +510,7 @@ class RuleNode:
             )
         rule_cls.check_params(name, value, filename, line)
         try:
-            return rule_cls(name, value, case_sensitive)
+            return rule_cls(name, value, case_sensitive, warning_state=warning_state)
         except re.error as exc:
             raise GenplisM3UGException(
                 f"Invalid regular expression: {exc}", filename, line
@@ -723,7 +843,7 @@ def _parse_sort_directive(raw_value: str, filename: str, line: int) -> SortSpec:
 def parse_m3ug(
     content: str, filename: str = "N/A", verbosity: Verbosity = Verbosity.NORMAL
 ) -> M3UGFile:
-    rules: list[RuleNode] = []
+    rules: list[FilterNode] = []
     sort_spec: SortSpec | None = None
     if verbosity.is_verbose:
         print(f"Parsing M3UG file {filename}:")
@@ -791,12 +911,23 @@ def parse_m3ug(
                 )
 
             # building validates data
-            tag_node = NameNode.build(tag, filename, n)
-            value_node = ValueNode.parse(value, mode, filename, n)
-            rule_node = RuleNode.build(
+            tag_names = _parse_tag_names(tag, filename, n)
+            if tag_names is None:
+                tag_names = (NameNode.build(tag, filename, n),)
+            value_set = _parse_value_set(value, mode, filename, n)
+            if value_set is None:
+                value_set = (ValueNode.parse(value, mode, filename, n),)
+            if mode == "numeric" and len(value_set) != 1:
+                raise GenplisM3UGException(
+                    "comparison operators take exactly one value; "
+                    "use @OR for alternatives",
+                    filename,
+                    n,
+                )
+            rule_node = _build_rule_set(
                 operator,
-                tag_node,
-                value_node,
+                tag_names,
+                value_set,
                 filename,
                 n,
                 case_sensitive,
