@@ -146,8 +146,7 @@ def test_process_path_prints_m3ug_filters(
     output = capsys.readouterr().out
     assert f"{file_m3ug} detected as M3UG file" in output
     assert "Parsed filters:" in output
-    assert "    rating greater or equal 3" in output
-    assert "    genre contains Metal" in output
+    assert "    rating greater or equal 3 AND genre contains Metal" in output
     assert "detected as music file" not in output
     assert "Parsed tags:" not in output
 
@@ -1049,7 +1048,7 @@ def test_empty_filter_includes_tagless_music_file(
     )
 
     assert all_tags == {song: {}}
-    assert all_filters == {filter_file: M3UGFile(())}
+    assert all_filters == {filter_file: M3UGFile(None)}
     playlist = filter_file.with_suffix(".m3u")
     assert song.name in playlist.read_text(encoding="utf-8").splitlines()
 

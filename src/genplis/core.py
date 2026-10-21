@@ -3,7 +3,7 @@ import os
 import re
 import sqlite3
 import sys
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from functools import cmp_to_key
 from pathlib import Path
@@ -21,7 +21,14 @@ from .executors import (
     make_executor,
 )
 from .m3u import PlaylistEntry, create_m3u, playlist_entry
-from .m3ug import M3UGFile, NameNode, RuleNode, get_rating, parse_m3ug
+from .m3ug import (
+    FilterNode,
+    M3UGFile,
+    NameNode,
+    format_expression,
+    get_rating,
+    parse_m3ug,
+)
 from .sorting import (
     SortSpec,
     SortValue,
@@ -363,8 +370,7 @@ def process_path(conn: sqlite3.Connection, cursor: sqlite3.Cursor, args: Args) -
             print(f"{path} detected as M3UG file")
             print("Parsed filters:")
             if parsed is not None:
-                for f in parsed.rules:
-                    print(f"    {f}")
+                print(f"    {format_expression(parsed.expression)}")
                 if parsed.sort is not None:
                     print(f"    sort: {format_sort_spec(parsed.sort)}")
         if is_excluded(path, args) and args.verbosity.shows_normal_output:
@@ -377,9 +383,9 @@ def process_path(conn: sqlite3.Connection, cursor: sqlite3.Cursor, args: Args) -
         sys.exit(1)
 
 
-def matches_rules(tags: Mapping[str, TagValue], rules: Sequence[RuleNode]) -> bool:
-    """Return True when every rule matches the given tags."""
-    return all(rule.apply(tags) for rule in rules)
+def matches_rules(tags: Mapping[str, TagValue], expression: FilterNode | None) -> bool:
+    """Return True when the filter expression matches the given tags."""
+    return expression is None or expression.apply(tags)
 
 
 def _sort_values(
@@ -492,7 +498,7 @@ def _record_matches(
     entry: Path | PlaylistEntry | None = None
     spec_cache: dict[SortSpec, SortValues] = {}
     for filter_file, parsed in all_filters.items():
-        if matches_rules(tags, parsed.rules):
+        if matches_rules(tags, parsed.expression):
             if entry is None:
                 entry = playlist_entry(file, tags) if extended else file
             spec = parsed.sort if parsed.sort is not None else default_sort
@@ -770,7 +776,7 @@ def process_file(
 def filter_songs(
     files_and_tags: Mapping[Path, Tags],
     filter_file: Path,
-    rules: Sequence[RuleNode],
+    expression: FilterNode | None,
     verbosity: Verbosity = Verbosity.NORMAL,
 ) -> list[Path]:
     if verbosity.is_verbose:
@@ -778,7 +784,7 @@ def filter_songs(
 
     filtered_songs: list[Path] = []
     for file, tags in files_and_tags.items():
-        if matches_rules(tags, rules):
+        if matches_rules(tags, expression):
             filtered_songs.append(file)
 
     if verbosity.is_verbose:

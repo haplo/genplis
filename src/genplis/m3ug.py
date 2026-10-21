@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import ClassVar, Self, TypeGuard
+from typing import ClassVar, Protocol, Self, TypeGuard
 
 from .exceptions import GenplisM3UGException
 from .sorting import (
@@ -181,6 +181,10 @@ class ValueNode:
         if isinstance(self.value, str):
             return self.value
         return None
+
+
+class FilterNode(Protocol):
+    def apply(self, tags: Mapping[str, TagValue]) -> bool: ...
 
 
 class RuleNode:
@@ -418,11 +422,77 @@ class GreaterOrEqualRuleNode(RuleNode):
 
 
 @dataclass(frozen=True, slots=True)
-class M3UGFile:
-    """A parsed M3UG file: filter rules and an optional ordering override."""
+class AndNode:
+    """A conjunction of filter nodes."""
 
-    rules: tuple[RuleNode, ...]
+    nodes: tuple[FilterNode, ...]
+
+    def apply(self, tags: Mapping[str, TagValue]) -> bool:
+        return all(node.apply(tags) for node in self.nodes)
+
+
+@dataclass(frozen=True, slots=True)
+class OrNode:
+    """A disjunction of filter nodes."""
+
+    nodes: tuple[FilterNode, ...]
+
+    def apply(self, tags: Mapping[str, TagValue]) -> bool:
+        return any(node.apply(tags) for node in self.nodes)
+
+
+@dataclass(frozen=True, slots=True)
+class NotNode:
+    """The negation of a filter node."""
+
+    node: FilterNode
+
+    def apply(self, tags: Mapping[str, TagValue]) -> bool:
+        return not self.node.apply(tags)
+
+
+def _leaf_rules(node: FilterNode | None) -> tuple[RuleNode, ...]:
+    """Flatten the leaf rules in an expression tree."""
+    if node is None:
+        return ()
+    if isinstance(node, RuleNode):
+        return (node,)
+    if isinstance(node, AndNode | OrNode):
+        leaves: list[RuleNode] = []
+        for child in node.nodes:
+            leaves.extend(_leaf_rules(child))
+        return tuple(leaves)
+    if isinstance(node, NotNode):
+        return _leaf_rules(node.node)
+    return ()
+
+
+def format_expression(node: FilterNode | None) -> str:
+    """Format a filter expression for verbose diagnostics."""
+    if node is None:
+        return "(always)"
+    if isinstance(node, RuleNode):
+        return str(node)
+    if isinstance(node, NotNode):
+        return f"NOT ({format_expression(node.node)})"
+    if isinstance(node, OrNode):
+        return "(" + " OR ".join(format_expression(child) for child in node.nodes) + ")"
+    if isinstance(node, AndNode):
+        return " AND ".join(format_expression(child) for child in node.nodes)
+    return str(node)
+
+
+@dataclass(frozen=True, slots=True)
+class M3UGFile:
+    """A parsed M3UG file: a filter expression and an ordering override."""
+
+    expression: FilterNode | None
     sort: SortSpec | None = None
+
+    @property
+    def rules(self) -> tuple[RuleNode, ...]:
+        """Return the leaf rules, flattened for diagnostics and tests."""
+        return _leaf_rules(self.expression)
 
 
 def parse_m3ug(
@@ -483,10 +553,10 @@ def parse_m3ug(
 
         rules.append(rule_node)
 
+    expression = AndNode(tuple(rules)) if rules else None
     if verbosity.is_verbose:
         print("Parsed rules:")
-        for rule in rules:
-            print(str(rule))
+        print(format_expression(expression))
         print()
 
-    return M3UGFile(tuple(rules), sort_spec)
+    return M3UGFile(expression, sort_spec)

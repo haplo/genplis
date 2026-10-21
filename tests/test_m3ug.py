@@ -4,6 +4,7 @@ import pytest
 
 from genplis.exceptions import GenplisM3UGException
 from genplis.m3ug import (
+    AndNode,
     ContainsRuleNode,
     EqualRuleNode,
     GreaterOrEqualRuleNode,
@@ -12,8 +13,11 @@ from genplis.m3ug import (
     LesserRuleNode,
     NameNode,
     NotEqualRuleNode,
+    NotNode,
+    OrNode,
     RuleNode,
     ValueNode,
+    format_expression,
     get_rating,
     parse_m3ug,
 )
@@ -445,6 +449,40 @@ genre ~= Synthwave
         GreaterOrEqualRuleNode(NameNode("rating"), ValueNode(4)),
         ContainsRuleNode(NameNode("genre"), ValueNode("Synthwave")),
     ]
+
+
+def test_expression_tree_flattens_rules() -> None:
+    parsed = parse_m3ug("artist = X\nrating >= 4\n")
+
+    assert isinstance(parsed.expression, AndNode)
+    assert parsed.rules == (
+        EqualRuleNode(NameNode("artist"), ValueNode("X")),
+        GreaterOrEqualRuleNode(NameNode("rating"), ValueNode(4)),
+    )
+    assert format_expression(parsed.expression) == (
+        "artist equals X AND rating greater or equal 4"
+    )
+
+
+def test_empty_expression_matches_everything() -> None:
+    parsed = parse_m3ug("\n")
+
+    assert parsed.expression is None
+    assert parsed.rules == ()
+    assert format_expression(parsed.expression) == "(always)"
+
+
+def test_expression_nodes_apply_logic() -> None:
+    first = EqualRuleNode(NameNode("artist"), ValueNode("X"))
+    second = EqualRuleNode(NameNode("genre"), ValueNode("Metal"))
+
+    assert AndNode((first, second)).apply({"artist": "X", "genre": "Metal"})
+    assert OrNode((first, second)).apply({"artist": "X", "genre": "Rock"})
+    assert NotNode(first).apply({"artist": "Y"})
+    assert format_expression(OrNode((first, second))) == (
+        "(artist equals X OR genre equals Metal)"
+    )
+    assert format_expression(NotNode(first)) == "NOT (artist equals X)"
 
 
 def test_sort_directive_is_parsed_with_filters() -> None:
