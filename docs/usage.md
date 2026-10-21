@@ -130,8 +130,10 @@ Both forms also warn when the file matches the current exclude configuration.
   `[output] sort` applies; its default is `filename`, the absolute path.
   Equal keys keep directory-walk order. See
   [Ordering](https://github.com/haplo/genplis/blob/main/docs/m3ug.md#ordering).
-- `@LIMIT` caps the number of entries and `@MAX-DURATION` caps their total
-  duration. Both apply after ordering and `@DEDUPE`; `0` disables either one.
+- `@DEDUPE` keeps the first entry for each key after ordering; entries missing
+  a key are always kept. `@LIMIT` caps the number of entries and
+  `@MAX-DURATION` caps their total duration. These apply after ordering;
+  `0` disables either cap.
 - If no song matches, no playlist is written. An existing playlist is left
   untouched in that case.
 - Playlists are UTF-8 text. By default they are extended M3U files: the first

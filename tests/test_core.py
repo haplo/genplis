@@ -792,6 +792,126 @@ def test_process_dir_combines_limit_and_max_duration(
     assert capped == ["a.mp3"]
 
 
+def test_process_dir_dedupes_by_normalized_keys(
+    genplis_db: sqlite3.Connection,
+    make_args: Callable[..., Args],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tracks: dict[str, Tags] = {
+        "a.mp3": {"artist": ["A"], "title": ["Same"]},
+        "b.mp3": {"artist": ["A"], "title": ["same"]},
+        "c.mp3": {"artist": ["A"], "title": ["Other"]},
+    }
+
+    entries = _run_sort_test(
+        genplis_db,
+        make_args,
+        tmp_path,
+        monkeypatch,
+        tracks,
+        "@DEDUPE title\nartist = A\n",
+    )
+
+    assert entries == ["a.mp3", "c.mp3"]
+
+
+def test_process_dir_dedupe_keeps_first_after_ordering(
+    genplis_db: sqlite3.Connection,
+    make_args: Callable[..., Args],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tracks: dict[str, Tags] = {
+        "low.mp3": {"artist": ["A"], "title": ["Same"], "rating": 1},
+        "high.mp3": {"artist": ["A"], "title": ["Same"], "rating": 5},
+    }
+
+    entries = _run_sort_test(
+        genplis_db,
+        make_args,
+        tmp_path,
+        monkeypatch,
+        tracks,
+        "@DEDUPE title\n@sort rating desc\nartist = A\n",
+    )
+
+    assert entries == ["high.mp3"]
+
+
+def test_process_dir_dedupe_keeps_entries_missing_a_key(
+    genplis_db: sqlite3.Connection,
+    make_args: Callable[..., Args],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tracks: dict[str, Tags] = {
+        "a.mp3": {"artist": ["A"]},
+        "b.mp3": {"artist": ["A"]},
+        "c.mp3": {"artist": ["A"], "title": ["Same"]},
+        "d.mp3": {"artist": ["A"], "title": ["Same"]},
+    }
+
+    entries = _run_sort_test(
+        genplis_db,
+        make_args,
+        tmp_path,
+        monkeypatch,
+        tracks,
+        "@DEDUPE title\nartist = A\n",
+    )
+
+    assert entries == ["a.mp3", "b.mp3", "c.mp3"]
+
+
+def test_process_dir_dedupe_normalizes_numeric_keys(
+    genplis_db: sqlite3.Connection,
+    make_args: Callable[..., Args],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tracks: dict[str, Tags] = {
+        "a.mp3": {"artist": ["A"], "track": ["2"]},
+        "b.mp3": {"artist": ["A"], "track": 2},
+        "c.mp3": {"artist": ["A"], "track": 3},
+    }
+
+    entries = _run_sort_test(
+        genplis_db,
+        make_args,
+        tmp_path,
+        monkeypatch,
+        tracks,
+        "@DEDUPE track\nartist = A\n",
+    )
+
+    assert entries == ["a.mp3", "c.mp3"]
+
+
+def test_process_dir_dedupe_runs_before_limit(
+    genplis_db: sqlite3.Connection,
+    make_args: Callable[..., Args],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tracks: dict[str, Tags] = {
+        "a.mp3": {"artist": ["A"], "title": ["Same"]},
+        "b.mp3": {"artist": ["A"], "title": ["Same"]},
+        "c.mp3": {"artist": ["A"], "title": ["Other"]},
+    }
+
+    entries = _run_sort_test(
+        genplis_db,
+        make_args,
+        tmp_path,
+        monkeypatch,
+        tracks,
+        "@DEDUPE title\n@LIMIT 2\nartist = A\n",
+    )
+
+    assert entries == ["a.mp3", "c.mp3"]
+
+
 def test_process_dir_sorts_by_derived_rating(
     genplis_db: sqlite3.Connection,
     make_args: Callable[..., Args],

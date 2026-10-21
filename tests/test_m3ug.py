@@ -925,6 +925,31 @@ def test_duplicate_limit_and_max_duration_are_errors() -> None:
         parse_m3ug("@MAX-DURATION 1m\n@MAX-DURATION 2m\n", "favorites.m3ug")
 
 
+def test_dedupe_directive() -> None:
+    parsed = parse_m3ug("@DEDUPE title, Album, artist\n")
+
+    assert parsed.dedupe == ("title", "album", "artist")
+    assert parsed.expression is None
+
+
+def test_dedupe_without_keys_disables_it() -> None:
+    assert parse_m3ug("@DEDUPE\n").dedupe == ()
+
+
+def test_dedupe_rejects_duplicates_and_empty_keys() -> None:
+    with pytest.raises(GenplisM3UGException, match="Duplicate @DEDUPE key"):
+        parse_m3ug("@DEDUPE title, Title\n", "favorites.m3ug")
+    with pytest.raises(GenplisM3UGException, match="Empty @DEDUPE key"):
+        parse_m3ug("@DEDUPE title,,album\n", "favorites.m3ug")
+    with pytest.raises(GenplisM3UGException, match="Empty @DEDUPE key"):
+        parse_m3ug("@DEDUPE title,\n", "favorites.m3ug")
+
+
+def test_duplicate_dedupe_directive_is_an_error() -> None:
+    with pytest.raises(GenplisM3UGException, match="Duplicate @DEDUPE"):
+        parse_m3ug("@DEDUPE title\n@DEDUPE album\n", "favorites.m3ug")
+
+
 def test_sort_directive_is_parsed_with_filters() -> None:
     parsed = parse_m3ug("@sort artist, album desc\nrating >= 4\n")
 

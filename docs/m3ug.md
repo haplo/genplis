@@ -382,6 +382,25 @@ rating >= 4
 Both limits are selection constraints, not filters: they apply after ordering
 and after `@DEDUPE`, and they do not change which songs match the rules.
 
+## Removing duplicates
+
+`@DEDUPE` removes entries that share the same values for the listed tags:
+
+```text
+@DEDUPE title
+@DEDUPE album, title
+```
+
+Keys work like sort values: multi-valued tags use their first non-empty value,
+text is compared case-insensitively, and numeric-looking strings are compared
+as numbers. After ordering, the **first** entry for each key is kept and later
+duplicates are dropped. Entries that are missing any key are always kept, so
+`@DEDUPE title` never removes a song without a title.
+
+Dedupe runs before `@LIMIT` and `@MAX-DURATION`, so duplicate entries do not
+consume either cap. `@DEDUPE` with no tags disables dedupe; this is useful when
+an included file supplies a default set of keys (see `@INCLUDE`).
+
 ## Special tag names
 
 Tag names are matched case-insensitively, so `Artist`, `artist`, and `ARTIST`

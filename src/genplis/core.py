@@ -30,6 +30,7 @@ from .m3ug import (
     parse_m3ug,
 )
 from .sorting import (
+    SortKey,
     SortSpec,
     SortValue,
     SortValues,
@@ -76,6 +77,7 @@ class Match:
     entry: Path | PlaylistEntry
     sort_values: SortValues = ()
     duration: float | None = None
+    dedupe_values: SortValues = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -430,6 +432,23 @@ def _sort_matches(matched: list[Match], spec: SortSpec) -> None:
         matched.sort(key=lambda item: item.order)
 
 
+def _dedupe_matches(matched: list[Match]) -> list[Match]:
+    """Keep the first entry for each normalized key after ordering."""
+    seen: set[tuple[SortValue, ...]] = set()
+    kept: list[Match] = []
+    for match in matched:
+        values = match.dedupe_values
+        if not values or any(value is None for value in values):
+            kept.append(match)
+            continue
+        key = tuple(value for value in values if value is not None)
+        if key in seen:
+            continue
+        seen.add(key)
+        kept.append(match)
+    return kept
+
+
 def _select_matches(
     matched: list[Match],
     limit: int | None,
@@ -528,6 +547,7 @@ def _record_matches(
     """Add a file to every filter it matches, with its effective sort keys."""
     entry: Path | PlaylistEntry | None = None
     spec_cache: dict[SortSpec, SortValues] = {}
+    dedupe_cache: dict[tuple[str, ...], SortValues] = {}
     for filter_file, parsed in all_filters.items():
         if matches_rules(tags, parsed.expression):
             if entry is None:
@@ -538,7 +558,24 @@ def _record_matches(
             duration = None
             if parsed.max_duration is not None and parsed.max_duration > 0:
                 duration = duration_seconds(tags.get("duration"))
-            matches[filter_file].append(Match(order, entry, spec_cache[spec], duration))
+            dedupe_values: SortValues = ()
+            if parsed.dedupe:
+                if parsed.dedupe not in dedupe_cache:
+                    dedupe_cache[parsed.dedupe] = _sort_values(
+                        file,
+                        tags,
+                        tuple(SortKey(name) for name in parsed.dedupe),
+                    )
+                dedupe_values = dedupe_cache[parsed.dedupe]
+            matches[filter_file].append(
+                Match(
+                    order,
+                    entry,
+                    spec_cache[spec],
+                    duration,
+                    dedupe_values,
+                )
+            )
 
 
 def process_directory(
@@ -687,6 +724,8 @@ def process_directory(
         matched = matches[filter_file]
         spec = parsed.sort if parsed.sort is not None else args.config.output.sort
         _sort_matches(matched, spec)
+        if parsed.dedupe:
+            matched = _dedupe_matches(matched)
         matched = _select_matches(matched, parsed.limit, parsed.max_duration)
         if args.verbosity.is_verbose:
             print(f"\nFiltering songs and generating playlist for {filter_file}")

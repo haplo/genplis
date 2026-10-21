@@ -879,6 +879,7 @@ class M3UGFile:
     sort: SortSpec | None = None
     limit: int | None = None
     max_duration: float | None = None
+    dedupe: tuple[str, ...] | None = None
 
     @property
     def rules(self) -> tuple[RuleNode, ...]:
@@ -904,8 +905,10 @@ def parse_m3ug(
     sort_spec: SortSpec | None = None
     limit_spec: int | None = None
     max_duration_spec: float | None = None
+    dedupe_spec: tuple[str, ...] | None = None
     limit_seen = False
     max_duration_seen = False
+    dedupe_seen = False
     if verbosity.is_verbose:
         print(f"Parsing M3UG file {filename}:")
         print("----------------")
@@ -1016,6 +1019,33 @@ def parse_m3ug(
                     print(f"Parsed max duration: {max_duration_spec}")
                 is_directive = True
                 break
+            if modifier == "@dedupe":
+                if case_sensitive or or_modifier or not_modifier:
+                    raise GenplisM3UGException(
+                        "Directives cannot use rule modifiers", filename, n
+                    )
+                if dedupe_seen:
+                    raise GenplisM3UGException(
+                        "Duplicate @DEDUPE directive", filename, n
+                    )
+                raw_dedupe = rest.strip()
+                keys: list[str] = []
+                if raw_dedupe:
+                    for element in raw_dedupe.split(","):
+                        key = element.strip().lower()
+                        if not key:
+                            raise GenplisM3UGException("Empty @DEDUPE key", filename, n)
+                        if key in keys:
+                            raise GenplisM3UGException(
+                                f"Duplicate @DEDUPE key: {key}", filename, n
+                            )
+                        keys.append(key)
+                dedupe_spec = tuple(keys)
+                dedupe_seen = True
+                if verbosity.is_verbose:
+                    print(f"Parsed dedupe: {', '.join(dedupe_spec) or 'disabled'}")
+                is_directive = True
+                break
             raise GenplisM3UGException(f"Unrecognized directive: {first}", filename, n)
 
         if is_directive:
@@ -1098,4 +1128,5 @@ def parse_m3ug(
         sort_spec,
         limit_spec,
         max_duration_spec,
+        dedupe_spec,
     )
