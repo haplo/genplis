@@ -13,6 +13,14 @@ import psutil
 from . import db
 from .config import Config, load_config
 from .exceptions import GenplisConfigError, GenplisError
+from .executors import (
+    ParseItem,
+    ParseOrder,
+    ParseSettings,
+    ProcessExecutor,
+    auto_workers,
+    make_executor,
+)
 from .m3u import create_m3u
 from .m3ug import RuleNode, get_rating, parse_m3ug
 from .tags import AUDIO_PROPERTY_TAGS, get_audio_property_tags, get_tags
@@ -37,6 +45,7 @@ class Args:
     include_source: bool = True
     clean: bool = False
     config_disabled: bool = False
+    jobs: int = 1
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,6 +78,19 @@ def format_size(size: int) -> str:
 def regex_type(arg_value: str) -> re.Pattern[str]:
     """"""
     return re.compile(arg_value)
+
+
+def non_negative_int(arg_value: str) -> int:
+    """Parse a command-line integer that must be zero or greater."""
+    try:
+        value = int(arg_value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            f"expected an integer, got {arg_value!r}"
+        ) from exc
+    if value < 0:
+        raise argparse.ArgumentTypeError(f"must be at least 0, got {value}")
+    return value
 
 
 def setup_argparse() -> argparse.ArgumentParser:
@@ -134,6 +156,17 @@ def setup_argparse() -> argparse.ArgumentParser:
         metavar="PATH",
     )
     parser.add_argument(
+        "-j",
+        "--jobs",
+        help=(
+            "Parse cache misses with N worker processes "
+            "(0 = one per CPU, capped at 8; 1 = no pool)"
+        ),
+        type=non_negative_int,
+        default=None,
+        metavar="N",
+    )
+    parser.add_argument(
         "--clean",
         help=(
             "Remove cache entries for files that no longer exist. With PATH, "
@@ -174,6 +207,14 @@ def _resolve_verbosity(args: argparse.Namespace, config: Config) -> Verbosity:
     if config.general.verbose:
         return Verbosity.VERBOSE
     return Verbosity.NORMAL
+
+
+def _resolve_jobs(args: argparse.Namespace, config: Config) -> int:
+    """Resolve the worker count from the CLI, config, or CPU count."""
+    raw_jobs = args.jobs if args.jobs is not None else config.general.jobs
+    if raw_jobs < 0:
+        raise GenplisConfigError(f"jobs must be at least 0, got {raw_jobs}")
+    return auto_workers() if raw_jobs == 0 else raw_jobs
 
 
 def resolve_args(args: argparse.Namespace, config: Config) -> Args:
@@ -222,6 +263,7 @@ def resolve_args(args: argparse.Namespace, config: Config) -> Args:
         include_source=include_source,
         clean=args.clean,
         config_disabled=args.no_config,
+        jobs=_resolve_jobs(args, config),
     )
 
 
@@ -323,8 +365,15 @@ def process_directory(
 
     start_time = timer()
 
-    all_tags: dict[Path, Tags] = {}
     all_filters: dict[Path, list[RuleNode]] = {}
+    path_order: list[Path] = []
+    tags_by_path: dict[Path, Tags] = {}
+    pending: list[ParseItem] = []
+    settings = ParseSettings(
+        max_size=args.config.tags.max_size,
+        ignore=args.config.tags.ignore,
+        verbosity=args.verbosity,
+    )
     batch = db.WriteBatch(conn)
     try:
         for current_dir, dirnames, filenames in directory.walk():
@@ -351,11 +400,70 @@ def process_directory(
                 if not file.is_file():
                     continue
 
-                tags, filters, _ = process_file(conn, cursor, file, args, batch=batch)
-                if tags is not None:
-                    all_tags[file] = tags
-                if filters or file.suffix.lower() == ".m3ug":
+                path_order.append(file)
+                if args.jobs <= 1:
+                    tags, filters, _ = process_file(
+                        conn, cursor, file, args, batch=batch
+                    )
+                    if tags is not None:
+                        tags_by_path[file] = tags
+                    if filters or file.suffix.lower() == ".m3ug":
+                        all_filters[file] = filters
+                    continue
+
+                if file.suffix.lower() == ".m3ug":
+                    _, filters, _ = process_file(conn, cursor, file, args)
                     all_filters[file] = filters
+                    continue
+
+                last_modified = db.get_last_modified(file)
+                cache_status = db.get_cache_status(cursor, file, last_modified)
+                if cache_status is db.CacheStatus.HIT:
+                    tags_by_path[file] = db.get_cached_tags(cursor, file)
+                else:
+                    pending.append(
+                        ParseItem(
+                            index=len(path_order) - 1,
+                            path=file,
+                            last_modified=last_modified,
+                        )
+                    )
+
+        if args.jobs <= 1:
+            all_tags = tags_by_path
+        else:
+            executor = make_executor(
+                args.jobs,
+                len(pending),
+                ParseOrder.ORDERED,
+                settings,
+            )
+            if isinstance(executor, ProcessExecutor) and args.verbosity.is_verbose:
+                print(f"Parsing with {executor.workers} worker processes")
+            try:
+                for result in executor.parse(pending):
+                    if args.verbosity.is_verbose:
+                        for message in result.messages:
+                            print(message)
+                    if result.tags is None:
+                        continue
+                    batch.store(
+                        cursor,
+                        result.item.path,
+                        result.tags,
+                        last_modified=result.item.last_modified,
+                        verbosity=args.verbosity,
+                    )
+                    tags_by_path[result.item.path] = result.tags
+            except BaseException:
+                executor.close(cancel=True)
+                raise
+            else:
+                executor.close()
+
+            # Hits were resolved during the walk and misses arrive later, so
+            # rebuild the mapping in walk order before filtering.
+            all_tags = {p: tags_by_path[p] for p in path_order if p in tags_by_path}
     finally:
         batch.flush()
 

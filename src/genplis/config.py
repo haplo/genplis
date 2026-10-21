@@ -15,7 +15,7 @@ from .tags import DEFAULT_MAX_TAG_SIZE
 CONFIG_FILENAME = "config.ini"
 
 _KNOWN_SECTIONS: Final[dict[str, frozenset[str]]] = {
-    "general": frozenset({"verbose", "quiet"}),
+    "general": frozenset({"verbose", "quiet", "jobs"}),
     "collection": frozenset({"path", "exclude"}),
     "tags": frozenset({"max_size", "ignore"}),
     "database": frozenset({"path"}),
@@ -27,6 +27,7 @@ _KNOWN_SECTIONS: Final[dict[str, frozenset[str]]] = {
 class GeneralConfig:
     verbose: bool = False
     quiet: bool = False
+    jobs: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,6 +98,7 @@ def load_config(path: Path | None = None) -> Config:
 
     general_raw = _get_option(parser, sections, "general", "verbose")
     general_quiet_raw = _get_option(parser, sections, "general", "quiet")
+    general_jobs_raw = _get_option(parser, sections, "general", "jobs")
     collection_path_raw = _get_option(parser, sections, "collection", "path")
     collection_exclude_raw = _get_option(parser, sections, "collection", "exclude")
     tags_max_size_raw = _get_option(parser, sections, "tags", "max_size")
@@ -117,13 +119,23 @@ def load_config(path: Path | None = None) -> Config:
         default=False,
         where=_where(config_path, "general", "quiet"),
     )
+    general_jobs = _parse_int(
+        general_jobs_raw,
+        default=0,
+        minimum=0,
+        where=_where(config_path, "general", "jobs"),
+    )
     if general_verbose and general_quiet:
         raise GenplisConfigError(
             f"{config_path}: [general] verbose and quiet cannot both be true"
         )
 
     return Config(
-        general=GeneralConfig(verbose=general_verbose, quiet=general_quiet),
+        general=GeneralConfig(
+            verbose=general_verbose,
+            quiet=general_quiet,
+            jobs=general_jobs,
+        ),
         collection=CollectionConfig(
             path=_parse_path(
                 collection_path_raw,

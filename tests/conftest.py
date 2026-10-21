@@ -51,6 +51,7 @@ def make_args() -> Callable[..., Args]:
         db_path: Path | None = None,
         include_source: bool = True,
         clean: bool = False,
+        jobs: int = 1,
     ) -> Args:
         return Args(
             path=Path(path_str),
@@ -61,6 +62,7 @@ def make_args() -> Callable[..., Args]:
             config=config if config is not None else Config(),
             include_source=include_source,
             clean=clean,
+            jobs=jobs,
         )
 
     return _make_args

@@ -103,6 +103,15 @@ def test_load_quiet_general_config(tmp_path: Path) -> None:
     assert config.general == GeneralConfig(quiet=True)
 
 
+def test_load_jobs_general_config(tmp_path: Path) -> None:
+    config_file = tmp_path / "config.ini"
+    config_file.write_text("[general]\njobs = 4\n")
+
+    config = load_config(config_file)
+
+    assert config.general == GeneralConfig(jobs=4)
+
+
 def test_reject_verbose_and_quiet_together(tmp_path: Path) -> None:
     config_file = tmp_path / "config.ini"
     config_file.write_text("[general]\nverbose = true\nquiet = true\n")
@@ -178,6 +187,8 @@ def test_percent_sign_is_literal(tmp_path: Path) -> None:
         ("[collection]\nexlude = value\n", "unknown option"),
         ("[tags]\nmax_size = many\n", "expected an integer"),
         ("[tags]\nmax_size = -1\n", "at least 0"),
+        ("[general]\njobs = many\n", "expected an integer"),
+        ("[general]\njobs = -1\n", "at least 0"),
         ("[output]\noverwrite = maybe\n", "expected a boolean"),
         ("[output]\ninclude_source = maybe\n", "expected a boolean"),
         ("[collection]\nexclude = [\n", "invalid regular expression"),
