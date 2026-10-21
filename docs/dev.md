@@ -295,6 +295,7 @@ pending; see the roadmap.
   - [x] Tag size threshold to ignore
   - [x] Tags to ignore
   - [x] Example config in `examples/config.ini`
+- [ ] Support ordering
 - [ ] Support OR conditionals
 - [x] Command for DB cleaning
 - [ ] Optimize memory usage
