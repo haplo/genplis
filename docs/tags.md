@@ -104,8 +104,8 @@ Tinytag stores embedded metadata values as lists, even when there is only one
 value. Genplis flattens a one-item list to a single value before filtering, and
 keeps longer lists as lists:
 
-- One value: `genre = Metal` and `genre ~= Metal` behave as expected.
-- Several values: `=` and `~=` match if **any** value matches; `!=` matches
+- One value: `genre = Metal` and `genre ~ Metal` behave as expected.
+- Several values: `=` and `~` match if **any** value matches; `!=` matches
   only if **all** values differ; numeric comparisons match if any value
   passes.
 
@@ -134,9 +134,8 @@ Notes:
   resolved.
 - `bitdepth` is absent for many lossy formats, so a rule on it will not match
   those files.
-- `is_lossless` is a boolean. The filter language currently has no boolean
-  literal, so it cannot be matched directly. Use `mime_type` as a workaround
-  (for example `mime_type ~= flac`).
+- `is_lossless` is a boolean; compare it with `is_lossless = true` or
+  `is_lossless = false`. Text operators do not match boolean values.
 - Calculated properties are exempt from `[tags] max_size`, but can still be
   removed with `[tags] ignore` (use the unprefixed name).
 
@@ -187,7 +186,7 @@ Two settings affect the tags available to filters:
   to remove ratings entirely.
 
 An ignored or oversized tag behaves exactly like a missing tag: `=` and
-`~=` do not match, `!=` matches, and numeric comparisons do not match. If a
+`~` do not match, `!=` matches, and numeric comparisons do not match. If a
 filter does not behave as expected, run genplis on the file (and with
 `--verbose`) to confirm the tag survived.
 

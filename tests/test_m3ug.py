@@ -6,6 +6,7 @@ from genplis.exceptions import GenplisM3UGException
 from genplis.m3ug import (
     AndNode,
     ContainsRuleNode,
+    EndsWithRuleNode,
     EqualRuleNode,
     GreaterOrEqualRuleNode,
     GreaterRuleNode,
@@ -15,7 +16,9 @@ from genplis.m3ug import (
     NotEqualRuleNode,
     NotNode,
     OrNode,
+    RegexRuleNode,
     RuleNode,
+    StartsWithRuleNode,
     ValueNode,
     format_expression,
     get_rating,
@@ -35,7 +38,7 @@ def parse_rules(
 
 
 def test_contains_rule_string_value() -> None:
-    rules = parse_rules("genre ~= Synthwave")
+    rules = parse_rules("genre ~ Synthwave")
     assert rules == [
         ContainsRuleNode(NameNode("genre"), ValueNode("Synthwave")),
     ]
@@ -45,7 +48,7 @@ def test_contains_rule_string_value() -> None:
 
 
 def test_contains_rule_quoted_string_value() -> None:
-    rules = parse_rules('genre ~= "Heavy Metal"')
+    rules = parse_rules('genre ~ "Heavy Metal"')
     assert rules == [
         ContainsRuleNode(NameNode("genre"), ValueNode("Heavy Metal")),
     ]
@@ -103,6 +106,143 @@ def test_boolean_never_matches_numeric_rule() -> None:
     assert not parse_rules("is_lossless = 1")[0].apply({"is_lossless": True})
     assert not parse_rules("is_lossless < 2")[0].apply({"is_lossless": True})
     assert parse_rules("is_lossless != 1")[0].apply({"is_lossless": True})
+
+
+def test_boolean_literals_compare_equal() -> None:
+    equal = parse_rules("is_lossless = true")[0]
+    assert equal == EqualRuleNode(NameNode("is_lossless"), ValueNode(True))
+    assert equal.apply({"is_lossless": True})
+    assert not equal.apply({"is_lossless": False})
+    assert not equal.apply({})
+
+    assert parse_rules("is_lossless != false")[0].apply({"is_lossless": True})
+    assert not parse_rules("is_lossless != false")[0].apply({"is_lossless": False})
+
+
+def test_quoted_booleans_are_strings() -> None:
+    rule = parse_rules('genre = "true"')[0]
+    assert rule == EqualRuleNode(NameNode("genre"), ValueNode("true"))
+    assert rule.apply({"genre": "true"})
+    assert not rule.apply({"genre": True})
+
+
+def test_text_operators_treat_booleans_as_strings() -> None:
+    rule = parse_rules("comment ~ true")[0]
+    assert rule == ContainsRuleNode(NameNode("comment"), ValueNode("true"))
+    assert rule.apply({"comment": "this is true"})
+    assert not rule.apply({"comment": True})
+
+
+def test_numeric_operators_reject_booleans() -> None:
+    with pytest.raises(GenplisM3UGException, match="numeric value"):
+        parse_rules("rating > true")
+
+
+def test_text_operator_on_boolean_tag_warns_once(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    rule = parse_rules("comment ~ true")[0]
+    with caplog.at_level("WARNING", logger="genplis.m3ug"):
+        assert not rule.apply({"comment": True})
+        assert not rule.apply({"comment": False})
+
+    assert caplog.messages == [
+        "text operator '~' applied to boolean tag 'comment'; use = true or = false"
+    ]
+
+
+def test_text_matching_is_case_insensitive_by_default() -> None:
+    assert parse_rules("genre = metal")[0].apply({"genre": "Metal"})
+    assert parse_rules("genre != metal")[0].apply({"genre": "Rock"})
+    assert not parse_rules("genre != metal")[0].apply({"genre": "METAL"})
+    assert parse_rules("genre ~ metal")[0].apply({"genre": "Heavy Metal"})
+    assert parse_rules("genre ^ heavy")[0].apply({"genre": "Heavy Metal"})
+    assert parse_rules("genre $ metal")[0].apply({"genre": "Heavy Metal"})
+    assert parse_rules("genre % ^heavy")[0].apply({"genre": "Heavy Metal"})
+
+
+def test_case_modifier_makes_one_rule_case_sensitive() -> None:
+    sensitive = parse_rules('@CASE artist = "DANCE WITH THE DEAD"')[0]
+    assert sensitive == EqualRuleNode(
+        NameNode("artist"), ValueNode("DANCE WITH THE DEAD"), case_sensitive=True
+    )
+    assert sensitive.apply({"artist": "DANCE WITH THE DEAD"})
+    assert not sensitive.apply({"artist": "Dance With The Dead"})
+
+    default = parse_rules("artist = x\ngenre = metal\n")[0]
+    assert default.apply({"artist": "X"})
+    assert parse_rules("genre = metal\n")[0].apply({"genre": "Metal"})
+
+
+def test_case_modifier_applies_to_text_operators() -> None:
+    rule = parse_rules("@CASE genre ~ Metal")[0]
+    assert rule.apply({"genre": "Heavy Metal"})
+    assert not rule.apply({"genre": "heavy metal"})
+
+    regex = parse_rules("@CASE genre % ^metal")[0]
+    assert regex.apply({"genre": "metalcore"})
+    assert not regex.apply({"genre": "Metalcore"})
+
+
+def test_case_modifier_is_an_error_for_comparisons() -> None:
+    with pytest.raises(GenplisM3UGException, match="@CASE"):
+        parse_rules("@CASE rating > 4")
+
+
+def test_regex_operator_uses_search_and_inline_flags() -> None:
+    assert parse_rules("genre % Metal")[0].apply({"genre": "Heavy Metal"})
+    assert not parse_rules("genre % ^Metal")[0].apply({"genre": "Heavy Metal"})
+    assert parse_rules("genre % (?-i)Metal")[0].apply({"genre": "Heavy Metal"})
+    assert not parse_rules("genre % (?-i)Metal")[0].apply({"genre": "heavy metal"})
+
+
+def test_invalid_regex_reports_location() -> None:
+    with pytest.raises(
+        GenplisM3UGException,
+        match=r"favorites\.m3ug:3: Invalid regular expression",
+    ):
+        parse_m3ug("artist = X\n\n@CASE genre % [\n", "favorites.m3ug")
+
+
+def test_removed_operator_spellings_are_errors() -> None:
+    for operator in ("~=", "^=", "$=", "#"):
+        with pytest.raises(GenplisM3UGException, match="Unrecognized operator"):
+            parse_rules(f"genre {operator} Metal")
+
+
+def test_quotes_support_escapes_and_preserve_regex_backslashes() -> None:
+    assert parse_rules(r'artist = "He said \"hi\""')[0].apply(
+        {"artist": 'He said "hi"'}
+    )
+    assert parse_rules(r"artist = 'it\'s fine'")[0].apply({"artist": "it's fine"})
+    assert parse_rules(r'artist = "a\\b"')[0].apply({"artist": r"a\b"})
+    assert parse_rules(r"filename % \.mp3$")[0].apply({"filename": "/music/song.mp3"})
+    assert parse_rules(r'filename % "\\.mp3$"')[0].apply(
+        {"filename": "/music/song.mp3"}
+    )
+
+
+def test_new_text_operators() -> None:
+    starts = parse_rules("artist ^ DANCE")[0]
+    assert starts == StartsWithRuleNode(NameNode("artist"), ValueNode("DANCE"))
+    assert starts.apply({"artist": "DANCE WITH THE DEAD"})
+    assert not starts.apply({"artist": "The DANCE"})
+
+    ends = parse_rules("artist $ DEAD")[0]
+    assert ends == EndsWithRuleNode(NameNode("artist"), ValueNode("DEAD"))
+    assert ends.apply({"artist": "DANCE WITH THE DEAD"})
+    assert not ends.apply({"artist": "DEAD DANCE"})
+
+    regex = parse_rules('genre % "^(Synth|Retro)wave$"')[0]
+    assert regex == RegexRuleNode(NameNode("genre"), ValueNode("^(Synth|Retro)wave$"))
+    assert regex.apply({"genre": "Synthwave"})
+    assert not regex.apply({"genre": "Synthwave; Electronic"})
+
+
+def test_text_operators_use_string_values_for_numbers() -> None:
+    rule = parse_rules("title ~ 1980")[0]
+    assert rule.value_node == ValueNode("1980")
+    assert rule.apply({"title": "Songs from 1980"})
 
 
 def test_equal_rule_string_value() -> None:
@@ -351,7 +491,7 @@ def test_not_equal_rule_numeric_string_value() -> None:
 
 
 def test_contains_rule_list_value() -> None:
-    rules = parse_rules("genre ~= wave")
+    rules = parse_rules("genre ~ wave")
     assert rules[0].apply({"genre": ["Synthwave", "Retrowave"]})
     assert not rules[0].apply({"genre": ["Metal", "Rock"]})
 
@@ -443,7 +583,7 @@ def test_multiple_rules() -> None:
 # My favorite DANCE WITH THE DEAD songs
 artist = DANCE WITH THE DEAD
 rating >= 4
-genre ~= Synthwave
+genre ~ Synthwave
     """) == [
         EqualRuleNode(NameNode("artist"), ValueNode("DANCE WITH THE DEAD")),
         GreaterOrEqualRuleNode(NameNode("rating"), ValueNode(4)),
@@ -459,9 +599,7 @@ def test_expression_tree_flattens_rules() -> None:
         EqualRuleNode(NameNode("artist"), ValueNode("X")),
         GreaterOrEqualRuleNode(NameNode("rating"), ValueNode(4)),
     )
-    assert format_expression(parsed.expression) == (
-        "artist equals X AND rating greater or equal 4"
-    )
+    assert format_expression(parsed.expression) == "artist = X AND rating >= 4"
 
 
 def test_empty_expression_matches_everything() -> None:
@@ -480,9 +618,9 @@ def test_expression_nodes_apply_logic() -> None:
     assert OrNode((first, second)).apply({"artist": "X", "genre": "Rock"})
     assert NotNode(first).apply({"artist": "Y"})
     assert format_expression(OrNode((first, second))) == (
-        "(artist equals X OR genre equals Metal)"
+        "(artist = X OR genre = Metal)"
     )
-    assert format_expression(NotNode(first)) == "NOT (artist equals X)"
+    assert format_expression(NotNode(first)) == "NOT (artist = X)"
 
 
 def test_sort_directive_is_parsed_with_filters() -> None:

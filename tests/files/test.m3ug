@@ -1,2 +1,2 @@
 rating >= 3
-genre ~= "Metal"
+genre ~ "Metal"

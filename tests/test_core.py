@@ -146,7 +146,7 @@ def test_process_path_prints_m3ug_filters(
     output = capsys.readouterr().out
     assert f"{file_m3ug} detected as M3UG file" in output
     assert "Parsed filters:" in output
-    assert "    rating greater or equal 3 AND genre contains Metal" in output
+    assert "    rating >= 3 AND genre ~ Metal" in output
     assert "detected as music file" not in output
     assert "Parsed tags:" not in output
 
@@ -452,7 +452,7 @@ def test_process_dir_filters_songs_across_subdirectories(
 
     filter_file = tmp_path / "favorites.m3ug"
     filter_file.write_text(
-        'artist = "Test Artist"\nmime_type ~= ogg\n', encoding="utf-8"
+        'artist = "Test Artist"\nmime_type ~ ogg\n', encoding="utf-8"
     )
 
     process_directory(
@@ -780,7 +780,7 @@ def test_process_dir_verbose_lists_matching_songs(
     shutil.copy2(file_mp3, mp3)
     shutil.copy2(file_ogg, ogg)
     filter_file = tmp_path / "favorites.m3ug"
-    filter_file.write_text("mime_type ~= ogg\n", encoding="utf-8")
+    filter_file.write_text("mime_type ~ ogg\n", encoding="utf-8")
 
     process_directory(
         genplis_db,

@@ -32,37 +32,35 @@ genplis and the generated playlist format, see
 A rule is one line with three parts:
 
 ```text
-tag operator value
+tag-set operator value-set
 ```
 
 For example:
 
 ```text
-genre ~= "Heavy Metal"
+genre ~ "Heavy Metal"
 rating >= 4
 ```
 
-A file may also contain a single `@sort` line; it controls playlist order and
-is not a filter rule. See [Ordering](#ordering).
+A file may also contain directives such as `@sort`; they control the playlist
+and are not filter rules. See [Ordering](#ordering).
 
 Rules about the file itself:
 
 - **Encoding:** UTF-8. A byte-order mark is accepted and ignored.
-- **Comments:** lines whose first character is `#`. Comments must start at
-  column 0; `  # comment` is not a comment. There are no inline comments:
-  `genre = Rock # my favorite` compares `genre` with the literal string
-  `Rock # my favorite`.
+- **Comments:** lines whose first non-whitespace character is `#`. There are
+  no inline comments: `genre = Rock # my favorite` compares `genre` with the
+  literal string `Rock # my favorite`.
 - **Blank lines:** ignored.
 - **Line endings:** LF or CRLF both work.
-- **Whitespace:** use a single space between the tag, the operator, and the
-  value. Do not indent rules. Tabs are not separators. The value itself may
-  contain spaces (`artist = DANCE WITH THE DEAD`), and extra spaces after the
-  operator are trimmed.
-- **One rule per line.** A rule that cannot be split into exactly
-  `tag operator value` is rejected with `<filename:line>: Invalid filter syntax`,
-  and the run stops.
-- **Directives:** the optional `@sort` line must also start at column 0.
-  Unknown directives are errors.
+- **Whitespace:** leading and trailing whitespace is ignored. Tag, operator,
+  and value may be separated by one or more spaces or tabs. The value itself
+  may contain spaces (`artist = DANCE WITH THE DEAD`).
+- **One rule per line.** A rule that cannot be split into
+  `tag-set operator value-set` is rejected with
+  `<filename:line>: Invalid filter syntax`, and the run stops.
+- **Directives and modifiers:** names that start with `@` are
+  case-insensitive. Unknown names are errors.
 
 ## Values and types
 
@@ -75,42 +73,55 @@ The value at the end of the line is interpreted as follows:
 | `'DANCE WITH THE DEAD'` | string | Use quotes to be explicit, or when the value has leading/trailing spaces. |
 | `1980` | integer | Only digits. |
 | `4.5` | float | Digits, a dot, and digits. |
+| `true` / `false` | boolean | Only for `=` and `!=`. |
 
 Details that matter when writing filters:
 
 - Numbers are only recognized in the forms `123` and `123.45`. Negative
   numbers, `+7`, `.5`, `5.`, `1e3`, and `0x10` are treated as strings.
-- Quoting always produces a string, even for digits: `rating = "4"` compares
-  against the string `"4"`, not the number `4`.
-- Quotes cannot be escaped. If a value contains a double quote, use single
-  quotes around it (and vice versa).
+- Quoting always produces a string, even for digits or booleans:
+  `rating = "4"` compares against the string `"4"`, and `genre = "true"`
+  against the string `"true"`.
+- Quotes support `\"`, `\'`, and `\\`. Other backslashes are preserved, which
+  keeps regular expressions such as `\d+` readable.
 - Numeric tag values stored as strings by the tag library are compared
   numerically when the rule value is a number. This is why `track = 7` matches
   a track tag of `"7"`.
-- Values are case-sensitive. `genre = Metal` does not match `metal`.
-  Tag *names* are case-insensitive.
+- Text matching is case-insensitive by default. Tag *names* are always
+  case-insensitive. Add `@CASE` to one rule to make it case-sensitive.
+- For text operators (`~`, `^`, `$`, `%`), `true` and `false` are the strings
+  `"true"` and `"false"`. For numeric comparisons they are errors.
 
 ## Operators
 
 | Operator | Meaning | Rule value | Tag value |
 | --- | --- | --- | --- |
-| `=` | equal | string or number | same type; numeric strings are coerced for numeric rules |
-| `!=` | not equal | string or number | inverse of `=` |
-| `~=` | contains | string only | string, or a list of strings |
+| `=` | equal | string, number, or boolean | same type; numeric strings are coerced for numeric rules |
+| `!=` | not equal | string, number, or boolean | inverse of `=` |
+| `~` | contains | string | string, or a list of strings |
+| `^` | starts with | string | string, or a list of strings |
+| `$` | ends with | string | string, or a list of strings |
+| `%` | regex search | string | string, or a list of strings |
 | `<` | less than | number only | number or numeric string |
 | `<=` | less than or equal | number only | number or numeric string |
 | `>` | greater than | number only | number or numeric string |
 | `>=` | greater than or equal | number only | number or numeric string |
 
+There are no aliases. The old spellings `~`, `^=`, `$=`, `#`, and every
+other operator not in this table are rejected with `Unrecognized operator`.
+
 ### Equality: `=`
 
 - `genre = Metal` matches exactly `Metal`, not `Heavy Metal` or `Metalcore`.
+  Matching is case-insensitive, so `genre = metal` also matches `Metal`.
 - `rating = 5` matches a numeric rating of 5, including a tag stored as the
   string `"5"`.
+- `is_lossless = true` and `is_lossless = false` compare boolean tags.
 - If a tag holds several values, the rule matches when **any** value equals
   the expected value.
 - A song without the tag does not match.
-- Case matters: `artist = "DANCE WITH THE DEAD"` does not match
+- Add `@CASE` when case matters:
+  `@CASE artist = "DANCE WITH THE DEAD"` does not match
   `Dance With The Dead`.
 
 ### Inequality: `!=`
@@ -122,24 +133,33 @@ Details that matter when writing filters:
   to the expected value. This is often surprising; use `=` when you want to
   require a tag to exist.
 
-### Contains: `~=`
+### Text operators: `~`, `^`, `$`, `%`
 
-- This is a case-sensitive substring test, not a regular expression.
-  `genre ~= Metal` matches `Metal`, `Heavy Metal`, `Metalcore`, and
-  `Nu Metal`. `genre ~= metal` matches `metal` only.
-- The expected value must be a string. `comment ~= 42` is a parse error;
-  `comment ~= "42"` is a valid string search.
-- A list of values matches when any element contains the substring.
-- Non-string tag values (numbers, booleans) never match.
+- `~` is a substring test, `^` a prefix test, and `$` a suffix test. They are
+  case-insensitive unless the rule starts with `@CASE`.
+- `genre ~ Metal` matches `Metal`, `Heavy Metal`, `Metalcore`, and
+  `Nu Metal`. `@CASE genre ~ metal` matches only the exact lower-case
+  substring.
+- `%` is a regular-expression **search**, not a full match. `genre % ^Metal`
+  matches values that start with `Metal`, and `filename % \.mp3$` matches
+  MP3 paths.
+- `%` is compiled with `re.IGNORECASE` unless the rule has `@CASE`. Inline
+  flags such as `(?-i)` still work and can override that for part of the
+  pattern. Invalid patterns are parse errors with a file and line.
+- A list of values matches when any element satisfies the operator.
+- Non-string tag values never match. Applying a text operator to a boolean
+  tag logs one warning per rule per run; use `= true` or `= false` instead.
 
 ### Numeric comparisons: `<`, `<=`, `>`, `>=`
 
 - The expected value must be an unquoted number. `year > "1980"` is a parse
   error because the quoted value is a string; write `year > 1980`.
+- `true` and `false` are not accepted. `rating > true` is a parse error.
 - Numbers, numeric strings, and lists containing them are compared
   numerically. `track > 7` matches `"8"` as well as `8`.
 - A list matches when any element passes the comparison.
 - A missing tag, a non-numeric string, or a boolean never matches.
+- `@CASE` has no meaning for comparisons and is rejected.
 - Units depend on the tag: `duration` is in seconds, `bitrate` in kilobits
   per second, `samplerate` in hertz. See
   [Tags](https://github.com/haplo/genplis/blob/main/docs/tags.md).
@@ -147,8 +167,8 @@ Details that matter when writing filters:
 ### Missing values
 
 A tag that is absent is treated as missing. Zero and false are real values,
-not missing ones, so `track = 0` and `comment = ""` work as expected. There is
-still no boolean literal, so `is_lossless` cannot be compared directly.
+not missing ones, so `track = 0`, `comment = ""`, and `is_lossless = false`
+work as expected.
 
 ## Ordering
 
@@ -286,18 +306,18 @@ everything, inspect your files first; see
 
 ```text
 # great metal songs (4-star or better)
-genre ~= "Metal"
+genre ~ "Metal"
 rating >= 4
 ```
 
-Both rules must pass. Because `~=` is a substring test, this also matches
+Both rules must pass. Because `~` is a substring test, this also matches
 `Heavy Metal`, `Nu Metal`, and `Metalcore`; use `genre = Metal` for an exact
 match.
 
 ### Musicals
 
 ```text
-genre ~= "Musical"
+genre ~ "Musical"
 ```
 
 ### More patterns
@@ -324,19 +344,19 @@ duration >= 600
 Lossless files (by MIME type, since booleans cannot be compared directly):
 
 ```text
-mime_type ~= flac
+mime_type ~ flac
 ```
 
 Songs whose path contains a folder name:
 
 ```text
-filename ~= /Live/
+filename ~ /Live/
 ```
 
 Combining several conditions:
 
 ```text
-genre ~= Synthwave
+genre ~ Synthwave
 year >= 2010
 rating >= 4
 duration < 480
@@ -371,12 +391,8 @@ uv run genplis --verbose ~/Music
 ## Current limitations
 
 - No OR, grouping, or parentheses. All rules are ANDed.
-- No regex operator. `~=` is a case-sensitive substring test.
-- No boolean literals, so boolean tags cannot be compared directly.
 - No negative or scientific-notation numbers.
 - No inline comments.
-- No quote escaping.
-- Exactly one space between tag and operator; no tabs or indentation.
 - Numeric comparisons need a numeric rule value; quoted numbers are strings.
 - One `@sort` line per file; combine all keys on that line.
 - Missing sort values always go last; there is no nulls-first option.

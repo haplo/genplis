@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import ClassVar, Protocol, Self, TypeGuard
+from typing import ClassVar, Literal, Protocol, Self, TypeGuard
 
 from .exceptions import GenplisM3UGException
 from .sorting import (
@@ -19,14 +20,22 @@ from .types import TagValue, Verbosity
 logger = logging.getLogger(__name__)
 
 
-type RuleValue = str | float | int
+type RuleValue = str | float | int | bool
+type ValueMode = Literal["equality", "text", "numeric"]
+
+EQUALITY_OPERATORS = frozenset({"=", "!="})
+TEXT_OPERATORS = frozenset({"~", "^", "$", "%"})
+NUMERIC_OPERATORS = frozenset({"<", "<=", ">", ">="})
+OPERATORS = EQUALITY_OPERATORS | TEXT_OPERATORS | NUMERIC_OPERATORS
 
 
 def is_number(value: object) -> TypeGuard[int | float]:
     return isinstance(value, int | float) and not isinstance(value, bool)
 
 
-def values_equal(tag_value: TagValue, expected: RuleValue) -> bool:
+def values_equal(
+    tag_value: TagValue, expected: RuleValue, *, case_sensitive: bool = False
+) -> bool:
     """Compare a tag value with a rule value.
 
     tinytag 2.3 stores numeric metadata such as ``track`` and ``disc`` as
@@ -41,6 +50,8 @@ def values_equal(tag_value: TagValue, expected: RuleValue) -> bool:
             return int(tag_value) == expected
         if FLOAT_RE.match(tag_value):
             return float(tag_value) == expected
+    if isinstance(tag_value, str) and isinstance(expected, str) and not case_sensitive:
+        return tag_value.casefold() == expected.casefold()
     return tag_value == expected
 
 
@@ -103,6 +114,113 @@ def get_rating(tags: Mapping[str, TagValue]) -> float | None:
     return None
 
 
+def _unescape_quoted(text: str) -> str:
+    """Remove quote escaping while preserving other backslashes."""
+    result: list[str] = []
+    index = 0
+    while index < len(text):
+        character = text[index]
+        if character == "\\" and index + 1 < len(text):
+            following = text[index + 1]
+            if following in {'"', "'", "\\"}:
+                result.append(following)
+                index += 2
+                continue
+        result.append(character)
+        index += 1
+    return "".join(result)
+
+
+def _is_quoted(text: str) -> bool:
+    return len(text) >= 2 and text[0] == text[-1] and text[0] in {"'", '"'}
+
+
+def _split_rule_line(text: str) -> list[str]:
+    """Split a rule into tag, operator, and the untouched value remainder."""
+    parts: list[str] = []
+    buffer: list[str] = []
+    quote: str | None = None
+    escaped = False
+    bracket_depth = 0
+
+    for index, character in enumerate(text):
+        if quote is not None:
+            buffer.append(character)
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == quote:
+                quote = None
+            continue
+
+        if character in {"'", '"'}:
+            quote = character
+            buffer.append(character)
+        elif character == "[":
+            bracket_depth += 1
+            buffer.append(character)
+        elif character == "]":
+            bracket_depth = max(0, bracket_depth - 1)
+            buffer.append(character)
+        elif character in {" ", "\t"} and bracket_depth == 0:
+            if buffer:
+                parts.append("".join(buffer))
+                buffer = []
+                if len(parts) == 2:
+                    remainder = text[index:].strip()
+                    if remainder:
+                        return [*parts, remainder]
+                    return parts
+        else:
+            buffer.append(character)
+
+    if buffer:
+        parts.append("".join(buffer))
+    return parts
+
+
+def _split_first_word(text: str) -> tuple[str, str]:
+    """Split off the first whitespace-delimited word."""
+    parts = text.split(maxsplit=1)
+    if len(parts) == 1:
+        return parts[0], ""
+    return parts[0], parts[1]
+
+
+def _normalize_inline_flags(pattern: str) -> str:
+    """Turn ``(?-i)`` into a scoped group for Python's regex engine.
+
+    Python only allows inline flag removals inside a scoped group, while M3UG
+    and many other regex flavours accept ``(?-i)`` as a switch for the rest of
+    the pattern. Wrapping the remainder keeps that behaviour.
+    """
+    result: list[str] = []
+    index = 0
+    in_class = False
+    closings = 0
+    while index < len(pattern):
+        character = pattern[index]
+        if character == "\\" and index + 1 < len(pattern):
+            result.append(pattern[index : index + 2])
+            index += 2
+            continue
+        if character == "[":
+            in_class = True
+        elif character == "]":
+            in_class = False
+        if not in_class and pattern.startswith("(?", index):
+            match = re.match(r"\(\?([aiLmsux]*)-([aiLmsux]*)\)", pattern[index:])
+            if match is not None:
+                result.append(f"(?{match.group(1)}-{match.group(2)}:")
+                closings += 1
+                index += len(match.group(0))
+                continue
+        result.append(character)
+        index += 1
+    return "".join(result) + ")" * closings
+
+
 class NameNode:
     def __init__(self, name: str) -> None:
         self.name = name
@@ -151,21 +269,34 @@ class ValueNode:
         return f"<Value={self.value}>"
 
     def __str__(self) -> str:
+        if isinstance(self.value, bool):
+            return "true" if self.value else "false"
         return str(self.value)
 
     @classmethod
     def build(cls, value: object, filename: str, line: int) -> Self:
+        return cls.parse(value, "equality", filename, line)
+
+    @classmethod
+    def parse(cls, value: object, mode: ValueMode, filename: str, line: int) -> Self:
         if not isinstance(value, str):
             raise GenplisM3UGException(f"Invalid value: {value}", filename, line)
 
         value = value.strip()
         # quoted values are always literal strings, even if they look numeric
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
-            return cls(value[1:-1])
+        if _is_quoted(value):
+            return cls(_unescape_quoted(value[1:-1]))
 
+        if mode == "text":
+            return cls(value)
+
+        if value == "true":
+            return cls(True)
+        if value == "false":
+            return cls(False)
         if FLOAT_RE.match(value):
             return cls(float(value))
-        elif INT_RE.match(value):
+        if INT_RE.match(value):
             return cls(int(value))
         return cls(value)
 
@@ -189,23 +320,38 @@ class FilterNode(Protocol):
 
 class RuleNode:
     OPERATOR_NAME: ClassVar[str]
+    OPERATOR: ClassVar[str]
+    IS_TEXT: ClassVar[bool] = False
 
-    def __init__(self, name: NameNode, value: ValueNode) -> None:
+    def __init__(
+        self,
+        name: NameNode,
+        value: ValueNode,
+        case_sensitive: bool = False,
+        *,
+        warning_state: list[bool] | None = None,
+    ) -> None:
         self.name_node = name
         self.value_node = value
+        self.case_sensitive = case_sensitive
+        self._warning_state = warning_state if warning_state is not None else [False]
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, RuleNode):
             return NotImplemented
         if type(self) is not type(other):
             return False
-        return self.name_node == other.name_node and self.value_node == other.value_node
+        return (
+            self.name_node == other.name_node
+            and self.value_node == other.value_node
+            and self.case_sensitive == other.case_sensitive
+        )
 
     def __repr__(self) -> str:
-        return f"Rule=<{self.name_node}, {self.OPERATOR_NAME}, {self.value_node}>"
+        return f"Rule=<{self.name_node}, {self.OPERATOR}, {self.value_node}>"
 
     def __str__(self) -> str:
-        return f"{self.name_node} {self.OPERATOR_NAME} {self.value_node}"
+        return f"{self.name_node} {self.OPERATOR} {self.value_node}"
 
     @classmethod
     def build(
@@ -215,14 +361,21 @@ class RuleNode:
         value: ValueNode,
         filename: str,
         line: int,
+        case_sensitive: bool = False,
     ) -> RuleNode:
         rule_cls: type[RuleNode]
         if operator == "=":
             rule_cls = EqualRuleNode
         elif operator == "!=":
             rule_cls = NotEqualRuleNode
-        elif operator == "~=":
+        elif operator == "~":
             rule_cls = ContainsRuleNode
+        elif operator == "^":
+            rule_cls = StartsWithRuleNode
+        elif operator == "$":
+            rule_cls = EndsWithRuleNode
+        elif operator == "%":
+            rule_cls = RegexRuleNode
         elif operator == "<":
             rule_cls = LesserRuleNode
         elif operator == "<=":
@@ -236,13 +389,29 @@ class RuleNode:
                 f"Unrecognized operator: {operator}", filename, line
             )
         rule_cls.check_params(name, value, filename, line)
-        return rule_cls(name, value)
+        try:
+            return rule_cls(name, value, case_sensitive)
+        except re.error as exc:
+            raise GenplisM3UGException(
+                f"Invalid regular expression: {exc}", filename, line
+            ) from exc
 
     def apply(self, tags: Mapping[str, TagValue]) -> bool:
-        _, raw_value = self.name_node.find(tags)
-        # print(tag, repr(raw_value))
+        tag_name, raw_value = self.name_node.find(tags)
         tag_value = self.value_node.normalize(raw_value)
+        if self.IS_TEXT and _has_boolean(tag_value):
+            self._warn_boolean(tag_name)
         return self.check(tag_value)
+
+    def _warn_boolean(self, tag_name: str) -> None:
+        if self._warning_state[0]:
+            return
+        self._warning_state[0] = True
+        logger.warning(
+            "text operator %r applied to boolean tag %r; use = true or = false",
+            self.OPERATOR,
+            tag_name,
+        )
 
     def check(self, tag_value: TagValue) -> bool:
         """True if rule passes for the given value.
@@ -260,165 +429,211 @@ class RuleNode:
         pass
 
 
+def _has_boolean(value: TagValue) -> bool:
+    if isinstance(value, bool):
+        return True
+    if isinstance(value, list):
+        return any(isinstance(item, bool) for item in value)
+    return False
+
+
+def _value_mode(operator: str, filename: str, line: int) -> ValueMode:
+    if operator in EQUALITY_OPERATORS:
+        return "equality"
+    if operator in TEXT_OPERATORS:
+        return "text"
+    if operator in NUMERIC_OPERATORS:
+        return "numeric"
+    raise GenplisM3UGException(f"Unrecognized operator: {operator}", filename, line)
+
+
+def _text_equal(first: str, second: str, case_sensitive: bool) -> bool:
+    if case_sensitive:
+        return first == second
+    return first.casefold() == second.casefold()
+
+
+def _string_values(tag_value: TagValue) -> list[str]:
+    if isinstance(tag_value, list):
+        return [value for value in tag_value if isinstance(value, str)]
+    if isinstance(tag_value, str):
+        return [tag_value]
+    return []
+
+
 class EqualRuleNode(RuleNode):
     OPERATOR_NAME = "equals"
+    OPERATOR = "="
 
     def check(self, tag_value: TagValue) -> bool:
         if isinstance(tag_value, list):
-            return any(values_equal(v, self.value_node.value) for v in tag_value)
-        return values_equal(tag_value, self.value_node.value)
+            return any(
+                values_equal(
+                    value, self.value_node.value, case_sensitive=self.case_sensitive
+                )
+                for value in tag_value
+            )
+        return values_equal(
+            tag_value, self.value_node.value, case_sensitive=self.case_sensitive
+        )
 
 
 class NotEqualRuleNode(RuleNode):
     OPERATOR_NAME = "not equal"
+    OPERATOR = "!="
 
     def check(self, tag_value: TagValue) -> bool:
         if isinstance(tag_value, list):
-            return all(not values_equal(v, self.value_node.value) for v in tag_value)
-        return not values_equal(tag_value, self.value_node.value)
+            return all(
+                not values_equal(
+                    value, self.value_node.value, case_sensitive=self.case_sensitive
+                )
+                for value in tag_value
+            )
+        return not values_equal(
+            tag_value, self.value_node.value, case_sensitive=self.case_sensitive
+        )
 
 
 class ContainsRuleNode(RuleNode):
     OPERATOR_NAME = "contains"
+    OPERATOR = "~"
+    IS_TEXT = True
 
     def check(self, tag_value: TagValue) -> bool:
         expected = self.value_node.text()
         if expected is None:
             return False
-        if isinstance(tag_value, str):
-            return expected in tag_value
-        if isinstance(tag_value, list):
-            return any(expected in v for v in tag_value)
+        if not self.case_sensitive:
+            expected = expected.casefold()
+        for value in _string_values(tag_value):
+            candidate = value if self.case_sensitive else value.casefold()
+            if expected in candidate:
+                return True
         return False
+
+
+class StartsWithRuleNode(RuleNode):
+    OPERATOR_NAME = "starts with"
+    OPERATOR = "^"
+    IS_TEXT = True
+
+    def check(self, tag_value: TagValue) -> bool:
+        expected = self.value_node.text()
+        if expected is None:
+            return False
+        return any(
+            _text_equal(value[: len(expected)], expected, self.case_sensitive)
+            for value in _string_values(tag_value)
+        )
+
+
+class EndsWithRuleNode(RuleNode):
+    OPERATOR_NAME = "ends with"
+    OPERATOR = "$"
+    IS_TEXT = True
+
+    def check(self, tag_value: TagValue) -> bool:
+        expected = self.value_node.text()
+        if expected is None:
+            return False
+        return any(
+            len(value) >= len(expected)
+            and _text_equal(value[-len(expected) :], expected, self.case_sensitive)
+            for value in _string_values(tag_value)
+        )
+
+
+class RegexRuleNode(RuleNode):
+    OPERATOR_NAME = "matches"
+    OPERATOR = "%"
+    IS_TEXT = True
+
+    def __init__(
+        self,
+        name: NameNode,
+        value: ValueNode,
+        case_sensitive: bool = False,
+        *,
+        warning_state: list[bool] | None = None,
+    ) -> None:
+        super().__init__(name, value, case_sensitive, warning_state=warning_state)
+        pattern = value.text()
+        if pattern is None:
+            raise re.error("regular expression needs a string value")
+        flags = 0 if case_sensitive else re.IGNORECASE
+        self.pattern = re.compile(_normalize_inline_flags(pattern), flags)
+
+    def check(self, tag_value: TagValue) -> bool:
+        return any(
+            self.pattern.search(value) is not None
+            for value in _string_values(tag_value)
+        )
+
+
+class _NumericRuleNode(RuleNode):
+    """Base class for numeric comparison operators."""
 
     @classmethod
     def check_params(
         cls, name: NameNode, value: ValueNode, filename: str, line: int
     ) -> None:
-        if is_number(value.value):
+        if not is_number(value.value):
             raise GenplisM3UGException(
-                "{operator} needs a string value", filename, line
+                f"{cls.OPERATOR} needs a numeric value, got: {value.value}",
+                filename,
+                line,
             )
 
+    def check(self, tag_value: TagValue) -> bool:
+        if isinstance(tag_value, list):
+            return any(self.check(value) for value in tag_value)
+        expected = self.value_node.numeric()
+        if expected is None:
+            return False
+        if is_number(tag_value):
+            return self.compare(tag_value, expected)
+        if isinstance(tag_value, str):
+            if INT_RE.match(tag_value):
+                return self.compare(int(tag_value), expected)
+            if FLOAT_RE.match(tag_value):
+                return self.compare(float(tag_value), expected)
+        return False
 
-class LesserRuleNode(RuleNode):
+    def compare(self, tag_value: int | float, expected: int | float) -> bool:
+        raise NotImplementedError()
+
+
+class LesserRuleNode(_NumericRuleNode):
     OPERATOR_NAME = "lesser"
+    OPERATOR = "<"
 
-    def check(self, tag_value: TagValue) -> bool:
-        if isinstance(tag_value, list):
-            return any(self.check(v) for v in tag_value)
-        expected = self.value_node.numeric()
-        if expected is None:
-            return False
-        if is_number(tag_value):
-            return tag_value < expected
-        if isinstance(tag_value, str):
-            if INT_RE.match(tag_value):
-                return int(tag_value) < expected
-            elif FLOAT_RE.match(tag_value):
-                return float(tag_value) < expected
-        return False
-
-    @classmethod
-    def check_params(
-        cls, name: NameNode, value: ValueNode, filename: str, line: int
-    ) -> None:
-        if not is_number(value.value):
-            raise GenplisM3UGException(
-                f"Lesser than operator (<) needs a numeric value, got: {value.value}",
-                filename,
-                line,
-            )
+    def compare(self, tag_value: int | float, expected: int | float) -> bool:
+        return tag_value < expected
 
 
-class LesserOrEqualRuleNode(RuleNode):
+class LesserOrEqualRuleNode(_NumericRuleNode):
     OPERATOR_NAME = "less or equal"
+    OPERATOR = "<="
 
-    def check(self, tag_value: TagValue) -> bool:
-        if isinstance(tag_value, list):
-            return any(self.check(v) for v in tag_value)
-        expected = self.value_node.numeric()
-        if expected is None:
-            return False
-        if is_number(tag_value):
-            return tag_value <= expected
-        if isinstance(tag_value, str):
-            if INT_RE.match(tag_value):
-                return int(tag_value) <= expected
-            elif FLOAT_RE.match(tag_value):
-                return float(tag_value) <= expected
-        return False
-
-    @classmethod
-    def check_params(
-        cls, name: NameNode, value: ValueNode, filename: str, line: int
-    ) -> None:
-        if not is_number(value.value):
-            raise GenplisM3UGException(
-                f"Lesser or equal than operator (<=) needs a numeric value, got: {value.value}",
-                filename,
-                line,
-            )
+    def compare(self, tag_value: int | float, expected: int | float) -> bool:
+        return tag_value <= expected
 
 
-class GreaterRuleNode(RuleNode):
+class GreaterRuleNode(_NumericRuleNode):
     OPERATOR_NAME = "greater"
+    OPERATOR = ">"
 
-    def check(self, tag_value: TagValue) -> bool:
-        if isinstance(tag_value, list):
-            return any(self.check(v) for v in tag_value)
-        expected = self.value_node.numeric()
-        if expected is None:
-            return False
-        if is_number(tag_value):
-            return tag_value > expected
-        if isinstance(tag_value, str):
-            if INT_RE.match(tag_value):
-                return int(tag_value) > expected
-            elif FLOAT_RE.match(tag_value):
-                return float(tag_value) > expected
-        return False
-
-    @classmethod
-    def check_params(
-        cls, name: NameNode, value: ValueNode, filename: str, line: int
-    ) -> None:
-        if not is_number(value.value):
-            raise GenplisM3UGException(
-                f"Greater than operator (>) needs a numeric value, got: {value.value}",
-                filename,
-                line,
-            )
+    def compare(self, tag_value: int | float, expected: int | float) -> bool:
+        return tag_value > expected
 
 
-class GreaterOrEqualRuleNode(RuleNode):
+class GreaterOrEqualRuleNode(_NumericRuleNode):
     OPERATOR_NAME = "greater or equal"
+    OPERATOR = ">="
 
-    def check(self, tag_value: TagValue) -> bool:
-        if isinstance(tag_value, list):
-            return any(self.check(v) for v in tag_value)
-        expected = self.value_node.numeric()
-        if expected is None:
-            return False
-        if is_number(tag_value):
-            return tag_value >= expected
-        if isinstance(tag_value, str):
-            if INT_RE.match(tag_value):
-                return int(tag_value) >= expected
-            elif FLOAT_RE.match(tag_value):
-                return float(tag_value) >= expected
-        return False
-
-    @classmethod
-    def check_params(
-        cls, name: NameNode, value: ValueNode, filename: str, line: int
-    ) -> None:
-        if not is_number(value.value):
-            raise GenplisM3UGException(
-                f"Greater or equal than operator (>=) needs a numeric value, got: {value.value}",
-                filename,
-                line,
-            )
+    def compare(self, tag_value: int | float, expected: int | float) -> bool:
+        return tag_value >= expected
 
 
 @dataclass(frozen=True, slots=True)
@@ -495,6 +710,16 @@ class M3UGFile:
         return _leaf_rules(self.expression)
 
 
+def _parse_sort_directive(raw_value: str, filename: str, line: int) -> SortSpec:
+    try:
+        sort_spec = parse_sort_spec(raw_value)
+    except SortSpecError as exc:
+        raise GenplisM3UGException(str(exc), filename, line) from exc
+    if not sort_spec:
+        raise GenplisM3UGException("@sort needs at least one tag", filename, line)
+    return sort_spec
+
+
 def parse_m3ug(
     content: str, filename: str = "N/A", verbosity: Verbosity = Verbosity.NORMAL
 ) -> M3UGFile:
@@ -507,51 +732,81 @@ def parse_m3ug(
         print("----------------")
     for n, line in enumerate(content.splitlines(), 1):
         # ignore comments
-        if line.startswith("#"):
+        stripped = line.lstrip()
+        if stripped.startswith("#"):
             if verbosity.is_verbose:
                 print(f"Ignoring line {n}: comment")
             continue
-        elif not line.strip():
+        elif not stripped.strip():
             if verbosity.is_verbose:
                 print(f"Ignoring line {n}: empty")
             continue
-        elif line.startswith("@"):
-            parts = line.split(maxsplit=1)
-            directive = parts[0]
-            raw_value = parts[1] if len(parts) == 2 else ""
-            if directive.lower() != "@sort":
+
+        text = stripped.strip()
+        case_sensitive = False
+        while text.startswith("@"):
+            first, rest = _split_first_word(text)
+            modifier = first.lower()
+            if modifier == "@case":
+                if case_sensitive:
+                    raise GenplisM3UGException("Duplicate @CASE modifier", filename, n)
+                case_sensitive = True
+                text = rest.strip()
+                if not text:
+                    raise GenplisM3UGException("@CASE needs a rule", filename, n)
+                continue
+            if modifier == "@sort":
+                if case_sensitive:
+                    raise GenplisM3UGException(
+                        "@CASE cannot modify a directive", filename, n
+                    )
+                if sort_spec is not None:
+                    raise GenplisM3UGException(
+                        "Duplicate @sort directive; combine all keys on one line",
+                        filename,
+                        n,
+                    )
+                sort_spec = _parse_sort_directive(rest, filename, n)
+                if verbosity.is_verbose:
+                    print(f"Parsed sort: {format_sort_spec(sort_spec)}")
+                break
+            raise GenplisM3UGException(f"Unrecognized directive: {first}", filename, n)
+        else:
+            components = _split_rule_line(text)
+
+            if len(components) != 3:
+                raise GenplisM3UGException("Invalid filter syntax", filename, n)
+
+            tag, operator, value = components
+            if operator not in OPERATORS:
                 raise GenplisM3UGException(
-                    f"Unrecognized directive: {directive}", filename, n
+                    f"Unrecognized operator: {operator}", filename, n
                 )
-            if sort_spec is not None:
+            mode = _value_mode(operator, filename, n)
+            if case_sensitive and mode == "numeric":
                 raise GenplisM3UGException(
-                    "Duplicate @sort directive; combine all keys on one line",
+                    f"@CASE cannot be used with comparison operator {operator}",
                     filename,
                     n,
                 )
-            try:
-                sort_spec = parse_sort_spec(raw_value)
-            except SortSpecError as exc:
-                raise GenplisM3UGException(str(exc), filename, n) from exc
-            if not sort_spec:
-                raise GenplisM3UGException("@sort needs at least one tag", filename, n)
-            if verbosity.is_verbose:
-                print(f"Parsed sort: {format_sort_spec(sort_spec)}")
+
+            # building validates data
+            tag_node = NameNode.build(tag, filename, n)
+            value_node = ValueNode.parse(value, mode, filename, n)
+            rule_node = RuleNode.build(
+                operator,
+                tag_node,
+                value_node,
+                filename,
+                n,
+                case_sensitive,
+            )
+
+            rules.append(rule_node)
             continue
 
-        components = line.split(" ", 2)
-
-        if len(components) != 3:
+        if text and not text.startswith("@"):
             raise GenplisM3UGException("Invalid filter syntax", filename, n)
-
-        tag, operator, value = components
-
-        # building validates data
-        tag_node = NameNode.build(tag, filename, n)
-        value_node = ValueNode.build(value, filename, n)
-        rule_node = RuleNode.build(operator, tag_node, value_node, filename, n)
-
-        rules.append(rule_node)
 
     expression = AndNode(tuple(rules)) if rules else None
     if verbosity.is_verbose:

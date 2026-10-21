@@ -40,7 +40,7 @@ Create a filter in your music collection, for example
 
 ```text
 # four-star metal
-genre ~= "Metal"
+genre ~ "Metal"
 rating >= 4
 ```
 

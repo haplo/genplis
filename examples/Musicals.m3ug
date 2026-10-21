@@ -1,2 +1,2 @@
-genre ~= "Musical"
+genre ~ "Musical"
 @sort filename
