@@ -426,6 +426,8 @@ pending; see the roadmap.
 - [x] Command for DB cleaning
 - [x] Optimize memory usage
 - [ ] Optimize DB space
+- [ ] Display all available tags, with stats
+- [ ] Debug M3UG
 - [ ] Improve Windows support (**HELP NEEDED!**)
 - [ ] Improve MacOS support (**HELP NEEDED!**)
 - [ ] Publish to PyPI! 🚀
