@@ -380,6 +380,16 @@ def process_path(conn: sqlite3.Connection, cursor: sqlite3.Cursor, args: Args) -
                     print("    no playlist will be generated (@NO-PLAYLIST)")
         if is_excluded(path, args) and args.verbosity.shows_normal_output:
             print("WARNING: This file is excluded by current configuration.")
+        if parsed is not None:
+            # An explicit M3UG path processes only that filter. Its directory
+            # is scanned for songs, and @INCLUDE still pulls in shared rules.
+            process_directory(
+                conn,
+                cursor,
+                path.parent,
+                args,
+                filters={path: parsed},
+            )
     else:
         print(
             f"{path} must be either a directory or a file. Exiting...",
@@ -622,6 +632,7 @@ def process_directory(
     args: Args,
     *,
     retain_tags: bool = False,
+    filters: Mapping[Path, M3UGFile] | None = None,
 ) -> tuple[dict[Path, Tags], dict[Path, M3UGFile]]:
     """Traverse the directory and process all files.
 
@@ -633,6 +644,11 @@ def process_directory(
     M3UG file that matches at least one song. Unless include_source is
     disabled, the original M3UG text is embedded as comments at the top of the
     playlist. Folders that match an exclude pattern are skipped entirely.
+
+    When ``filters`` is given, those already-parsed filters are used instead
+    of discovering every ``.m3ug`` file under ``directory``. This is how a
+    single filter passed on the command line is processed without touching
+    the playlists of its neighbours.
 
     With ``retain_tags`` False (the default), tags are released as soon as
     each file has been matched against the filters and ``all_tags`` is empty.
@@ -648,7 +664,11 @@ def process_directory(
 
     start_time = timer()
 
-    all_filters = _discover_filters(conn, cursor, directory, args)
+    all_filters = (
+        dict(filters)
+        if filters is not None
+        else _discover_filters(conn, cursor, directory, args)
+    )
     matches: dict[Path, list[Match]] = {filter_file: [] for filter_file in all_filters}
     retained: dict[int, tuple[Path, Tags]] | None = {} if retain_tags else None
     processed = 0

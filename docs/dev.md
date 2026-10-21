@@ -45,7 +45,10 @@ docs/               user and developer documentation
 
 ## Data flow
 
-A directory run goes through these stages:
+A directory run goes through these stages. A `.m3ug` path given directly on
+the command line uses the same pipeline with its parent directory as the scan
+root and its single parsed filter passed to `process_directory(filters=...)`,
+so neighbouring playlists are not touched.
 
 ```text
 resolve config + CLI arguments

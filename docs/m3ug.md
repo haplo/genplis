@@ -19,7 +19,8 @@ genplis and the generated playlist format, see
   produce a playlist of its own.
 - Filters are applied to every music file found under the `PATH` given on the
   command line (or configured in the config file), not just to the folder that
-  contains the `.m3ug` file.
+  contains the `.m3ug` file. When `PATH` is the `.m3ug` file itself, its
+  containing directory is the scan root and only that filter is processed.
 - All rules in a file are combined with **AND**. Add `@OR` to a rule to join it
   to the previous rule as an alternative, and `@NOT` to negate one rule.
 - A file may contain directives such as `@sort` to choose the playlist order.
@@ -635,15 +636,17 @@ Calculated values are printed with a `*` prefix (`*duration`, `*filename`,
 `*rating`) to show that they were not embedded in the file.
 Use the names **without** the `*` in filters.
 
-To see how a `.m3ug` file is parsed without generating a playlist:
+To process only one `.m3ug` file and regenerate its playlist:
 
 ```bash
 uv run genplis /path/to/Favorites.m3ug
 ```
 
-The single-file form also prints the `@sort` keys when the file has them. To
-see the parsed rules, the effective sort order, each matching song, and match
-counts during a full run, add `--verbose`:
+This prints the parsed rules, scans the file's directory for music, and writes
+`Favorites.m3u` next to it. Other `.m3ug` files under that directory are
+ignored. The single-file form also prints the `@sort` keys when the file has
+them. To see the parsed rules, the effective sort order, each matching song,
+and match counts during a full run, add `--verbose`:
 
 ```bash
 uv run genplis --verbose ~/Music

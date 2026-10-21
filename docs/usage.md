@@ -11,16 +11,16 @@ see [Configuration](https://github.com/haplo/genplis/blob/main/docs/config.md).
 genplis [OPTIONS] [PATH]
 ```
 
-`PATH` is either a directory (your music collection) or a single audio file.
-It may be omitted when `[collection] path` is set in the config file. If
-neither is available, genplis exits with an error explaining that `PATH` is
-required.
+`PATH` is a directory (your music collection), a single audio file, or a
+`.m3ug` filter file. It may be omitted when `[collection] path` is set in the
+config file. If neither is available, genplis exits with an error explaining
+that `PATH` is required.
 
 ## Options
 
 | Option | Meaning |
 | --- | --- |
-| `PATH` | Directory to scan, or a single file to inspect. |
+| `PATH` | Directory to scan, an audio file to inspect, or a `.m3ug` filter to process on its own. |
 | `-e REGEX`, `--exclude REGEX` | Skip files and folders whose path matches this regular expression. May be repeated. **Replaces** the config file's `exclude` list entirely. |
 | `--config FILE` | Read settings from this file instead of the XDG default. |
 | `--no-config` | Ignore all configuration files. |
@@ -62,13 +62,15 @@ edit the config file instead.
 1. Loads the config file (unless `--no-config`) and merges it with the
    command-line options.
 2. Opens or creates the cache database.
-3. Walks `PATH` to find and parse every `.m3ug` file, pruning excluded folders
-   and files. Includes are resolved recursively and their directives merged
-   as defaults for the including file.
-4. Walks `PATH` again for audio files, skipping unsupported formats silently
-   (`--verbose` explains why). It parses each file's tags, reusing cached tags
-   when the file has not changed, and applies every `.m3ug` file's rules as
-   soon as that file's tags are available.
+3. Walks the scan root to find and parse every `.m3ug` file, pruning excluded
+   folders and files. The scan root is `PATH` when it is a directory; for a
+   `.m3ug` `PATH` it is the directory containing that file. Includes are
+   resolved recursively and their directives merged as defaults for the
+   including file.
+4. Walks the scan root again for audio files, skipping unsupported formats
+   silently (`--verbose` explains why). It parses each file's tags, reusing
+   cached tags when the file has not changed, and applies every `.m3ug` file's
+   rules as soon as that file's tags are available.
 5. Writes a playlist for each `.m3ug` file that matched at least one song.
    Entries are ordered by the file's `@sort` directive, or by `[output] sort`
    (default `filename`) when it has none. `@LIMIT` and `@MAX-DURATION` can cap
@@ -76,10 +78,14 @@ edit the config file instead.
 6. Prints how many files were processed, how long it took, and the process's
    RAM usage.
 
-A run only filters the files under `PATH`. Cached entries for other folders
-are not used to build playlists, and a `.m3ug` file does not pull audio files
-in from outside the scanned tree. An `@INCLUDE` may read a filter file from
-outside `PATH`, but it only adds rules and defaults.
+A run only filters the files under the scan root. Cached entries for other
+folders are not used to build playlists, and a `.m3ug` file does not pull
+audio files in from outside the scanned tree. An `@INCLUDE` may read a filter
+file from outside the scan root, but it only adds rules and defaults.
+
+When `PATH` is a `.m3ug` file, genplis processes only that filter: it scans
+the file's directory for songs and writes its `.m3u`. Other `.m3ug` files in
+that tree are ignored, so their playlists are not updated.
 
 ### Parallel parsing
 
@@ -102,7 +108,7 @@ Small runs stay inline: genplis does not start a process pool when only a few
 files need parsing. The setting is also available as `[general] jobs` in the
 config file.
 
-### Inspecting one file
+### Inspecting or processing one file
 
 ```bash
 uv run genplis /path/to/song.mp3
@@ -117,9 +123,11 @@ Filter names do **not** include the `*`.
 uv run genplis /path/to/Favorites.m3ug
 ```
 
-This prints the parsed rules, and the `@sort` keys when present, then exits.
-It does **not** generate a playlist: playlists are only produced when scanning
-a directory.
+This prints the parsed rules and, when present, the `@sort` keys. It then
+scans the file's directory for audio files using only this filter, so
+`Favorites.m3ug` produces its `Favorites.m3u` without processing any other
+`.m3ug` files in that tree. A file marked `@NO-PLAYLIST` is still parsed and
+may satisfy includes, but no playlist is written for it.
 
 Both forms also warn when the file matches the current exclude configuration.
 

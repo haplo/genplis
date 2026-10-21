@@ -140,16 +140,43 @@ def test_process_path_prints_m3ug_filters(
     genplis_db: sqlite3.Connection,
     make_args: Callable[..., Args],
     file_m3ug: Path,
+    tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    process_path(genplis_db, genplis_db.cursor(), make_args(str(file_m3ug)))
+    filter_file = tmp_path / file_m3ug.name
+    shutil.copy2(file_m3ug, filter_file)
+
+    process_path(genplis_db, genplis_db.cursor(), make_args(str(filter_file)))
 
     output = capsys.readouterr().out
-    assert f"{file_m3ug} detected as M3UG file" in output
+    assert f"{filter_file} detected as M3UG file" in output
     assert "Parsed filters:" in output
     assert "    rating >= 3 AND genre ~ Metal" in output
     assert "detected as music file" not in output
     assert "Parsed tags:" not in output
+
+
+def test_process_path_generates_playlist_for_m3ug_file_only(
+    genplis_db: sqlite3.Connection,
+    make_args: Callable[..., Args],
+    file_mp3: Path,
+    tmp_path: Path,
+) -> None:
+    song = tmp_path / "song.mp3"
+    shutil.copy2(file_mp3, song)
+    filter_file = tmp_path / "favorites.m3ug"
+    filter_file.write_text('artist = "Test Artist"\n', encoding="utf-8")
+    other_filter = tmp_path / "other.m3ug"
+    other_filter.write_text('artist = "Nobody"\n', encoding="utf-8")
+
+    process_path(
+        genplis_db,
+        genplis_db.cursor(),
+        make_args(str(filter_file), include_source=False, extended_m3u=False),
+    )
+
+    assert filter_file.with_suffix(".m3u").read_text() == "song.mp3\n"
+    assert not other_filter.with_suffix(".m3u").exists()
 
 
 def test_process_path_warns_for_excluded_single_file(

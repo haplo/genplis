@@ -56,6 +56,13 @@ Later runs only re-read files that changed. Large cold scans parse files in
 parallel by default; see [Parallel parsing](https://github.com/haplo/genplis/blob/main/docs/usage.md#parallel-parsing)
 for `--jobs`.
 
+To regenerate just one playlist without processing the other filters in the
+collection, pass the filter file itself:
+
+```bash
+uv run genplis ~/Music/Favorites.m3ug
+```
+
 To see which tags a file actually has (useful when writing filters):
 
 ```bash
