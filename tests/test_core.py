@@ -990,6 +990,27 @@ def test_resolve_args_verbosity() -> None:
     assert resolve(["-qqq"]) is Verbosity.REALLY_QUIET
 
 
+def test_resolve_args_jobs_precedence(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("genplis.core.auto_workers", lambda: 8)
+    parser = setup_argparse()
+    config = Config(
+        collection=CollectionConfig(path=Path("/music")),
+        general=GeneralConfig(jobs=3),
+    )
+
+    assert resolve_args(parser.parse_args([]), config).jobs == 3
+    assert resolve_args(parser.parse_args(["--jobs", "5"]), config).jobs == 5
+    assert resolve_args(parser.parse_args(["--jobs", "0"]), config).jobs == 8
+    assert resolve_args(parser.parse_args(["/music"]), Config()).jobs == 8
+
+
+def test_setup_argparse_rejects_negative_jobs() -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        setup_argparse().parse_args(["--jobs", "-1", "/music"])
+
+    assert exc_info.value.code == 2
+
+
 def test_resolve_args_uses_include_source_from_config() -> None:
     config = Config(
         collection=CollectionConfig(path=Path("/music")),

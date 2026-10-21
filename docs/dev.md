@@ -27,6 +27,7 @@ automatically on commit.
 src/genplis/
     __main__.py     entry point for `genplis` / `python -m genplis`
     core.py         CLI, config merging, directory walking, filtering
+    executors.py    sequential and process-pool tag parsing
     config.py       INI loading and validation
     db.py           SQLite cache
     tags.py         tag extraction and calculated properties
@@ -53,8 +54,14 @@ open/create SQLite cache
 walk PATH (prune excluded directories)
         ↓
 for each file:
-    .m3ug  → parse rules
-    audio  → cache hit? reuse : parse with tinytag, cache
+    .m3ug  → parse rules in the main process
+    audio  → cache hit? reuse : queue for parsing
+        ↓
+parse queued files (inline, or in worker processes)
+        ↓
+write results through one WriteBatch in the main process
+        ↓
+rebuild all_tags in walk order
         ↓
 for each .m3ug file:
     apply all rules to all audio files found in this run
@@ -65,6 +72,62 @@ if any matches: write <stem>.m3u next to the .m3ug file
 Rules are ANDed: `core.filter_songs` stops at the first failing rule. Each
 `RuleNode` looks up its tag, normalizes multi-value tags, and calls its own
 `check()`.
+
+## Parallel parsing
+
+`core.process_directory` walks and checks the cache in the main process. With
+`--jobs 1`, it calls `core.process_file` inline during the walk and keeps the
+old per-file verbose order. With more workers it resolves cache hits during
+the walk and queues misses and stale files. If fewer than
+`executors.MIN_PARALLEL_FILES` files are queued, `SequentialExecutor` parses
+them in the main process after the walk; otherwise `ProcessExecutor` sends
+`ParseItem` batches to worker processes. In both `--jobs > 1` cases the
+miss/stale diagnostics are printed after the walk.
+
+Invariants:
+
+- **One SQLite connection and one writer, in the main process.** Workers never
+  open or receive the connection. Pool contexts are `forkserver` on POSIX and
+  `spawn` on Windows, never plain `fork`, so a worker cannot inherit the
+  database file descriptor.
+- **Workers only parse tags.** They return tags and verbose messages. M3UG
+  parsing, filtering, playlist generation, cache reads, and cache writes stay
+  in the main process.
+- **Playlist order is walk order.** Cache hits are resolved during the walk and
+  misses arrive later, so `all_tags` is rebuilt from the recorded path order
+  before filtering. Results are consumed in submission order, so verbose lines
+  and cache rows stay in walk order for the files that needed parsing.
+- **`--jobs 1` is the old inline path.** It uses the same `WriteBatch` plumbing,
+  so output, cache contents, and playlist bytes do not change.
+- **Flush points.** `WriteBatch` commits every `core.COMMIT_EVERY` writes
+  (currently 128) and flushes at the end of the parse phase, on errors, and on
+  `KeyboardInterrupt`; an interrupted pool is shut down with
+  `cancel_futures=True` and `wait=False` so it cannot hang the process.
+
+To benchmark, use a cache database on the real filesystem, not a tmpfs, and
+compare the cold paths three times each. Checksum the playlists to confirm that
+they are byte-identical:
+
+```bash
+rm -f ~/.cache/genplis/b-seq.db
+/usr/bin/time -f '%e s, %M KiB' \
+    uv run genplis --db ~/.cache/genplis/b-seq.db --jobs 1 ~/Music
+sha256sum ~/Music/*.m3u
+
+rm -f ~/.cache/genplis/b-auto.db
+/usr/bin/time -f '%e s, %M KiB' \
+    uv run genplis --db ~/.cache/genplis/b-auto.db ~/Music
+sha256sum ~/Music/*.m3u
+
+rm -f ~/.cache/genplis/b-warm.db
+uv run genplis --db ~/.cache/genplis/b-warm.db ~/Music
+/usr/bin/time -f '%e s, %M KiB' \
+    uv run genplis --db ~/.cache/genplis/b-warm.db ~/Music
+```
+
+Run each configuration three times and take the median; first runs include
+page-cache cold effects. The worker count defaults to the CPU affinity count
+capped at eight; `[general] jobs` and `--jobs` override it.
 
 ## Running
 
@@ -286,8 +349,8 @@ pending; see the roadmap.
 - [ ] Improve M3U generation
   - [x] Include original M3UG content as comment
   - [ ] Support [basic extended M3U playlist tags](https://datatracker.ietf.org/doc/html/rfc8216#section-4.3)
-- [ ] Parallel parsing of files
-  - [ ] Number of processes for parallel parsing
+- [x] Parallel parsing of files
+  - [x] Number of processes for parallel parsing
 - [ ] Support narrowing of valid tag names
 - [x] Config file support
   - [x] Default music collection path

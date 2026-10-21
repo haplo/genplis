@@ -9,6 +9,7 @@ from genplis.tags import (
     get_audio_property_tags,
     get_tag_size,
     get_tags,
+    parse_tags,
 )
 from genplis.types import Tags, Verbosity
 
@@ -65,6 +66,39 @@ def test_get_tags_ogg(file_ogg: Path) -> None:
         "samplerate": 44100,
         "title": ["Test"],
     }
+
+
+def test_parse_tags_returns_messages_without_printing(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    raw_tags: Tags = {
+        "artist": ["Test Artist"],
+        "long": ["x" * 10],
+        "title": ["Test"],
+    }
+    _patch_tinytag(monkeypatch, raw_tags)
+
+    tags, messages = parse_tags(
+        Path("song.mp3"),
+        max_size=5,
+        ignore=frozenset({"artist"}),
+    )
+
+    assert tags == {"title": ["Test"]}
+    assert "Removing tag artist because it is configured to be ignored" in messages
+    assert "Removing tag long because it's larger than 5 UTF-8 bytes" in messages
+    assert capsys.readouterr().out == ""
+
+
+def test_parse_tags_reports_unsupported_file(tmp_path: Path) -> None:
+    unsupported = tmp_path / "notes.txt"
+    unsupported.write_text("not music\n", encoding="utf-8")
+
+    tags, messages = parse_tags(unsupported)
+
+    assert tags is None
+    assert messages == (f"Skipping {unsupported}: not supported by tinytag",)
 
 
 def test_get_audio_property_tags() -> None:

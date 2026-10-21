@@ -27,6 +27,59 @@ AUDIO_PROPERTY_TAGS: Final[frozenset[str]] = frozenset(
 )
 
 
+def parse_tags(
+    file_path: Path,
+    *,
+    max_size: int = DEFAULT_MAX_TAG_SIZE,
+    ignore: frozenset[str] = frozenset(),
+) -> tuple[Tags | None, tuple[str, ...]]:
+    """Return music tags and verbose diagnostics, without printing anything.
+
+    The tags are ``None`` when the file is not a music file or cannot be read
+    or parsed. Tag names in ``ignore`` are dropped before size checking.
+    Values whose combined UTF-8 encoded length exceeds ``max_size`` bytes are
+    dropped as well; they are usually lyrics or long comments. A ``max_size``
+    of 0 disables size filtering.
+
+    Calculated audio properties are never dropped by the size limit.
+
+    The messages are the lines that ``get_tags`` prints in verbose mode.
+    """
+    messages: list[str] = []
+    if not TinyTag.is_supported(file_path):
+        messages.append(f"Skipping {file_path}: not supported by tinytag")
+        return None, tuple(messages)
+
+    try:
+        raw_tags = TinyTag.get(file_path).as_dict()
+    except (TinyTagException, OSError) as exc:
+        messages.append(f"Skipping {file_path}: {exc}")
+        return None, tuple(messages)
+    tags: Tags = {}
+
+    ignored = {name.lower() for name in ignore}
+
+    # Sanitize tags:
+    # Remove ignored and large tags, they are likely lyrics or long comments
+    for key, value in raw_tags.items():
+        if key.lower() in ignored:
+            messages.append(
+                f"Removing tag {key} because it is configured to be ignored"
+            )
+            continue
+        if (
+            max_size > 0
+            and key not in AUDIO_PROPERTY_TAGS
+            and get_tag_size(value) > max_size
+        ):
+            messages.append(
+                f"Removing tag {key} because it's larger than {max_size} UTF-8 bytes"
+            )
+            continue
+        tags[key] = value
+    return tags, tuple(messages)
+
+
 def get_tags(
     file_path: Path,
     verbosity: Verbosity = Verbosity.NORMAL,
@@ -45,40 +98,10 @@ def get_tags(
 
     Calculated audio properties are never dropped by the size limit.
     """
-    if not TinyTag.is_supported(file_path):
-        if verbosity.is_verbose:
-            print(f"Skipping {file_path}: not supported by tinytag")
-        return None
-
-    try:
-        raw_tags = TinyTag.get(file_path).as_dict()
-    except (TinyTagException, OSError) as exc:
-        if verbosity.is_verbose:
-            print(f"Skipping {file_path}: {exc}")
-        return None
-    tags: Tags = {}
-
-    ignored = {name.lower() for name in ignore}
-
-    # Sanitize tags:
-    # Remove ignored and large tags, they are likely lyrics or long comments
-    for key, value in raw_tags.items():
-        if key.lower() in ignored:
-            if verbosity.is_verbose:
-                print(f"Removing tag {key} because it is configured to be ignored")
-            continue
-        if (
-            max_size > 0
-            and key not in AUDIO_PROPERTY_TAGS
-            and get_tag_size(value) > max_size
-        ):
-            if verbosity.is_verbose:
-                print(
-                    f"Removing tag {key} because it's larger than "
-                    f"{max_size} UTF-8 bytes"
-                )
-            continue
-        tags[key] = value
+    tags, messages = parse_tags(file_path, max_size=max_size, ignore=ignore)
+    if verbosity.is_verbose:
+        for message in messages:
+            print(message)
     return tags
 
 
