@@ -988,7 +988,7 @@ def _resolve_include_path(raw_path: str, filename: str, line: int) -> Path:
 
 def _include_candidates(target: Path) -> tuple[Path, ...]:
     """Return the paths to try for an include, adding .m3ug when missing."""
-    if target.suffix:
+    if target.name.lower().endswith(".m3ug"):
         return (target,)
     return (target, target.with_name(f"{target.name}.m3ug"))
 
