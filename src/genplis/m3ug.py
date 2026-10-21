@@ -983,7 +983,7 @@ def _read_include(
         if target.is_dir():
             raise IsADirectoryError(target)
         return target.read_text(encoding="utf-8-sig")
-    except FileNotFoundError as exc:
+    except (FileNotFoundError, KeyError) as exc:
         raise GenplisM3UGException(
             f'cannot include "{raw_path}": file not found', filename, line
         ) from exc

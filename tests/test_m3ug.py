@@ -1166,6 +1166,19 @@ def test_include_loader_callback(tmp_path: Path) -> None:
     assert parsed.expression.apply({"genre": "Metal"})
 
 
+def test_include_loader_missing_entry_is_fatal(tmp_path: Path) -> None:
+    main = tmp_path / "Metal.m3ug"
+    main.write_text("@INCLUDE Base.m3ug\n", encoding="utf-8")
+    files: dict[Path, str] = {}
+
+    with pytest.raises(GenplisM3UGException, match="file not found"):
+        parse_m3ug(
+            main.read_text(),
+            str(main),
+            include_loader=lambda path: files[path],
+        )
+
+
 def test_missing_include_is_fatal(tmp_path: Path) -> None:
     main = tmp_path / "Metal.m3ug"
     main.write_text("@INCLUDE Base.m3ug\n", encoding="utf-8")
