@@ -369,10 +369,20 @@ pending; see the roadmap.
   - [x] Tags to ignore
   - [x] Example config in `examples/config.ini`
 - [ ] Improve M3UG grammar
-  - [ ] Support ordering
-  - [ ] Support OR conditionals
-  - [ ] Support limit
-  - [ ] Support random
+  - [ ] Ordering
+  - [ ] @OR operator
+  - [ ] @NOT operator
+  - [ ] Multi-tag glob (`[<tag1> | <tag2> | <tag3>] OP <value>`)
+  - [ ] Multi-value glob (`<tag> OP [<value1> | <value2> | <value3>]`)
+  - [ ] Limit
+  - [ ] Limit N per <tag>
+  - [ ] Random sort
+  - [ ] Boolean literals
+  - [ ] "Starts/ends with" operator
+  - [ ] Regex operator
+  - [ ] Duration formats (`mm:ss`, `<n>m`)
+  - [ ] Include other M3UG
+  - [ ] Abstract M3UG (doesn't generate an M3U, meant for include)
 - [x] Command for DB cleaning
 - [x] Optimize memory usage
 - [ ] Optimize DB space
