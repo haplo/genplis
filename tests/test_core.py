@@ -1017,6 +1017,18 @@ def test_resolve_args_db_path_precedence(tmp_path: Path) -> None:
     assert from_cli.db_path == tmp_path / "cli.db"
 
 
+def test_resolve_args_expands_db_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    args = resolve_args(
+        setup_argparse().parse_args(["--db", "~/music.db", "/music"]),
+        Config(),
+    )
+
+    assert args.db_path == tmp_path / "music.db"
+
+
 def test_resolve_args_allows_clean_without_path() -> None:
     args = resolve_args(setup_argparse().parse_args(["--clean"]), Config())
 

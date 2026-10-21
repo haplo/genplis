@@ -206,7 +206,10 @@ def resolve_args(args: argparse.Namespace, config: Config) -> Args:
         if args.include_source is not None
         else config.output.include_source
     )
-    db_path = db.get_db_path(args.db if args.db is not None else config.database.path)
+    raw_db_path = args.db if args.db is not None else config.database.path
+    if raw_db_path is not None:
+        raw_db_path = raw_db_path.expanduser()
+    db_path = db.get_db_path(raw_db_path)
 
     return Args(
         path=path,
