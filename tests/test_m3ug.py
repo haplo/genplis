@@ -1210,6 +1210,64 @@ def test_include_paths_are_relative_to_the_containing_file(tmp_path: Path) -> No
     assert parsed.expression.apply({"genre": "Metal"})
 
 
+def test_include_adds_m3ug_extension_when_missing(tmp_path: Path) -> None:
+    base = tmp_path / "Base.m3ug"
+    main = tmp_path / "Main.m3ug"
+    base.write_text("genre = Metal\n", encoding="utf-8")
+    main.write_text("@INCLUDE Base\n", encoding="utf-8")
+
+    parsed = parse_m3ug(main.read_text(), str(main))
+
+    assert parsed.expression is not None
+    assert parsed.expression.apply({"genre": "Metal"})
+
+
+def test_include_prefers_the_exact_path_over_m3ug_fallback(tmp_path: Path) -> None:
+    exact = tmp_path / "Base"
+    fallback = tmp_path / "Base.m3ug"
+    main = tmp_path / "Main.m3ug"
+    exact.write_text("genre = Exact\n", encoding="utf-8")
+    fallback.write_text("genre = Fallback\n", encoding="utf-8")
+    main.write_text("@INCLUDE Base\n", encoding="utf-8")
+
+    parsed = parse_m3ug(main.read_text(), str(main))
+
+    assert parsed.expression is not None
+    assert parsed.expression.apply({"genre": "Exact"})
+    assert not parsed.expression.apply({"genre": "Fallback"})
+
+
+def test_include_extension_fallback_with_loader(tmp_path: Path) -> None:
+    main = tmp_path / "Main.m3ug"
+    base = (tmp_path / "Base").resolve()
+    fallback = (tmp_path / "Base.m3ug").resolve()
+    files = {fallback: "genre = Metal\n"}
+    loaded: list[Path] = []
+
+    def loader(path: Path) -> str:
+        loaded.append(path)
+        return files[path]
+
+    main.write_text("@INCLUDE Base\n", encoding="utf-8")
+
+    parsed = parse_m3ug(main.read_text(), str(main), include_loader=loader)
+
+    assert loaded == [base, fallback]
+    assert parsed.expression is not None
+    assert parsed.expression.apply({"genre": "Metal"})
+
+
+def test_missing_include_without_extension_is_fatal(tmp_path: Path) -> None:
+    main = tmp_path / "Metal.m3ug"
+    main.write_text("@INCLUDE Base\n", encoding="utf-8")
+
+    with pytest.raises(
+        GenplisM3UGException,
+        match=r'cannot include "Base": file not found',
+    ):
+        parse_m3ug(main.read_text(), str(main))
+
+
 def test_include_expands_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
     base = tmp_path / "Base.m3ug"
@@ -1292,6 +1350,19 @@ def test_include_cycle_reports_the_chain(tmp_path: Path) -> None:
     second = tmp_path / "Base.m3ug"
     first.write_text("@INCLUDE Base.m3ug\n", encoding="utf-8")
     second.write_text("@INCLUDE Metal.m3ug\n", encoding="utf-8")
+
+    with pytest.raises(
+        GenplisM3UGException,
+        match=r"include cycle: Metal\.m3ug -> Base\.m3ug -> Metal\.m3ug",
+    ):
+        parse_m3ug(first.read_text(), str(first))
+
+
+def test_include_cycle_through_extension_fallback(tmp_path: Path) -> None:
+    first = tmp_path / "Metal.m3ug"
+    second = tmp_path / "Base.m3ug"
+    first.write_text("@INCLUDE Base\n", encoding="utf-8")
+    second.write_text("@INCLUDE Metal\n", encoding="utf-8")
 
     with pytest.raises(
         GenplisM3UGException,

@@ -462,8 +462,10 @@ an included file supplies a default set of keys (see `@INCLUDE`).
 The rest of the line is the path. Matching quotes are stripped, `~` is
 expanded, and relative paths resolve from the directory of the file containing
 the `@INCLUDE`. Absolute paths work too. Any readable file may be included;
-the `.m3ug` extension is only a convention. Includes may nest up to 32 levels
-deep.
+the `.m3ug` extension is only a convention. If the path has no extension and
+does not exist, genplis also tries the same name with `.m3ug` appended, so
+`@INCLUDE Base` loads `Base.m3ug`. An existing exact path always wins. Includes
+may nest up to 32 levels deep.
 
 Included rules are ANDed with the current file's rules as separate groups.
 `@OR` and `@NOT` only apply within the file that writes them:

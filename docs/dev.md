@@ -94,7 +94,9 @@ AND groups. Cycles are detected by resolved path, depth is capped at 32, and
 missing, unreadable, directory, cyclic, too-deep, or invalid includes raise
 `GenplisM3UGException` with the including file and line. `include_loader` on
 `parse_m3ug` lets tests supply file contents without touching the filesystem.
-`@NO-PLAYLIST` lives on `M3UGFile` rather than `Directives`, so it is never
+When an include path has no suffix and does not exist, the loader tries the
+same path with `.m3ug` appended before reporting it missing. `@NO-PLAYLIST`
+lives on `M3UGFile` rather than `Directives`, so it is never
 inherited; core skips matching and writing for those files while still parsing
 them for includes.
 

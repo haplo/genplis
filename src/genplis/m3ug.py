@@ -986,33 +986,47 @@ def _resolve_include_path(raw_path: str, filename: str, line: int) -> Path:
     return base / path
 
 
+def _include_candidates(target: Path) -> tuple[Path, ...]:
+    """Return the paths to try for an include, adding .m3ug when missing."""
+    if target.suffix:
+        return (target,)
+    return (target, target.with_name(f"{target.name}.m3ug"))
+
+
 def _read_include(
     target: Path,
     raw_path: str,
     filename: str,
     line: int,
     include_loader: IncludeLoader | None,
-) -> str:
-    try:
-        if include_loader is not None:
-            return include_loader(target)
-        if not target.exists():
-            raise FileNotFoundError(target)
-        if target.is_dir():
-            raise IsADirectoryError(target)
-        return target.read_text(encoding="utf-8-sig")
-    except (FileNotFoundError, KeyError) as exc:
-        raise GenplisM3UGException(
-            f'cannot include "{raw_path}": file not found', filename, line
-        ) from exc
-    except IsADirectoryError as exc:
-        raise GenplisM3UGException(
-            f'cannot include "{raw_path}": path is a directory', filename, line
-        ) from exc
-    except OSError as exc:
-        raise GenplisM3UGException(
-            f'cannot include "{raw_path}": cannot read file: {exc}', filename, line
-        ) from exc
+) -> tuple[str, Path]:
+    for candidate in _include_candidates(target):
+        try:
+            if include_loader is not None:
+                content = include_loader(candidate)
+            elif not candidate.exists():
+                raise FileNotFoundError(candidate)
+            elif candidate.is_dir():
+                raise IsADirectoryError(candidate)
+            else:
+                content = candidate.read_text(encoding="utf-8-sig")
+            return content, candidate
+        except (FileNotFoundError, KeyError):
+            continue
+        except IsADirectoryError as exc:
+            raise GenplisM3UGException(
+                f'cannot include "{raw_path}": path is a directory', filename, line
+            ) from exc
+        except OSError as exc:
+            raise GenplisM3UGException(
+                f'cannot include "{raw_path}": cannot read file: {exc}',
+                filename,
+                line,
+            ) from exc
+
+    raise GenplisM3UGException(
+        f'cannot include "{raw_path}": file not found', filename, line
+    )
 
 
 def _parse_m3ug_file(
@@ -1233,15 +1247,6 @@ def _parse_m3ug_file(
                 if not raw_path:
                     raise GenplisM3UGException("@INCLUDE needs a path", filename, n)
                 target = _resolve_include_path(raw_path, filename, n)
-                resolved = target.resolve()
-                if resolved in stack:
-                    cycle_start = stack.index(resolved)
-                    chain = (*stack[cycle_start:], resolved)
-                    raise GenplisM3UGException(
-                        "include cycle: " + " -> ".join(path.name for path in chain),
-                        filename,
-                        n,
-                    )
                 if depth + 1 > MAX_INCLUDE_DEPTH:
                     raise GenplisM3UGException(
                         f"include depth exceeded (maximum {MAX_INCLUDE_DEPTH})",
@@ -1253,16 +1258,25 @@ def _parse_m3ug_file(
                     if _is_quoted(raw_path)
                     else raw_path
                 )
-                included_content = _read_include(
-                    resolved,
+                included_content, included_target = _read_include(
+                    target.resolve(),
                     display_path,
                     filename,
                     n,
                     include_loader,
                 )
+                resolved = included_target.resolve()
+                if resolved in stack:
+                    cycle_start = stack.index(resolved)
+                    chain = (*stack[cycle_start:], resolved)
+                    raise GenplisM3UGException(
+                        "include cycle: " + " -> ".join(path.name for path in chain),
+                        filename,
+                        n,
+                    )
                 included_file, included_directive_values = _parse_m3ug_file(
                     included_content,
-                    str(target),
+                    str(included_target),
                     verbosity,
                     include_loader,
                     (*stack, resolved),
@@ -1271,7 +1285,7 @@ def _parse_m3ug_file(
                 included_directives.append(included_directive_values)
                 included_expressions.append(included_file.expression)
                 if verbosity.is_verbose:
-                    print(f"Included {target}")
+                    print(f"Included {included_target}")
                 is_directive = True
                 break
             raise GenplisM3UGException(f"Unrecognized directive: {first}", filename, n)
