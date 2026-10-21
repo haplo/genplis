@@ -19,7 +19,7 @@ from .executors import (
     auto_workers,
     make_executor,
 )
-from .m3u import create_m3u
+from .m3u import create_m3u, playlist_entry
 from .m3ug import RuleNode, get_rating, parse_m3ug
 from .tags import AUDIO_PROPERTY_TAGS, get_audio_property_tags, get_tags
 from .types import Tags, TagValue, Verbosity
@@ -46,6 +46,7 @@ class Args:
     db_path: Path
     config: Config
     include_source: bool = True
+    extended_m3u: bool = True
     clean: bool = False
     config_disabled: bool = False
     jobs: int = 1
@@ -190,6 +191,12 @@ def setup_argparse() -> argparse.ArgumentParser:
         action=argparse.BooleanOptionalAction,
         default=None,
     )
+    parser.add_argument(
+        "--extended-m3u",
+        help="Write #EXTM3U and #EXTINF metadata (artist, title, duration)",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+    )
     return parser
 
 
@@ -251,6 +258,11 @@ def resolve_args(args: argparse.Namespace, config: Config) -> Args:
         if args.include_source is not None
         else config.output.include_source
     )
+    extended_m3u = (
+        args.extended_m3u
+        if args.extended_m3u is not None
+        else config.output.extended_m3u
+    )
     raw_db_path = args.db if args.db is not None else config.database.path
     if raw_db_path is not None:
         raw_db_path = raw_db_path.expanduser()
@@ -264,6 +276,7 @@ def resolve_args(args: argparse.Namespace, config: Config) -> Args:
         db_path=db_path,
         config=config,
         include_source=include_source,
+        extended_m3u=extended_m3u,
         clean=args.clean,
         config_disabled=args.no_config,
         jobs=_resolve_jobs(args, config),
@@ -468,12 +481,14 @@ def process_directory(
                     "",
                     *source.splitlines(),
                 ]
+            entries = [playlist_entry(path, all_tags[path]) for path in files]
             create_m3u(
                 playlist_file,
-                files,
+                entries,
                 comments=comments,
                 overwrite=args.overwrite,
                 verbosity=args.verbosity,
+                extended=args.extended_m3u,
             )
 
     end_time = timer()

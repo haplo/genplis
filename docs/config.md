@@ -28,8 +28,8 @@ used, if any.
 3. Built-in defaults.
 
 For booleans, the command-line switches are `--verbose`/`--no-verbose`,
-`--overwrite`/`--no-overwrite`, and
-`--include-source`/`--no-include-source`. If neither form is given, the config
+`--overwrite`/`--no-overwrite`, `--include-source`/`--no-include-source`, and
+`--extended-m3u`/`--no-extended-m3u`. If neither form is given, the config
 value is used.
 
 `PATH` is special: it may be omitted when `[collection] path` is set. If a path
@@ -186,10 +186,24 @@ cache behavior and cleaning.
 | --- | --- | --- | --- | --- |
 | `overwrite` | boolean | `true` | `--overwrite` / `--no-overwrite` | Replace playlists that already exist. |
 | `include_source` | boolean | `true` | `--include-source` / `--no-include-source` | Embed the `.m3ug` source as comments at the top of the playlist. |
+| `extended_m3u` | boolean | `true` | `--extended-m3u` / `--no-extended-m3u` | Write an `#EXTM3U` header and `#EXTINF` metadata for every entry. |
 
 With `overwrite = false`, an existing playlist is left untouched and a warning
-is printed. With `include_source = false`, the generated `.m3u` contains only
-the file entries (and no record of the rules that produced it).
+is printed.
+
+With `include_source = false`, the generated `.m3u` contains no record of the
+rules that produced it.
+
+With `extended_m3u = true` (the default), the playlist starts with `#EXTM3U`
+and each entry is preceded by `#EXTINF:<seconds>,<artist> - <title>`. The title
+falls back to the title tag, the artist tag, and finally the file name; an
+unknown duration is written as `-1`. Set it to `false` to write a plain list
+with one path per line:
+
+```ini
+[output]
+extended_m3u = false
+```
 
 ## Settings that invalidate the cache
 

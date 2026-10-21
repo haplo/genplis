@@ -31,6 +31,7 @@ required.
 | `--clean` | Remove cache entries for files that no longer exist. See [Cleaning the cache](#cleaning-the-cache). |
 | `--overwrite`, `--no-overwrite` | Whether to replace an existing generated playlist. |
 | `--include-source`, `--no-include-source` | Whether to embed the original `.m3ug` text as comments in the playlist. |
+| `--extended-m3u`, `--no-extended-m3u` | Whether to write `#EXTM3U` and `#EXTINF` metadata. Enabled by default; `--no-extended-m3u` writes a plain list of paths. |
 | `-h`, `--help` | Show the built-in help and exit. |
 
 Every option with an on/off form overrides the corresponding config setting.
@@ -123,7 +124,14 @@ Both forms also warn when the file matches the current exclude configuration.
 - Only songs that match **all** rules are included.
 - If no song matches, no playlist is written. An existing playlist is left
   untouched in that case.
-- Playlists are UTF-8 text, one path per line.
+- Playlists are UTF-8 text. By default they are extended M3U files: the first
+  line is `#EXTM3U`, and every file is preceded by an
+  `#EXTINF:<seconds>,<artist> - <title>` line.
+- The `EXTINF` title falls back to the title tag, then the artist tag, then the
+  file name. The duration comes from the tag cache; when it is unavailable it
+  is written as `-1`.
+- Pass `--no-extended-m3u` (or set `extended_m3u = false` in
+  `[output]`) to write a plain list with one path per line and no metadata.
 - Paths are written relative to the playlist's directory, so nested filter
   files can use `../` entries. This keeps the playlist usable when the
   collection is moved. When no relative path exists (for example on different
@@ -134,8 +142,10 @@ Both forms also warn when the file matches the current exclude configuration.
   mistaken for playlist metadata. Use `--no-include-source` to omit it.
 - Existing playlists are overwritten by default. With `--no-overwrite`,
   genplis prints a warning and leaves the file alone.
-- The generated M3U is a plain list of files; extended M3U metadata
-  (`#EXTINF`) is not generated yet.
+- Only `#EXTM3U` and `#EXTINF` are generated. The remaining `#EXT-X-*` tags in
+  [RFC 8216](https://datatracker.ietf.org/doc/html/rfc8216#section-4.3) are
+  HTTP Live Streaming signalling and have no meaning for a local music
+  playlist, so genplis does not write them.
 
 ## Cache
 

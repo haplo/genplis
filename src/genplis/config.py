@@ -19,7 +19,7 @@ _KNOWN_SECTIONS: Final[dict[str, frozenset[str]]] = {
     "collection": frozenset({"path", "exclude"}),
     "tags": frozenset({"max_size", "ignore"}),
     "database": frozenset({"path"}),
-    "output": frozenset({"overwrite", "include_source"}),
+    "output": frozenset({"overwrite", "include_source", "extended_m3u"}),
 }
 
 
@@ -51,6 +51,7 @@ class DatabaseConfig:
 class OutputConfig:
     overwrite: bool = True
     include_source: bool = True
+    extended_m3u: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,6 +109,7 @@ def load_config(path: Path | None = None) -> Config:
     output_include_source_raw = _get_option(
         parser, sections, "output", "include_source"
     )
+    output_extended_m3u_raw = _get_option(parser, sections, "output", "extended_m3u")
 
     general_verbose = _parse_bool(
         general_raw,
@@ -175,6 +177,11 @@ def load_config(path: Path | None = None) -> Config:
                 output_include_source_raw,
                 default=True,
                 where=_where(config_path, "output", "include_source"),
+            ),
+            extended_m3u=_parse_bool(
+                output_extended_m3u_raw,
+                default=True,
+                where=_where(config_path, "output", "extended_m3u"),
             ),
         ),
         source=config_path,

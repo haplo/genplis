@@ -348,7 +348,7 @@ pending; see the roadmap.
 - [x] Example cron and systemd files and instructions on how to run periodically
 - [ ] Improve M3U generation
   - [x] Include original M3UG content as comment
-  - [ ] Support [basic extended M3U playlist tags](https://datatracker.ietf.org/doc/html/rfc8216#section-4.3)
+  - [x] Support basic extended M3U tags: [`#EXTM3U`](https://datatracker.ietf.org/doc/html/rfc8216#section-4.3.1.1) and [`#EXTINF`](https://datatracker.ietf.org/doc/html/rfc8216#section-4.3.2.1)
 - [x] Parallel parsing of files
   - [x] Number of processes for parallel parsing
 - [ ] Support narrowing of valid tag names
