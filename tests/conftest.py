@@ -1,6 +1,6 @@
 import re
 import sqlite3
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
@@ -30,11 +30,14 @@ def file_m3ug() -> Path:
 
 
 @pytest.fixture()
-def genplis_db(tmp_path: Path) -> sqlite3.Connection:
+def genplis_db(tmp_path: Path) -> Iterator[sqlite3.Connection]:
     db_path = tmp_path / "genplis.db"
     conn, cursor = setup_database_connection(db_path)
     create_files_table(cursor)
-    return conn
+    try:
+        yield conn
+    finally:
+        conn.close()
 
 
 @pytest.fixture()
