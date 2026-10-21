@@ -13,6 +13,7 @@ from genplis.config import (
     load_config,
 )
 from genplis.exceptions import GenplisConfigError
+from genplis.sorting import SortKey
 
 
 def test_get_config_path_uses_xdg_config_home(
@@ -145,6 +146,39 @@ def test_examples_config_loads() -> None:
     assert config.database.path is None
     assert config.output == OutputConfig()
     assert config.source == config_file
+
+
+def test_output_sort_defaults_to_filename() -> None:
+    assert OutputConfig().sort == (SortKey("filename"),)
+
+
+def test_load_output_sort(tmp_path: Path) -> None:
+    config_file = tmp_path / "config.ini"
+    config_file.write_text("[output]\nsort = artist, album desc\n")
+
+    config = load_config(config_file)
+
+    assert config.output.sort == (
+        SortKey("artist"),
+        SortKey("album", descending=True),
+    )
+
+
+def test_empty_output_sort_disables_ordering(tmp_path: Path) -> None:
+    config_file = tmp_path / "config.ini"
+    config_file.write_text("[output]\nsort =\n")
+
+    config = load_config(config_file)
+
+    assert config.output.sort == ()
+
+
+def test_invalid_output_sort_is_an_error(tmp_path: Path) -> None:
+    config_file = tmp_path / "config.ini"
+    config_file.write_text("[output]\nsort = artist sideways\n")
+
+    with pytest.raises(GenplisConfigError, match=r"\[output\] sort"):
+        load_config(config_file)
 
 
 def test_relative_path_is_relative_to_config_file(tmp_path: Path) -> None:

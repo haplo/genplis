@@ -3,7 +3,8 @@
 [![CI](https://github.com/haplo/genplis/actions/workflows/ci.yml/badge.svg)](https://github.com/haplo/genplis/actions/workflows/ci.yml)
 
 *Genplis* generates M3U playlists from a collection of music files by looking
-at their tags and audio properties and applying user-defined filters.
+at their tags and audio properties, applying user-defined filters, and
+ordering the results.
 
 Filters are written in `.m3ug` files using a small language called M3UG. Put a
 filter file in your collection, run genplis, and a matching `.m3u` playlist
@@ -71,7 +72,7 @@ details and the common pitfalls.
 | --- | --- |
 | [Usage](https://github.com/haplo/genplis/blob/main/docs/usage.md) | Options, single-file inspection, generated playlists, the tag cache, `--clean` |
 | [Configuration](https://github.com/haplo/genplis/blob/main/docs/config.md) | Config file location, every setting, precedence, annotated example |
-| [M3UG reference](https://github.com/haplo/genplis/blob/main/docs/m3ug.md) | Filter language: rules, operators, values, examples, limitations |
+| [M3UG reference](https://github.com/haplo/genplis/blob/main/docs/m3ug.md) | Filter language: rules, operators, ordering, examples, limitations |
 | [Tags](https://github.com/haplo/genplis/blob/main/docs/tags.md) | Available tag names, calculated audio properties, rating handling |
 | [Scheduling](https://github.com/haplo/genplis/blob/main/docs/scheduling.md) | Running genplis daily with systemd or cron |
 | [Development](https://github.com/haplo/genplis/blob/main/docs/dev.md) | Setup, tests, pre-commit, typing, CI, internals, roadmap |

@@ -10,6 +10,7 @@ from typing import Final
 from xdg_base_dirs import xdg_config_home
 
 from .exceptions import GenplisConfigError
+from .sorting import DEFAULT_SORT_SPEC, SortSpec, SortSpecError, parse_sort_spec
 from .tags import DEFAULT_MAX_TAG_SIZE
 
 CONFIG_FILENAME = "config.ini"
@@ -19,7 +20,7 @@ _KNOWN_SECTIONS: Final[dict[str, frozenset[str]]] = {
     "collection": frozenset({"path", "exclude"}),
     "tags": frozenset({"max_size", "ignore"}),
     "database": frozenset({"path"}),
-    "output": frozenset({"overwrite", "include_source", "extended_m3u"}),
+    "output": frozenset({"overwrite", "include_source", "extended_m3u", "sort"}),
 }
 
 
@@ -52,6 +53,7 @@ class OutputConfig:
     overwrite: bool = True
     include_source: bool = True
     extended_m3u: bool = True
+    sort: SortSpec = DEFAULT_SORT_SPEC
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,6 +112,7 @@ def load_config(path: Path | None = None) -> Config:
         parser, sections, "output", "include_source"
     )
     output_extended_m3u_raw = _get_option(parser, sections, "output", "extended_m3u")
+    output_sort_raw = _get_option(parser, sections, "output", "sort")
 
     general_verbose = _parse_bool(
         general_raw,
@@ -182,6 +185,11 @@ def load_config(path: Path | None = None) -> Config:
                 output_extended_m3u_raw,
                 default=True,
                 where=_where(config_path, "output", "extended_m3u"),
+            ),
+            sort=_parse_sort(
+                output_sort_raw,
+                default=DEFAULT_SORT_SPEC,
+                where=_where(config_path, "output", "sort"),
             ),
         ),
         source=config_path,
@@ -279,6 +287,15 @@ def _parse_path(
         # to whatever directory genplis happens to be run from.
         path = config_path.parent / path
     return path
+
+
+def _parse_sort(raw: str | None, *, default: SortSpec, where: str) -> SortSpec:
+    if raw is None:
+        return default
+    try:
+        return parse_sort_spec(raw)
+    except SortSpecError as exc:
+        raise GenplisConfigError(f"{where}: {exc}") from exc
 
 
 def _parse_patterns(raw: str | None, *, where: str) -> tuple[re.Pattern[str], ...]:

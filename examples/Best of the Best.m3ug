@@ -3,3 +3,4 @@
 # if the rating by your music app is not picked up by genplis
 # feel free to open an issue!
 rating >= 5
+@sort rating desc, artist, album, disc, track, title

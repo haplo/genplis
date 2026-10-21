@@ -5,6 +5,7 @@ import sqlite3
 import sys
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
+from functools import cmp_to_key
 from pathlib import Path
 from timeit import default_timer as timer
 
@@ -20,7 +21,15 @@ from .executors import (
     make_executor,
 )
 from .m3u import PlaylistEntry, create_m3u, playlist_entry
-from .m3ug import RuleNode, get_rating, parse_m3ug
+from .m3ug import M3UGFile, NameNode, RuleNode, get_rating, parse_m3ug
+from .sorting import (
+    SortSpec,
+    SortValue,
+    SortValues,
+    compare_sort_values,
+    format_sort_spec,
+    normalize_sort_value,
+)
 from .tags import AUDIO_PROPERTY_TAGS, get_audio_property_tags, get_tags
 from .types import Tags, TagValue, Verbosity
 
@@ -50,6 +59,15 @@ class Args:
     clean: bool = False
     config_disabled: bool = False
     jobs: int = 1
+
+
+@dataclass(frozen=True, slots=True)
+class Match:
+    """A matching playlist entry with its sort keys and walk position."""
+
+    order: int
+    entry: Path | PlaylistEntry
+    sort_values: SortValues = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -325,7 +343,7 @@ def process_path(conn: sqlite3.Connection, cursor: sqlite3.Cursor, args: Args) -
     if path.is_dir():
         process_directory(conn, cursor, path, args)
     elif path.is_file():
-        tags, filters, cache_status = process_file(conn, cursor, path, args)
+        tags, parsed, cache_status = process_file(conn, cursor, path, args)
         if tags is not None and args.verbosity.shows_normal_output:
             print(f"{path} detected as music file")
             print(f"Cache status: {CACHE_STATUS_MESSAGES[cache_status]}")
@@ -340,12 +358,15 @@ def process_path(conn: sqlite3.Connection, cursor: sqlite3.Cursor, args: Args) -
             for key, value in sorted(display_tags.items(), key=lambda t: t[0]):
                 print(f"    {key} = {value}")
         if (
-            filters or path.suffix.lower() == ".m3ug"
+            parsed is not None or path.suffix.lower() == ".m3ug"
         ) and args.verbosity.shows_normal_output:
             print(f"{path} detected as M3UG file")
             print("Parsed filters:")
-            for f in filters:
-                print(f"    {f}")
+            if parsed is not None:
+                for f in parsed.rules:
+                    print(f"    {f}")
+                if parsed.sort is not None:
+                    print(f"    sort: {format_sort_spec(parsed.sort)}")
         if is_excluded(path, args) and args.verbosity.shows_normal_output:
             print("WARNING: This file is excluded by current configuration.")
     else:
@@ -359,6 +380,47 @@ def process_path(conn: sqlite3.Connection, cursor: sqlite3.Cursor, args: Args) -
 def matches_rules(tags: Mapping[str, TagValue], rules: Sequence[RuleNode]) -> bool:
     """Return True when every rule matches the given tags."""
     return all(rule.apply(tags) for rule in rules)
+
+
+def _sort_values(
+    file: Path, tags: Mapping[str, TagValue], spec: SortSpec
+) -> SortValues:
+    """Resolve the sort values for one file.
+
+    ``filename`` is always the absolute path being processed, independent of
+    the cached tag value. Other keys use normal M3UG tag lookup, including the
+    special handling for ``rating``.
+    """
+    values: list[SortValue | None] = []
+    for key in spec:
+        if key.name.lower() == "filename":
+            raw: TagValue = os.path.abspath(file)
+        else:
+            _, raw = NameNode(key.name).find(tags)
+        values.append(normalize_sort_value(raw))
+    return tuple(values)
+
+
+def _compare_matches(first: Match, second: Match, spec: SortSpec) -> int:
+    """Compare matches by the sort spec, then by directory-walk order."""
+    result = compare_sort_values(first.sort_values, second.sort_values, spec)
+    if result:
+        return result
+    if first.order < second.order:
+        return -1
+    if first.order > second.order:
+        return 1
+    return 0
+
+
+def _sort_matches(matched: list[Match], spec: SortSpec) -> None:
+    """Sort matches in place, preserving walk order for an empty spec."""
+    if spec:
+        matched.sort(
+            key=cmp_to_key(lambda first, second: _compare_matches(first, second, spec))
+        )
+    else:
+        matched.sort(key=lambda item: item.order)
 
 
 def _walk_files(
@@ -406,31 +468,37 @@ def _discover_filters(
     cursor: sqlite3.Cursor,
     directory: Path,
     args: Args,
-) -> dict[Path, list[RuleNode]]:
+) -> dict[Path, M3UGFile]:
     """Parse every M3UG file before any audio file is filtered."""
-    all_filters: dict[Path, list[RuleNode]] = {}
+    all_filters: dict[Path, M3UGFile] = {}
     for file in _walk_files(directory, args, report_skips=False, only_m3ug=True):
-        _, rules, _ = process_file(conn, cursor, file, args)
-        all_filters[file] = rules
+        _, parsed, _ = process_file(conn, cursor, file, args)
+        if parsed is not None:
+            all_filters[file] = parsed
     return all_filters
 
 
 def _record_matches(
-    matches: dict[Path, list[tuple[int, Path | PlaylistEntry]]],
-    all_filters: Mapping[Path, Sequence[RuleNode]],
+    matches: dict[Path, list[Match]],
+    all_filters: Mapping[Path, M3UGFile],
     order: int,
     file: Path,
     tags: Tags,
     *,
     extended: bool,
+    default_sort: SortSpec,
 ) -> None:
-    """Add a file to every filter it matches, tagged with its walk order."""
+    """Add a file to every filter it matches, with its effective sort keys."""
     entry: Path | PlaylistEntry | None = None
-    for filter_file, rules in all_filters.items():
-        if matches_rules(tags, rules):
+    spec_cache: dict[SortSpec, SortValues] = {}
+    for filter_file, parsed in all_filters.items():
+        if matches_rules(tags, parsed.rules):
             if entry is None:
                 entry = playlist_entry(file, tags) if extended else file
-            matches[filter_file].append((order, entry))
+            spec = parsed.sort if parsed.sort is not None else default_sort
+            if spec not in spec_cache:
+                spec_cache[spec] = _sort_values(file, tags, spec)
+            matches[filter_file].append(Match(order, entry, spec_cache[spec]))
 
 
 def process_directory(
@@ -440,17 +508,17 @@ def process_directory(
     args: Args,
     *,
     retain_tags: bool = False,
-) -> tuple[dict[Path, Tags], dict[Path, list[RuleNode]]]:
+) -> tuple[dict[Path, Tags], dict[Path, M3UGFile]]:
     """Traverse the directory and process all files.
 
     See process_file for how each file is handled.
 
     Returns a tuple in the form (all_tags, all_filters), both keyed by file
     path: all_tags maps music files to their tags, all_filters maps M3UG
-    files to their parsed rules. A playlist is generated for each M3UG file
-    that matches at least one song. Unless include_source is disabled, the
-    original M3UG text is embedded as comments at the top of the playlist.
-    Folders that match an exclude pattern are skipped entirely.
+    files to their parsed rules and ordering. A playlist is generated for each
+    M3UG file that matches at least one song. Unless include_source is
+    disabled, the original M3UG text is embedded as comments at the top of the
+    playlist. Folders that match an exclude pattern are skipped entirely.
 
     With ``retain_tags`` False (the default), tags are released as soon as
     each file has been matched against the filters and ``all_tags`` is empty.
@@ -467,9 +535,7 @@ def process_directory(
     start_time = timer()
 
     all_filters = _discover_filters(conn, cursor, directory, args)
-    matches: dict[Path, list[tuple[int, Path | PlaylistEntry]]] = {
-        filter_file: [] for filter_file in all_filters
-    }
+    matches: dict[Path, list[Match]] = {filter_file: [] for filter_file in all_filters}
     retained: dict[int, tuple[Path, Tags]] | None = {} if retain_tags else None
     processed = 0
     pending: list[ParseItem] = []
@@ -497,6 +563,7 @@ def process_directory(
                     file,
                     tags,
                     extended=args.extended_m3u,
+                    default_sort=args.config.output.sort,
                 )
                 continue
 
@@ -514,6 +581,7 @@ def process_directory(
                     file,
                     tags,
                     extended=args.extended_m3u,
+                    default_sort=args.config.output.sort,
                 )
             else:
                 pending.append(
@@ -555,6 +623,7 @@ def process_directory(
                         result.item.path,
                         result.tags,
                         extended=args.extended_m3u,
+                        default_sort=args.config.output.sort,
                     )
             except BaseException:
                 executor.close(cancel=True)
@@ -571,17 +640,23 @@ def process_directory(
         else {}
     )
 
-    # Every filter has already been applied to every file. Sort the recorded
-    # matches by walk order (worker results can arrive out of order) and write
-    # each playlist.
-    for filter_file in all_filters:
+    # Every filter has already been applied to every file. Sort each match
+    # list with its effective spec (worker results can arrive out of order)
+    # and write each playlist.
+    for filter_file, parsed in all_filters.items():
         matched = matches[filter_file]
-        matched.sort(key=lambda item: item[0])
+        spec = parsed.sort if parsed.sort is not None else args.config.output.sort
+        _sort_matches(matched, spec)
         if args.verbosity.is_verbose:
             print(f"\nFiltering songs and generating playlist for {filter_file}")
+            print(f"Sort order: {format_sort_spec(spec)}")
             print(f"Files that match the filter {filter_file}:")
-            for _, entry in matched:
-                path = entry.path if isinstance(entry, PlaylistEntry) else entry
+            for match in matched:
+                path = (
+                    match.entry.path
+                    if isinstance(match.entry, PlaylistEntry)
+                    else match.entry
+                )
                 print(f"  {path}")
         if args.verbosity.shows_progress:
             print(f"Filter file {filter_file} matched {len(matched)} songs")
@@ -599,7 +674,7 @@ def process_directory(
                 ]
             create_m3u(
                 playlist_file,
-                (entry for _, entry in matched),
+                (match.entry for match in matched),
                 comments=comments,
                 overwrite=args.overwrite,
                 verbosity=args.verbosity,
@@ -624,11 +699,11 @@ def process_file(
     args: Args,
     *,
     batch: db.WriteBatch | None = None,
-) -> tuple[Tags | None, list[RuleNode], db.CacheStatus]:
+) -> tuple[Tags | None, M3UGFile | None, db.CacheStatus]:
     """Process a single file.
 
-    Returns a tuple in the form (tags, filters, cache_status), where tags is a
-    dictionary, filters is always a list (empty for non-M3UG files) and
+    Returns a tuple in the form (tags, parsed_m3ug, cache_status), where tags
+    is a dictionary, parsed_m3ug is ``None`` for non-M3UG files and
     cache_status is the state of the tag cache when the file was found.
 
     When ``batch`` is given, cache writes go through it instead of committing
@@ -639,8 +714,8 @@ def process_file(
     dictionary means the file is supported music but has no usable tags (for
     example because every tag is ignored).
 
-    If it's an M3UG file, parse it as such and return its filters.
-    See m3ug module.
+    If it's an M3UG file, parse it as such and return its rules and optional
+    ordering. See m3ug module.
 
     Music files are parsed with tinytag, detected tags are returned as a
     dictionary. Up-to-date cached tags are reused instead of parsing again;
@@ -652,15 +727,15 @@ def process_file(
 
     if file.suffix.lower() == ".m3ug":
         content = file.read_text(encoding="utf-8-sig")
-        rules = parse_m3ug(content, str(file), args.verbosity)
-        return None, rules, db.CacheStatus.MISS
+        parsed = parse_m3ug(content, str(file), args.verbosity)
+        return None, parsed, db.CacheStatus.MISS
 
     last_modified = db.get_last_modified(file)
     cache_status = db.get_cache_status(cursor, file, last_modified)
     if cache_status is db.CacheStatus.HIT:
         # reuse cached tags from DB instead of parsing them again
         cached_tags = db.get_cached_tags(cursor, file)
-        return cached_tags, [], cache_status
+        return cached_tags, None, cache_status
 
     tags = get_tags(
         file,
@@ -669,7 +744,7 @@ def process_file(
         ignore=args.config.tags.ignore,
     )
     if tags is None:
-        return None, [], cache_status
+        return None, None, cache_status
     # Cache supported files even when every tag was filtered out, so an empty
     # tag dictionary is not confused with "not a music file" next time.
     if batch is not None:
@@ -689,7 +764,7 @@ def process_file(
             verbosity=args.verbosity,
         )
         conn.commit()
-    return tags, [], cache_status
+    return tags, None, cache_status
 
 
 def filter_songs(

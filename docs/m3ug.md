@@ -22,6 +22,8 @@ genplis and the generated playlist format, see
 - All rules in a file are combined with **AND**: a song must satisfy all of
   them. There is no OR operator yet; use separate `.m3ug` files for separate
   playlists.
+- A file may contain one `@sort` directive to choose the playlist order. Without
+  it, the `[output] sort` setting applies (default `filename`).
 - If no song matches, no playlist file is written.
 - An empty `.m3ug` file has no rules and therefore matches every song.
 
@@ -40,6 +42,9 @@ genre ~= "Heavy Metal"
 rating >= 4
 ```
 
+A file may also contain a single `@sort` line; it controls playlist order and
+is not a filter rule. See [Ordering](#ordering).
+
 Rules about the file itself:
 
 - **Encoding:** UTF-8. A byte-order mark is accepted and ignored.
@@ -56,6 +61,8 @@ Rules about the file itself:
 - **One rule per line.** A rule that cannot be split into exactly
   `tag operator value` is rejected with `<filename:line>: Invalid filter syntax`,
   and the run stops.
+- **Directives:** the optional `@sort` line must also start at column 0.
+  Unknown directives are errors.
 
 ## Values and types
 
@@ -142,6 +149,82 @@ Details that matter when writing filters:
 A tag that is absent is treated as missing. Zero and false are real values,
 not missing ones, so `track = 0` and `comment = ""` work as expected. There is
 still no boolean literal, so `is_lossless` cannot be compared directly.
+
+## Ordering
+
+By default, entries are ordered by `[output] sort`, which is `filename` (the
+absolute path) unless configured otherwise. Add one `@sort` line to a `.m3ug`
+file to choose a different order for that playlist:
+
+```text
+@sort tag [asc|desc] [, tag [asc|desc]]...
+```
+
+Keys are compared from left to right. The direction applies to the key before
+it and defaults to `asc`. A second `@sort` line is an error; put all keys on
+one line.
+
+```text
+# Title, ascending
+@sort title
+
+# Newest first
+@sort year desc
+
+# Album order
+@sort artist, album, disc, track, title
+
+# Highest rated first, then album order
+@sort rating desc, artist, album, disc, track, title
+```
+
+`duration` and `filename` are ordinary sort keys too:
+
+```text
+# Shortest songs first
+@sort duration
+
+# Longest songs first
+@sort duration desc
+
+# Path order, matching the default
+@sort filename
+```
+
+`filename` is the absolute path of the file, not the relative path written
+into the playlist. `year` and `original_year` are the release-date tags
+available from tinytag; there is no separate `date` tag.
+
+### Missing values
+
+A missing value sorts after every present value **for that key only**. It does
+not demote the entry past an entry that differs on a higher-priority key. When
+both entries are missing the same key, or have the same value, comparison
+continues to the lower-priority keys. So an entry with a missing `disc` is not
+automatically sent to the bottom of the playlist:
+
+```text
+@sort artist, album, disc, track, title
+```
+
+| Song | artist | album | disc | track | title |
+| --- | --- | --- | --- | --- | --- |
+| 1 | Rammstein | Herzeleid | 1 | 4 | Asche zu Asche |
+| 2 | Rammstein | Rosenrot | | | Benzin |
+| 3 | Rammstein | Mutter | | | Zwitter |
+| 4 | VAST | Turquoise & Crimson | 1 | 3 | Lost |
+
+The order is 1, 3, 2, 4. The `Rammstein` group comes before `VAST`, and within
+`Rammstein` the albums are ordered `Herzeleid`, `Mutter`, `Rosenrot`. Songs 2 and 3 have
+no disc or track tags, but those keys are never reached because their albums already
+differ.  Missing values are last in both ascending and descending order, and equal keys
+keep directory-walk order.
+
+Numeric-looking values sort numerically, so `track` values `2` and `10` come
+out in the expected order. Other text sorts case-insensitively. Multi-valued
+tags use their first non-empty value. `rating` uses the same raw-or-derived
+handling as filters; see [Rating](https://github.com/haplo/genplis/blob/main/docs/tags.md#rating)
+for the scale caveat.
 
 ## Special tag names
 
@@ -277,8 +360,9 @@ To see how a `.m3ug` file is parsed without generating a playlist:
 uv run genplis /path/to/Favorites.m3ug
 ```
 
-To see the parsed rules, each matching song, and match counts during a full
-run, add `--verbose`:
+The single-file form also prints the `@sort` keys when the file has them. To
+see the parsed rules, the effective sort order, each matching song, and match
+counts during a full run, add `--verbose`:
 
 ```bash
 uv run genplis --verbose ~/Music
@@ -294,5 +378,9 @@ uv run genplis --verbose ~/Music
 - No quote escaping.
 - Exactly one space between tag and operator; no tabs or indentation.
 - Numeric comparisons need a numeric rule value; quoted numbers are strings.
+- One `@sort` line per file; combine all keys on that line.
+- Missing sort values always go last; there is no nulls-first option.
+- Text sorting is case-insensitive but not locale-aware or natural-number
+  aware; numeric-looking values are compared as numbers.
 
 Some of these are on the [roadmap](https://github.com/haplo/genplis/blob/main/docs/dev.md#roadmap).

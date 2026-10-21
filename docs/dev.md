@@ -31,7 +31,8 @@ src/genplis/
     config.py       INI loading and validation
     db.py           SQLite cache
     tags.py         tag extraction and calculated properties
-    m3ug.py         filter parser and rule nodes
+    m3ug.py         filter and @sort parser, rule nodes
+    sorting.py      sort specs, value normalization, comparison
     m3u.py          playlist writer
     files.py        modification-time helper
     json.py         JSON encoder for cached tags
@@ -58,7 +59,7 @@ parse every .m3ug file in the main process
 walk PATH again for audio files:
     .m3ug  → skip (already parsed)
     audio  → cache hit? apply every filter now : queue for parsing
-    keep only matching playlist entries, tagged with walk order
+    keep matching playlist entries with walk order and sort keys
         ↓
 parse queued files (inline, or in worker processes)
         ↓
@@ -67,17 +68,20 @@ write results through one WriteBatch in the main process
 apply every filter to each result as it arrives
         ↓
 for each .m3ug file:
-    sort matches by walk order
+    sort matches by its @sort, or [output] sort (default filename)
+    equal keys keep walk order
     if any: write <stem>.m3u next to the .m3ug file
 ```
 
 Rules are ANDed: `core.matches_rules` stops at the first failing rule. Each
 `RuleNode` looks up its tag, normalizes multi-value tags, and calls its own
-`check()`.
+`check()`. An optional `@sort` line is parsed into a `SortSpec`; it does not
+participate in filtering.
 
 Tags are not retained across files in a normal run. `process_directory` only
-keeps the matching `Path` or `PlaylistEntry` records. The `retain_tags` keyword
-exists for tests and debugging and restores the old all-tags return value.
+keeps matching `Match` records (the playlist entry, walk order, and normalized
+sort keys). The `retain_tags` keyword exists for tests and debugging and
+restores the old all-tags return value.
 
 ## Parallel parsing
 
@@ -99,12 +103,15 @@ Invariants:
 - **Workers only parse tags.** They return tags and verbose messages. M3UG
   parsing, filtering, playlist generation, cache reads, and cache writes stay
   in the main process.
-- **Playlist order is walk order.** Each audio file gets a walk-order index.
-  Cache hits are evaluated during the walk and worker results are evaluated as
-  they arrive; the recorded matches are sorted by that index before playlists
-  are written. `all_tags` is only rebuilt (in the same order) when
-  `retain_tags=True`. Results are consumed in submission order, so verbose
-  lines and cache rows stay in walk order for the files that needed parsing.
+- **Playlist order is the effective sort spec, with walk order as the final
+  tie-breaker.** Each audio file gets a walk-order index and, for every
+  playlist it matches, the normalized keys for that playlist's `@sort` or the
+  configured default (`filename`). Cache hits are evaluated during the walk
+  and worker results are evaluated as they arrive; matches are sorted by the
+  keys before playlists are written. `all_tags` is only rebuilt in walk order
+  when `retain_tags=True`. Results are consumed in submission order, so
+  verbose lines and cache rows stay in walk order for the files that needed
+  parsing.
 - **Tags are short-lived.** A file's tags are dropped after it has been
   matched against every filter. Only matching playlist entries are retained.
 - **`--jobs 1` is the inline path.** It uses the same `WriteBatch` plumbing,
@@ -285,6 +292,15 @@ Add the alias to `get_rating()` in `m3ug.py`, normalize it to the 0–5 scale,
 and add tests next to the existing `fmps_rating` tests. Document the scale in
 `docs/tags.md`.
 
+### Changing ordering
+
+`sorting.py` owns the sort grammar (`parse_sort_spec`), value normalization,
+and comparison. `M3UGFile.sort` is `None` when a file has no `@sort`, so the
+configured `[output] sort` applies; an explicit spec overrides it. The core
+pipeline computes sort values when a file matches and stores only those values,
+not the full tag dictionary. Add tests for direction, numeric strings, case
+folding, missing values, and stability when changing this code.
+
 ### Changing CLI or config behavior
 
 Update all of:
@@ -369,7 +385,7 @@ pending; see the roadmap.
   - [x] Tags to ignore
   - [x] Example config in `examples/config.ini`
 - [ ] Improve M3UG grammar
-  - [ ] Ordering
+  - [x] Ordering
   - [ ] @OR operator
   - [ ] @NOT operator
   - [ ] Multi-tag glob (`[<tag1> | <tag2> | <tag3>] OP <value>`)

@@ -260,7 +260,7 @@ def test_parallel_rebuilds_tags_in_walk_order(
         for line in filter_file.with_suffix(".m3u").read_text().splitlines()
         if not line.startswith("#")
     ]
-    assert playlist_entries == [path.name for path in audio_order]
+    assert playlist_entries == sorted(path.name for path in audio_order)
 
 
 def test_pipeline_caches_empty_tags_and_skips_unsupported(

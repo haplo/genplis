@@ -1,20 +1,25 @@
 from __future__ import annotations
 
 import logging
-import re
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import ClassVar, Self, TypeGuard
 
 from .exceptions import GenplisM3UGException
+from .sorting import (
+    FLOAT_RE,
+    INT_RE,
+    SortSpec,
+    SortSpecError,
+    format_sort_spec,
+    parse_sort_spec,
+)
 from .types import TagValue, Verbosity
 
 logger = logging.getLogger(__name__)
 
 
 type RuleValue = str | float | int
-
-FLOAT_RE = re.compile(r"^\d+\.\d+$")
-INT_RE = re.compile(r"^\d+$")
 
 
 def is_number(value: object) -> TypeGuard[int | float]:
@@ -412,10 +417,19 @@ class GreaterOrEqualRuleNode(RuleNode):
             )
 
 
+@dataclass(frozen=True, slots=True)
+class M3UGFile:
+    """A parsed M3UG file: filter rules and an optional ordering override."""
+
+    rules: tuple[RuleNode, ...]
+    sort: SortSpec | None = None
+
+
 def parse_m3ug(
     content: str, filename: str = "N/A", verbosity: Verbosity = Verbosity.NORMAL
-) -> list[RuleNode]:
+) -> M3UGFile:
     rules: list[RuleNode] = []
+    sort_spec: SortSpec | None = None
     if verbosity.is_verbose:
         print(f"Parsing M3UG file {filename}:")
         print("----------------")
@@ -430,6 +444,29 @@ def parse_m3ug(
         elif not line.strip():
             if verbosity.is_verbose:
                 print(f"Ignoring line {n}: empty")
+            continue
+        elif line.startswith("@"):
+            parts = line.split(maxsplit=1)
+            directive = parts[0]
+            raw_value = parts[1] if len(parts) == 2 else ""
+            if directive.lower() != "@sort":
+                raise GenplisM3UGException(
+                    f"Unrecognized directive: {directive}", filename, n
+                )
+            if sort_spec is not None:
+                raise GenplisM3UGException(
+                    "Duplicate @sort directive; combine all keys on one line",
+                    filename,
+                    n,
+                )
+            try:
+                sort_spec = parse_sort_spec(raw_value)
+            except SortSpecError as exc:
+                raise GenplisM3UGException(str(exc), filename, n) from exc
+            if not sort_spec:
+                raise GenplisM3UGException("@sort needs at least one tag", filename, n)
+            if verbosity.is_verbose:
+                print(f"Parsed sort: {format_sort_spec(sort_spec)}")
             continue
 
         components = line.split(" ", 2)
@@ -452,4 +489,4 @@ def parse_m3ug(
             print(str(rule))
         print()
 
-    return rules
+    return M3UGFile(tuple(rules), sort_spec)

@@ -69,7 +69,8 @@ edit the config file instead.
    when the file has not changed, and applies every `.m3ug` file's rules as
    soon as that file's tags are available.
 5. Writes a playlist for each `.m3ug` file that matched at least one song.
-   Matching entries are kept in directory-walk order.
+   Entries are ordered by the file's `@sort` directive, or by `[output] sort`
+   (default `filename`) when it has none.
 6. Prints how many files were processed, how long it took, and the process's
    RAM usage.
 
@@ -113,8 +114,9 @@ Filter names do **not** include the `*`.
 uv run genplis /path/to/Favorites.m3ug
 ```
 
-This prints the parsed rules and exits. It does **not** generate a playlist:
-playlists are only produced when scanning a directory.
+This prints the parsed rules, and the `@sort` keys when present, then exits.
+It does **not** generate a playlist: playlists are only produced when scanning
+a directory.
 
 Both forms also warn when the file matches the current exclude configuration.
 
@@ -123,6 +125,10 @@ Both forms also warn when the file matches the current exclude configuration.
 - A `.m3ug` file named `Favorites.m3ug` produces `Favorites.m3u` in the same
   directory.
 - Only songs that match **all** rules are included.
+- Entry order comes from the file's `@sort` directive. Without one,
+  `[output] sort` applies; its default is `filename`, the absolute path.
+  Equal keys keep directory-walk order. See
+  [Ordering](https://github.com/haplo/genplis/blob/main/docs/m3ug.md#ordering).
 - If no song matches, no playlist is written. An existing playlist is left
   untouched in that case.
 - Playlists are UTF-8 text. By default they are extended M3U files: the first
@@ -199,8 +205,9 @@ genplis prints that there is nothing to clean and exits.
 
 Normal runs print per-file cache updates, a line for each filter file with its
 match count, and a final summary. `--verbose` adds config/database paths,
-exclusion decisions, parsed rules, and the list of matching songs. M3UG rule
-diagnostics are printed while filters are discovered, before audio processing.
+exclusion decisions, parsed rules, the effective sort order, and the list of
+matching songs. M3UG rule diagnostics are printed while filters are discovered,
+before audio processing.
 With `--jobs 1`, audio diagnostics follow the walk order. With `--jobs` greater
 than 1, diagnostics for cache misses and cache updates are printed after the
 audio walk; a file's own diagnostics stay together.

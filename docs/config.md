@@ -37,6 +37,10 @@ is given on the command line, it wins. `--exclude` is also special: any
 `--exclude` option replaces the entire configured list rather than adding to
 it.
 
+`@sort` is also special: a directive in a `.m3ug` file overrides
+`[output] sort` for that playlist. The configured/built-in value only applies
+to playlists without an `@sort` line.
+
 ## File format
 
 The file is standard INI syntax with a few strict rules:
@@ -50,7 +54,9 @@ The file is standard INI syntax with a few strict rules:
 - **No interpolation.** The percent sign is an ordinary character, so regexes
   such as `/100%/` work as written.
 - **Lists are one entry per line.** For `exclude` and `ignore`, each non-empty
-  line is one entry. Commas are part of the value, not separators.
+  line is one entry. Commas are part of the value, not separators. The
+  `[output] sort` option is the exception: it uses the comma-separated key
+  list described below, the same syntax as `@sort`.
 - **Paths** may start with `~`. Relative paths are resolved against the config
   file's directory, not the current working directory.
 
@@ -187,6 +193,7 @@ cache behavior and cleaning.
 | `overwrite` | boolean | `true` | `--overwrite` / `--no-overwrite` | Replace playlists that already exist. |
 | `include_source` | boolean | `true` | `--include-source` / `--no-include-source` | Embed the `.m3ug` source as comments at the top of the playlist. |
 | `extended_m3u` | boolean | `true` | `--extended-m3u` / `--no-extended-m3u` | Write an `#EXTM3U` header and `#EXTINF` metadata for every entry. |
+| `sort` | sort keys | `filename` | none | Default entry order. A `.m3ug` file's `@sort` directive overrides it. |
 
 With `overwrite = false`, an existing playlist is left untouched and a warning
 is printed.
@@ -204,6 +211,43 @@ with one path per line:
 [output]
 extended_m3u = false
 ```
+
+### `sort`
+
+Default entry order for playlists that do not contain an `@sort` directive.
+The value is a comma-separated list of tag names, highest-priority key first.
+Each key may be followed by `asc` (the default) or `desc`:
+
+```ini
+[output]
+sort = artist, album, disc, track, title
+```
+
+The special key `filename` means the absolute path of the file. The default is
+`filename`, which gives a stable path order rather than depending on the
+filesystem's directory-walk order.
+
+```ini
+[output]
+sort = rating desc, artist, album, disc, track, title
+```
+
+An `@sort` line in a `.m3ug` file replaces this setting for that playlist; the
+two are not combined. Set the option to an empty value to preserve
+directory-walk order for playlists without `@sort`:
+
+```ini
+[output]
+sort =
+```
+
+Missing values sort after present values for that key; lower-priority keys
+still break ties (including when both entries are missing the same key), and
+equal keys keep directory-walk order. Numeric-looking values sort numerically,
+other text sorts case-insensitively, and multi-valued tags use their first
+non-empty value. See
+[Ordering](https://github.com/haplo/genplis/blob/main/docs/m3ug.md#ordering)
+for the full key semantics and examples.
 
 ## Settings that invalidate the cache
 

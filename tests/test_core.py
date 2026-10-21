@@ -23,6 +23,7 @@ from genplis.config import (
 )
 from genplis.core import (
     Args,
+    _sort_values,
     clean_database,
     format_size,
     get_calculated_tags,
@@ -45,9 +46,11 @@ from genplis.m3ug import (
     ContainsRuleNode,
     EqualRuleNode,
     GreaterOrEqualRuleNode,
+    M3UGFile,
     NameNode,
     ValueNode,
 )
+from genplis.sorting import parse_sort_spec
 from genplis.types import Tags, TagValue, Verbosity
 
 
@@ -74,7 +77,7 @@ def test_process_audio_file(
         "samplerate": 44100,
         "title": ["Test"],
     }
-    assert filters == []
+    assert filters is None
     assert cache_status is CacheStatus.MISS
 
 
@@ -88,10 +91,11 @@ def test_process_m3ug_file(
         genplis_db, genplis_db.cursor(), file_m3ug, args
     )
     assert tags is None
-    assert filters == [
+    assert filters is not None
+    assert filters.rules == (
         GreaterOrEqualRuleNode(NameNode("rating"), ValueNode(3)),
         ContainsRuleNode(NameNode("genre"), ValueNode("Metal")),
-    ]
+    )
     assert cache_status is CacheStatus.MISS
 
 
@@ -333,7 +337,7 @@ def test_process_dir(
     assert set(all_tags) == {tmp_path / file_mp3.name, tmp_path / file_ogg.name}
     assert set(all_filters) == {tmp_path / file_m3ug.name}
     assert all(isinstance(tags, dict) for tags in all_tags.values())
-    assert len(all_filters[tmp_path / file_m3ug.name]) == 2
+    assert len(all_filters[tmp_path / file_m3ug.name].rules) == 2
 
 
 @pytest.mark.parametrize("jobs", [1, 2])
@@ -459,6 +463,239 @@ def test_process_dir_filters_songs_across_subdirectories(
     lines = (tmp_path / "favorites.m3u").read_text(encoding="utf-8").splitlines()
     playlist_entries = sorted(line for line in lines if not line.startswith("#"))
     assert playlist_entries == ["root.ogg", "sub/nested.ogg"]
+
+
+def _run_sort_test(
+    genplis_db: sqlite3.Connection,
+    make_args: Callable[..., Args],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tracks: dict[str, Tags],
+    m3ug: str,
+    *,
+    config: Config | None = None,
+) -> list[str]:
+    for name in tracks:
+        (tmp_path / name).write_bytes(b"")
+    filter_file = tmp_path / "favorites.m3ug"
+    filter_file.write_text(m3ug, encoding="utf-8")
+
+    def fake_get_tags(path: Path, *_args: object, **_kwargs: object) -> Tags | None:
+        return tracks.get(path.name)
+
+    monkeypatch.setattr("genplis.core.get_tags", fake_get_tags)
+    process_directory(
+        genplis_db,
+        genplis_db.cursor(),
+        tmp_path,
+        make_args(
+            str(tmp_path),
+            include_source=False,
+            extended_m3u=False,
+            config=config,
+        ),
+    )
+    return [
+        line
+        for line in filter_file.with_suffix(".m3u").read_text().splitlines()
+        if not line.startswith("#")
+    ]
+
+
+def test_process_dir_sorts_by_multiple_tags_with_missing_values(
+    genplis_db: sqlite3.Connection,
+    make_args: Callable[..., Args],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tracks: dict[str, Tags] = {
+        "song-4.mp3": {"artist": ["BDC"], "album": ["YDF"], "title": ["JAD"]},
+        "song-2.mp3": {"artist": ["ART"], "album": ["DLT"], "title": ["PLK"]},
+        "song-1.mp3": {"artist": ["ART"], "album": ["ALB"], "title": ["TIT"]},
+        "song-3.mp3": {"artist": ["ART"], "album": ["BUD"], "title": ["DSA"]},
+    }
+
+    entries = _run_sort_test(
+        genplis_db,
+        make_args,
+        tmp_path,
+        monkeypatch,
+        tracks,
+        "@sort artist, album, disc, track, title\n",
+    )
+
+    assert entries == ["song-1.mp3", "song-3.mp3", "song-2.mp3", "song-4.mp3"]
+
+
+def test_process_dir_sort_keeps_walk_order_for_ties(
+    genplis_db: sqlite3.Connection,
+    make_args: Callable[..., Args],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tracks: dict[str, Tags] = {
+        "c.mp3": {"artist": ["Same"], "title": ["Same"]},
+        "b.mp3": {"artist": ["Same"], "title": ["Same"]},
+        "a.mp3": {"artist": ["Same"], "title": ["Same"]},
+    }
+    for name in tracks:
+        (tmp_path / name).write_bytes(b"")
+    walk_order = [
+        Path(current) / name
+        for current, _dirs, names in tmp_path.walk()
+        for name in names
+        if name.endswith(".mp3")
+    ]
+
+    entries = _run_sort_test(
+        genplis_db,
+        make_args,
+        tmp_path,
+        monkeypatch,
+        tracks,
+        "@sort artist\n",
+    )
+
+    assert entries == [path.name for path in walk_order]
+
+
+def test_sort_filename_is_absolute_for_relative_paths(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    relative = Path("song.mp3")
+
+    assert _sort_values(relative, {}, parse_sort_spec("filename")) == (
+        str(relative.absolute()),
+    )
+
+
+def test_process_dir_defaults_to_absolute_filename_sort(
+    genplis_db: sqlite3.Connection,
+    make_args: Callable[..., Args],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tracks: dict[str, Tags] = {
+        "z.mp3": {"artist": ["A"], "title": ["Z"]},
+        "a.mp3": {"artist": ["A"], "title": ["A"]},
+        "m.mp3": {"artist": ["A"], "title": ["M"]},
+    }
+
+    entries = _run_sort_test(
+        genplis_db,
+        make_args,
+        tmp_path,
+        monkeypatch,
+        tracks,
+        "artist = A\n",
+    )
+
+    assert entries == ["a.mp3", "m.mp3", "z.mp3"]
+
+
+def test_process_dir_filename_sort_uses_absolute_path(
+    genplis_db: sqlite3.Connection,
+    make_args: Callable[..., Args],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tracks: dict[str, Tags] = {
+        "a.mp3": {"artist": ["A"], "title": ["A"], "filename": ["zzz"]},
+        "b.mp3": {"artist": ["A"], "title": ["B"], "filename": ["aaa"]},
+    }
+
+    entries = _run_sort_test(
+        genplis_db,
+        make_args,
+        tmp_path,
+        monkeypatch,
+        tracks,
+        "@sort filename\n",
+    )
+
+    assert entries == ["a.mp3", "b.mp3"]
+
+
+def test_process_dir_sorts_duration_numerically(
+    genplis_db: sqlite3.Connection,
+    make_args: Callable[..., Args],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tracks: dict[str, Tags] = {
+        "short.mp3": {"artist": ["A"], "title": ["Short"], "duration": 9},
+        "long.mp3": {"artist": ["A"], "title": ["Long"], "duration": 10},
+    }
+
+    entries = _run_sort_test(
+        genplis_db,
+        make_args,
+        tmp_path,
+        monkeypatch,
+        tracks,
+        "@sort duration desc\n",
+    )
+
+    assert entries == ["long.mp3", "short.mp3"]
+
+
+def test_process_dir_sorts_by_derived_rating(
+    genplis_db: sqlite3.Connection,
+    make_args: Callable[..., Args],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tracks: dict[str, Tags] = {
+        "low.mp3": {"artist": ["A"], "title": ["Low"], "fmps_rating": ["0.2"]},
+        "high.mp3": {"artist": ["A"], "title": ["High"], "fmps_rating": ["0.8"]},
+    }
+
+    entries = _run_sort_test(
+        genplis_db,
+        make_args,
+        tmp_path,
+        monkeypatch,
+        tracks,
+        "@sort rating desc\n",
+    )
+
+    assert entries == ["high.mp3", "low.mp3"]
+
+
+def test_process_dir_empty_config_sort_uses_walk_order(
+    genplis_db: sqlite3.Connection,
+    make_args: Callable[..., Args],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tracks: dict[str, Tags] = {
+        "c.mp3": {"artist": ["A"], "title": ["C"]},
+        "b.mp3": {"artist": ["A"], "title": ["B"]},
+        "a.mp3": {"artist": ["A"], "title": ["A"]},
+    }
+    for name in tracks:
+        (tmp_path / name).write_bytes(b"")
+
+    walk_order = [
+        Path(current) / name
+        for current, _dirs, names in tmp_path.walk()
+        for name in names
+        if name.endswith(".mp3")
+    ]
+
+    entries = _run_sort_test(
+        genplis_db,
+        make_args,
+        tmp_path,
+        monkeypatch,
+        tracks,
+        "artist = A\n",
+        config=Config(output=OutputConfig(sort=())),
+    )
+
+    assert entries == [path.name for path in walk_order]
 
 
 def test_process_dir_does_not_create_playlist_when_no_song_matches(
@@ -653,7 +890,7 @@ def test_process_file_uses_cached_tags_without_reparsing(
     )
 
     assert tags == {"title": ["Cached"]}
-    assert filters == []
+    assert filters is None
     assert cache_status is CacheStatus.HIT
 
 
@@ -679,7 +916,7 @@ def test_process_file_refreshes_stale_cache_entry(
     )
 
     assert tags == {"title": ["Fresh"]}
-    assert filters == []
+    assert filters is None
     assert cache_status is CacheStatus.STALE
     assert get_cached_tags(genplis_db.cursor(), file_mp3) == {"title": ["Fresh"]}
 
@@ -698,7 +935,8 @@ def test_process_file_accepts_uppercase_m3ug_extension(
     )
 
     assert tags is None
-    assert len(filters) == 2
+    assert filters is not None
+    assert len(filters.rules) == 2
     assert cache_status is CacheStatus.MISS
 
 
@@ -715,9 +953,10 @@ def test_process_file_reads_m3ug_with_utf8_bom(
     )
 
     assert tags is None
-    assert filters == [
+    assert filters is not None
+    assert filters.rules == (
         EqualRuleNode(NameNode("artist"), ValueNode("Test Artist")),
-    ]
+    )
 
 
 def test_process_file_ignores_unsupported_file_without_caching(
@@ -737,7 +976,7 @@ def test_process_file_ignores_unsupported_file_without_caching(
     )
 
     assert tags is None
-    assert filters == []
+    assert filters is None
     assert cache_status is CacheStatus.MISS
     assert (
         f"Skipping {unsupported}: not supported by tinytag" in capsys.readouterr().out
@@ -761,7 +1000,7 @@ def test_process_file_returns_and_caches_empty_tags_for_supported_file(
     )
 
     assert tags == {}
-    assert filters == []
+    assert filters is None
     assert cache_status is CacheStatus.MISS
     assert get_cached_tags(genplis_db.cursor(), file_mp3) == {}
 
@@ -778,7 +1017,7 @@ def test_process_file_uses_cached_empty_tags(
     )
 
     assert tags == {}
-    assert filters == []
+    assert filters is None
     assert cache_status is CacheStatus.HIT
 
 
@@ -810,7 +1049,7 @@ def test_empty_filter_includes_tagless_music_file(
     )
 
     assert all_tags == {song: {}}
-    assert all_filters == {filter_file: []}
+    assert all_filters == {filter_file: M3UGFile(())}
     playlist = filter_file.with_suffix(".m3u")
     assert song.name in playlist.read_text(encoding="utf-8").splitlines()
 
