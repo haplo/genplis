@@ -746,6 +746,94 @@ def test_expression_nodes_apply_logic() -> None:
     assert format_expression(NotNode(first)) == "NOT (artist = X)"
 
 
+def test_or_groups_rules_in_cnf() -> None:
+    parsed = parse_m3ug("genre = Metal\n@OR genre = Rock\nrating >= 4\n")
+
+    assert isinstance(parsed.expression, AndNode)
+    assert len(parsed.expression.nodes) == 2
+    assert isinstance(parsed.expression.nodes[0], OrNode)
+    assert format_expression(parsed.expression) == (
+        "(genre = Metal OR genre = Rock) AND rating >= 4"
+    )
+    assert parsed.expression.apply({"genre": "Metal", "rating": 5})
+    assert parsed.expression.apply({"genre": "Rock", "rating": 4})
+    assert not parsed.expression.apply({"genre": "Pop", "rating": 5})
+    assert not parsed.expression.apply({"genre": "Metal", "rating": 3})
+
+
+def test_or_cannot_be_the_first_rule() -> None:
+    with pytest.raises(GenplisM3UGException, match="@OR cannot be the first rule"):
+        parse_m3ug("@OR genre = Metal\n", "favorites.m3ug")
+
+
+def test_or_and_not_need_a_rule() -> None:
+    with pytest.raises(GenplisM3UGException, match="@OR needs a rule"):
+        parse_m3ug("genre = Metal\n@OR\n", "favorites.m3ug")
+    with pytest.raises(GenplisM3UGException, match="@NOT needs a rule"):
+        parse_m3ug("@NOT\n", "favorites.m3ug")
+
+
+def test_not_negates_one_rule() -> None:
+    parsed = parse_m3ug("@NOT rating >= 4\n")
+
+    assert isinstance(parsed.expression, AndNode)
+    assert isinstance(parsed.expression.nodes[0], NotNode)
+    assert format_expression(parsed.expression) == "NOT (rating >= 4)"
+    assert parsed.expression.apply({"rating": 3})
+    assert not parsed.expression.apply({"rating": 4})
+    assert parsed.expression.apply({})
+
+
+def test_or_not_and_case_combine_in_any_order() -> None:
+    parsed = parse_m3ug(
+        "@CASE artist = X\n@OR @NOT @CASE artist = Y\n@OR @CASE @NOT artist = Z\n"
+    )
+
+    assert parsed.expression is not None
+    assert parsed.expression.apply({"artist": "X"})
+    assert parsed.expression.apply({"artist": "Y"})
+    assert all(rule.case_sensitive for rule in parsed.rules)
+    assert not parsed.rules[0].apply({"artist": "x"})
+    assert not parsed.rules[1].apply({"artist": "y"})
+
+
+def test_directives_do_not_end_an_or_group() -> None:
+    parsed = parse_m3ug("genre = Metal\n@sort title\n@OR genre = Rock\nrating >= 4\n")
+
+    assert parsed.sort == (SortKey("title"),)
+    assert parsed.expression is not None
+    assert parsed.expression.apply({"genre": "Rock", "rating": 4})
+    assert not parsed.expression.apply({"genre": "Rock", "rating": 3})
+
+
+def test_not_applies_to_a_whole_set() -> None:
+    parsed = parse_m3ug("@NOT [genre | style] = [Metal | Rock]\n")
+
+    assert parsed.expression is not None
+    assert not parsed.expression.apply({"genre": "Rock"})
+    assert parsed.expression.apply({"genre": "Pop"})
+    assert parsed.expression.apply({})
+
+
+def test_not_does_not_negate_a_group() -> None:
+    parsed = parse_m3ug("genre = Metal\n@OR @NOT genre = Rock\n")
+
+    assert parsed.expression is not None
+    assert isinstance(parsed.expression, AndNode)
+    assert isinstance(parsed.expression.nodes[0], OrNode)
+    assert parsed.expression.apply({"genre": "Metal"})
+    assert parsed.expression.apply({"genre": "Pop"})
+    assert not parsed.expression.apply({"genre": "Rock"})
+
+
+def test_comparison_negation_and_missing_tags() -> None:
+    negated = parse_m3ug("@NOT rating >= 4\n").expression
+    direct = parse_m3ug("rating < 4\n").expression
+    assert negated is not None and direct is not None
+    assert negated.apply({})
+    assert not direct.apply({})
+
+
 def test_sort_directive_is_parsed_with_filters() -> None:
     parsed = parse_m3ug("@sort artist, album desc\nrating >= 4\n")
 

@@ -843,7 +843,8 @@ def _parse_sort_directive(raw_value: str, filename: str, line: int) -> SortSpec:
 def parse_m3ug(
     content: str, filename: str = "N/A", verbosity: Verbosity = Verbosity.NORMAL
 ) -> M3UGFile:
-    rules: list[FilterNode] = []
+    and_groups: list[list[FilterNode]] = []
+    current_group: list[FilterNode] | None = None
     sort_spec: SortSpec | None = None
     if verbosity.is_verbose:
         print(f"Parsing M3UG file {filename}:")
@@ -864,6 +865,9 @@ def parse_m3ug(
 
         text = stripped.strip()
         case_sensitive = False
+        or_modifier = False
+        not_modifier = False
+        is_directive = False
         while text.startswith("@"):
             first, rest = _split_first_word(text)
             modifier = first.lower()
@@ -875,10 +879,26 @@ def parse_m3ug(
                 if not text:
                     raise GenplisM3UGException("@CASE needs a rule", filename, n)
                 continue
+            if modifier == "@or":
+                if or_modifier:
+                    raise GenplisM3UGException("Duplicate @OR modifier", filename, n)
+                or_modifier = True
+                text = rest.strip()
+                if not text:
+                    raise GenplisM3UGException("@OR needs a rule", filename, n)
+                continue
+            if modifier == "@not":
+                if not_modifier:
+                    raise GenplisM3UGException("Duplicate @NOT modifier", filename, n)
+                not_modifier = True
+                text = rest.strip()
+                if not text:
+                    raise GenplisM3UGException("@NOT needs a rule", filename, n)
+                continue
             if modifier == "@sort":
-                if case_sensitive:
+                if case_sensitive or or_modifier or not_modifier:
                     raise GenplisM3UGException(
-                        "@CASE cannot modify a directive", filename, n
+                        "Directives cannot use rule modifiers", filename, n
                     )
                 if sort_spec is not None:
                     raise GenplisM3UGException(
@@ -889,57 +909,67 @@ def parse_m3ug(
                 sort_spec = _parse_sort_directive(rest, filename, n)
                 if verbosity.is_verbose:
                     print(f"Parsed sort: {format_sort_spec(sort_spec)}")
+                is_directive = True
                 break
             raise GenplisM3UGException(f"Unrecognized directive: {first}", filename, n)
-        else:
-            components = _split_rule_line(text)
 
-            if len(components) != 3:
-                raise GenplisM3UGException("Invalid filter syntax", filename, n)
-
-            tag, operator, value = components
-            if operator not in OPERATORS:
-                raise GenplisM3UGException(
-                    f"Unrecognized operator: {operator}", filename, n
-                )
-            mode = _value_mode(operator, filename, n)
-            if case_sensitive and mode == "numeric":
-                raise GenplisM3UGException(
-                    f"@CASE cannot be used with comparison operator {operator}",
-                    filename,
-                    n,
-                )
-
-            # building validates data
-            tag_names = _parse_tag_names(tag, filename, n)
-            if tag_names is None:
-                tag_names = (NameNode.build(tag, filename, n),)
-            value_set = _parse_value_set(value, mode, filename, n)
-            if value_set is None:
-                value_set = (ValueNode.parse(value, mode, filename, n),)
-            if mode == "numeric" and len(value_set) != 1:
-                raise GenplisM3UGException(
-                    "comparison operators take exactly one value; "
-                    "use @OR for alternatives",
-                    filename,
-                    n,
-                )
-            rule_node = _build_rule_set(
-                operator,
-                tag_names,
-                value_set,
-                filename,
-                n,
-                case_sensitive,
-            )
-
-            rules.append(rule_node)
+        if is_directive:
             continue
 
-        if text and not text.startswith("@"):
+        components = _split_rule_line(text)
+
+        if len(components) != 3:
             raise GenplisM3UGException("Invalid filter syntax", filename, n)
 
-    expression = AndNode(tuple(rules)) if rules else None
+        tag, operator, value = components
+        if operator not in OPERATORS:
+            raise GenplisM3UGException(
+                f"Unrecognized operator: {operator}", filename, n
+            )
+        mode = _value_mode(operator, filename, n)
+        if case_sensitive and mode == "numeric":
+            raise GenplisM3UGException(
+                f"@CASE cannot be used with comparison operator {operator}",
+                filename,
+                n,
+            )
+
+        # building validates data
+        tag_names = _parse_tag_names(tag, filename, n)
+        if tag_names is None:
+            tag_names = (NameNode.build(tag, filename, n),)
+        value_set = _parse_value_set(value, mode, filename, n)
+        if value_set is None:
+            value_set = (ValueNode.parse(value, mode, filename, n),)
+        if mode == "numeric" and len(value_set) != 1:
+            raise GenplisM3UGException(
+                "comparison operators take exactly one value; use @OR for alternatives",
+                filename,
+                n,
+            )
+        rule_node = _build_rule_set(
+            operator,
+            tag_names,
+            value_set,
+            filename,
+            n,
+            case_sensitive,
+        )
+        if not_modifier:
+            rule_node = NotNode(rule_node)
+
+        if or_modifier:
+            if current_group is None:
+                raise GenplisM3UGException("@OR cannot be the first rule", filename, n)
+            current_group.append(rule_node)
+        else:
+            current_group = [rule_node]
+            and_groups.append(current_group)
+
+    groups = tuple(
+        group[0] if len(group) == 1 else OrNode(tuple(group)) for group in and_groups
+    )
+    expression = AndNode(groups) if groups else None
     if verbosity.is_verbose:
         print("Parsed rules:")
         print(format_expression(expression))

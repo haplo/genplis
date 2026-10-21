@@ -73,10 +73,12 @@ for each .m3ug file:
     if any: write <stem>.m3u next to the .m3ug file
 ```
 
-Rules are ANDed: `core.matches_rules` stops at the first failing rule. Each
-`RuleNode` looks up its tag, normalizes multi-value tags, and calls its own
-`check()`. An optional `@sort` line is parsed into a `SortSpec`; it does not
-participate in filtering.
+Rules are parsed into a `FilterNode` expression tree. Plain rules form AND
+groups, consecutive `@OR` rules share an `OrNode`, and `@NOT` wraps one rule in
+a `NotNode`. Each leaf `RuleNode` looks up its tag, normalizes multi-value
+tags, and calls its own `check()`. `M3UGFile.rules` flattens the leaf rules for
+diagnostics; matching always uses `M3UGFile.expression`. Directives are parsed
+separately and never participate in filtering.
 
 Tags are not retained across files in a normal run. `process_directory` only
 keeps matching `Match` records (the playlist entry, walk order, and normalized
@@ -386,10 +388,10 @@ pending; see the roadmap.
   - [x] Example config in `examples/config.ini`
 - [ ] Improve M3UG grammar
   - [x] Ordering
-  - [ ] @OR operator
-  - [ ] @NOT operator
-  - [ ] Multi-tag glob (`[<tag1> | <tag2> | <tag3>] OP <value>`)
-  - [ ] Multi-value glob (`<tag> OP [<value1> | <value2> | <value3>]`)
+  - [x] @OR operator
+  - [x] @NOT operator
+  - [x] Multi-tag glob (`[<tag1> | <tag2> | <tag3>] OP <value>`)
+  - [x] Multi-value glob (`<tag> OP [<value1> | <value2> | <value3>]`)
   - [ ] Limit
   - [ ] Limit N per <tag>
   - [ ] Random sort

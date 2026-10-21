@@ -19,11 +19,10 @@ genplis and the generated playlist format, see
 - Filters are applied to every music file found under the `PATH` given on the
   command line (or configured in the config file), not just to the folder that
   contains the `.m3ug` file.
-- All rules in a file are combined with **AND**: a song must satisfy all of
-  them. There is no OR operator yet; use separate `.m3ug` files for separate
-  playlists.
-- A file may contain one `@sort` directive to choose the playlist order. Without
-  it, the `[output] sort` setting applies (default `filename`).
+- All rules in a file are combined with **AND**. Add `@OR` to a rule to join it
+  to the previous rule as an alternative, and `@NOT` to negate one rule.
+- A file may contain directives such as `@sort` to choose the playlist order.
+  Without one, the `[output] sort` setting applies (default `filename`).
 - If no song matches, no playlist file is written.
 - An empty `.m3ug` file has no rules and therefore matches every song.
 
@@ -216,6 +215,41 @@ rating > 4                     # valid
 A tag that is absent is treated as missing. Zero and false are real values,
 not missing ones, so `track = 0`, `comment = ""`, and `is_lossless = false`
 work as expected.
+
+## Combining rules
+
+Plain rules are ANDed. `@OR` joins a rule to the preceding OR group, and `@NOT`
+negates the rule on its line:
+
+```text
+genre = Metal
+@OR genre = Rock
+rating >= 4
+```
+
+This means `(genre = Metal OR genre = Rock) AND rating >= 4`. A plain rule
+starts a new AND group; consecutive `@OR` rules join the current group. `@OR`
+cannot be the first rule, and `@NOT` always applies to one rule, never to a
+group. There are no parentheses or nested groups.
+
+`@OR` and `@NOT` can be combined in any order. `@CASE` can appear with either
+or both:
+
+```text
+@CASE artist = "DANCE WITH THE DEAD"
+@OR @NOT @CASE genre = Pop
+```
+
+Directives do not end an OR group. This is still one OR group:
+
+```text
+genre = Metal
+@sort title
+@OR genre = Rock
+```
+
+`@NOT rating >= 4` matches unrated songs because a missing tag makes the
+comparison false. `rating < 4` does not match them.
 
 ## Ordering
 
@@ -437,7 +471,7 @@ uv run genplis --verbose ~/Music
 
 ## Current limitations
 
-- No OR, grouping, or parentheses. All rules are ANDed.
+- No nested OR groups or parentheses. `@NOT` applies to one rule only.
 - No negative or scientific-notation numbers.
 - No inline comments.
 - Numeric comparisons need a numeric rule value; quoted numbers are strings.
