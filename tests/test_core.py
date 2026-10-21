@@ -1071,6 +1071,71 @@ def test_process_dir_empty_config_sort_uses_walk_order(
     assert entries == [path.name for path in walk_order]
 
 
+def test_process_dir_skips_no_playlist_files(
+    genplis_db: sqlite3.Connection,
+    make_args: Callable[..., Args],
+    file_mp3: Path,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    shutil.copy2(file_mp3, tmp_path / "song.mp3")
+    filter_file = tmp_path / "fragment.m3ug"
+    filter_file.write_text("@NO-PLAYLIST\nartist = X\n", encoding="utf-8")
+    playlist_file = filter_file.with_suffix(".m3u")
+    playlist_file.write_text("keep this\n", encoding="utf-8")
+
+    all_tags, all_filters = process_directory(
+        genplis_db,
+        genplis_db.cursor(),
+        tmp_path,
+        make_args(str(tmp_path)),
+        retain_tags=True,
+    )
+
+    assert set(all_filters) == {filter_file}
+    assert all_filters[filter_file].no_playlist is True
+    assert playlist_file.read_text() == "keep this\n"
+    assert "Creating playlist" not in capsys.readouterr().out
+
+
+def test_process_dir_uses_no_playlist_fragment_in_include(
+    genplis_db: sqlite3.Connection,
+    make_args: Callable[..., Args],
+    file_mp3: Path,
+    tmp_path: Path,
+) -> None:
+    shutil.copy2(file_mp3, tmp_path / "song.mp3")
+    base = tmp_path / "Base.m3ug"
+    main = tmp_path / "Main.m3ug"
+    base.write_text('@NO-PLAYLIST\nartist = "Test Artist"\n', encoding="utf-8")
+    main.write_text("@INCLUDE Base.m3ug\n", encoding="utf-8")
+
+    process_directory(
+        genplis_db,
+        genplis_db.cursor(),
+        tmp_path,
+        make_args(str(tmp_path), include_source=False, extended_m3u=False),
+    )
+
+    assert not base.with_suffix(".m3u").exists()
+    assert main.with_suffix(".m3u").read_text() == "song.mp3\n"
+
+
+def test_process_path_reports_no_playlist(
+    genplis_db: sqlite3.Connection,
+    make_args: Callable[..., Args],
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    filter_file = tmp_path / "fragment.m3ug"
+    filter_file.write_text("@NO-PLAYLIST\nartist = X\n", encoding="utf-8")
+
+    process_path(genplis_db, genplis_db.cursor(), make_args(str(filter_file)))
+
+    output = capsys.readouterr().out
+    assert "no playlist will be generated (@NO-PLAYLIST)" in output
+
+
 def test_process_dir_does_not_create_playlist_when_no_song_matches(
     genplis_db: sqlite3.Connection,
     make_args: Callable[..., Args],

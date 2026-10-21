@@ -376,6 +376,8 @@ def process_path(conn: sqlite3.Connection, cursor: sqlite3.Cursor, args: Args) -
                 print(f"    {format_expression(parsed.expression)}")
                 if parsed.sort is not None:
                     print(f"    sort: {format_sort_spec(parsed.sort)}")
+                if parsed.no_playlist:
+                    print("    no playlist will be generated (@NO-PLAYLIST)")
         if is_excluded(path, args) and args.verbosity.shows_normal_output:
             print("WARNING: This file is excluded by current configuration.")
     else:
@@ -582,6 +584,8 @@ def _record_matches(
     spec_cache: dict[SortSpec, SortValues] = {}
     dedupe_cache: dict[tuple[str, ...], SortValues] = {}
     for filter_file, parsed in all_filters.items():
+        if parsed.no_playlist:
+            continue
         if matches_rules(tags, parsed.expression):
             if entry is None:
                 entry = playlist_entry(file, tags) if extended else file
@@ -754,6 +758,8 @@ def process_directory(
     # list with its effective spec (worker results can arrive out of order)
     # and write each playlist.
     for filter_file, parsed in all_filters.items():
+        if parsed.no_playlist:
+            continue
         matched = matches[filter_file]
         spec = parsed.sort if parsed.sort is not None else args.config.output.sort
         _sort_matches(matched, spec)

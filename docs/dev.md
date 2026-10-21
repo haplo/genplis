@@ -87,6 +87,9 @@ AND groups. Cycles are detected by resolved path, depth is capped at 32, and
 missing, unreadable, directory, cyclic, too-deep, or invalid includes raise
 `GenplisM3UGException` with the including file and line. `include_loader` on
 `parse_m3ug` lets tests supply file contents without touching the filesystem.
+`@NO-PLAYLIST` lives on `M3UGFile` rather than `Directives`, so it is never
+inherited; core skips matching and writing for those files while still parsing
+them for includes.
 
 Tags are not retained across files in a normal run. `process_directory` only
 keeps matching `Match` records (the playlist entry, walk order, and normalized
@@ -408,7 +411,7 @@ pending; see the roadmap.
   - [ ] Regex operator
   - [ ] Duration formats (`mm:ss`, `<n>m`)
   - [x] Include other M3UG
-  - [ ] Abstract M3UG (doesn't generate an M3U, meant for include)
+  - [x] Abstract M3UG (doesn't generate an M3U, meant for include)
 - [x] Command for DB cleaning
 - [x] Optimize memory usage
 - [ ] Optimize DB space

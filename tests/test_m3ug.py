@@ -1258,6 +1258,36 @@ def test_include_cannot_be_used_with_rule_modifiers(tmp_path: Path) -> None:
         parse_m3ug(main.read_text(), str(main))
 
 
+def test_no_playlist_directive() -> None:
+    parsed = parse_m3ug("@NO-PLAYLIST\nartist = X\n")
+
+    assert parsed.no_playlist is True
+    assert parsed.expression is not None
+    assert parsed.expression.apply({"artist": "X"})
+
+
+def test_no_playlist_rejects_arguments_and_duplicates() -> None:
+    with pytest.raises(GenplisM3UGException, match="takes no arguments"):
+        parse_m3ug("@NO-PLAYLIST yes\n", "favorites.m3ug")
+    with pytest.raises(GenplisM3UGException, match="Duplicate @NO-PLAYLIST"):
+        parse_m3ug("@NO-PLAYLIST\n@NO-PLAYLIST\n", "favorites.m3ug")
+
+
+def test_no_playlist_is_not_inherited_from_includes(tmp_path: Path) -> None:
+    base = tmp_path / "Base.m3ug"
+    main = tmp_path / "Main.m3ug"
+    base.write_text("@NO-PLAYLIST\nartist = X\n", encoding="utf-8")
+    main.write_text("@INCLUDE Base.m3ug\n", encoding="utf-8")
+
+    parsed_base = parse_m3ug(base.read_text(), str(base))
+    parsed_main = parse_m3ug(main.read_text(), str(main))
+
+    assert parsed_base.no_playlist is True
+    assert parsed_main.no_playlist is False
+    assert parsed_main.expression is not None
+    assert parsed_main.expression.apply({"artist": "X"})
+
+
 def test_examples_parse() -> None:
     """Every shipped example filter must remain valid."""
     examples_dir = Path(__file__).resolve().parent.parent / "examples"

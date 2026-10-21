@@ -491,6 +491,21 @@ Metal.m3ug:3: cannot include "Base.m3ug": file not found
 Metal.m3ug:3: include cycle: Metal.m3ug -> Base.m3ug -> Metal.m3ug
 ```
 
+## Files without a playlist
+
+Use `@NO-PLAYLIST` for include fragments and other filter-only files:
+
+```text
+@NO-PLAYLIST
+genre = Metal
+rating >= 4
+```
+
+The file is still parsed and may be included by other files, but genplis does
+not match songs against it directly and does not write a `.m3u` for it. Any
+existing playlist with the same name is left untouched. The flag applies only
+to the file that contains it and is never inherited through `@INCLUDE`.
+
 ## Special tag names
 
 Tag names are matched case-insensitively, so `Artist`, `artist`, and `ARTIST`

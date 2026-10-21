@@ -915,6 +915,7 @@ class M3UGFile:
     limit: int | None = None
     max_duration: float | None = None
     dedupe: tuple[str, ...] | None = None
+    no_playlist: bool = False
 
     @property
     def rules(self) -> tuple[RuleNode, ...]:
@@ -1007,6 +1008,8 @@ def _parse_m3ug_file(
     own_limit: int | _Unset = UNSET
     own_max_duration: float | _Unset = UNSET
     own_dedupe: tuple[str, ...] | _Unset = UNSET
+    own_no_playlist = False
+    no_playlist_seen = False
     included_directives: list[Directives] = []
     included_expressions: list[FilterNode | None] = []
 
@@ -1142,6 +1145,25 @@ def _parse_m3ug_file(
                 own_dedupe = tuple(keys)
                 if verbosity.is_verbose:
                     print(f"Parsed dedupe: {', '.join(own_dedupe) or 'disabled'}")
+                is_directive = True
+                break
+            if modifier == "@no-playlist":
+                if case_sensitive or or_modifier or not_modifier:
+                    raise GenplisM3UGException(
+                        "Directives cannot use rule modifiers", filename, n
+                    )
+                if rest.strip():
+                    raise GenplisM3UGException(
+                        "@NO-PLAYLIST takes no arguments", filename, n
+                    )
+                if no_playlist_seen:
+                    raise GenplisM3UGException(
+                        "Duplicate @NO-PLAYLIST directive", filename, n
+                    )
+                own_no_playlist = True
+                no_playlist_seen = True
+                if verbosity.is_verbose:
+                    print("Parsed no-playlist file")
                 is_directive = True
                 break
             if modifier == "@include":
@@ -1298,6 +1320,7 @@ def _parse_m3ug_file(
             None if isinstance(merged.max_duration, _Unset) else merged.max_duration
         ),
         dedupe=None if isinstance(merged.dedupe, _Unset) else merged.dedupe,
+        no_playlist=own_no_playlist,
     )
     return parsed, merged
 

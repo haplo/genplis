@@ -125,6 +125,8 @@ Both forms also warn when the file matches the current exclude configuration.
 
 - A `.m3ug` file named `Favorites.m3ug` produces `Favorites.m3u` in the same
   directory.
+- Files marked `@NO-PLAYLIST` are parsed and may be included, but they never
+  produce an `.m3u` themselves. Any existing playlist is left untouched.
 - Only songs that match **all** rules are included.
 - Entry order comes from the file's `@sort` directive. Without one,
   `[output] sort` applies; its default is `filename`, the absolute path.
