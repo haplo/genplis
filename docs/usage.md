@@ -190,9 +190,10 @@ genplis prints that there is nothing to clean and exits.
 
 Normal runs print per-file cache updates, a line for each filter file with its
 match count, and a final summary. `--verbose` adds config/database paths,
-exclusion decisions, parsed rules, and the list of matching songs. When more
-than one worker is parsing, verbose lines from different files may interleave;
-a file's own diagnostics are kept together.
+exclusion decisions, parsed rules, and the list of matching songs. `--jobs 1`
+keeps the old per-file order. With `--jobs` greater than 1, diagnostics for
+cache misses and cache updates are printed after the directory walk; a file's
+own diagnostics stay together.
 
 `-q` limits output to one line per filter file with its match count and, when
 a playlist is written, the line announcing it. `-qq` suppresses all normal
