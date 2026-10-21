@@ -1,9 +1,11 @@
+import gc
 import json
 import os
 import re
 import shutil
 import sqlite3
 import sys
+import weakref
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
@@ -46,7 +48,7 @@ from genplis.m3ug import (
     NameNode,
     ValueNode,
 )
-from genplis.types import Tags, Verbosity
+from genplis.types import Tags, TagValue, Verbosity
 
 
 def test_process_audio_file(
@@ -325,13 +327,83 @@ def test_process_dir(
 
     args = make_args(str(tmp_path))
     all_tags, all_filters = process_directory(
-        genplis_db, genplis_db.cursor(), tmp_path, args
+        genplis_db, genplis_db.cursor(), tmp_path, args, retain_tags=True
     )
 
     assert set(all_tags) == {tmp_path / file_mp3.name, tmp_path / file_ogg.name}
     assert set(all_filters) == {tmp_path / file_m3ug.name}
     assert all(isinstance(tags, dict) for tags in all_tags.values())
     assert len(all_filters[tmp_path / file_m3ug.name]) == 2
+
+
+@pytest.mark.parametrize("jobs", [1, 2])
+def test_process_dir_releases_tags_by_default(
+    genplis_db: sqlite3.Connection,
+    make_args: Callable[..., Args],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    jobs: int,
+) -> None:
+    music = tmp_path / "music"
+    music.mkdir()
+    song = music / "song.mp3"
+    song.write_bytes(b"")
+    filter_file = music / "favorites.m3ug"
+    filter_file.write_text('artist = "Test Artist"\n', encoding="utf-8")
+
+    class TrackedTags(dict[str, TagValue]):
+        pass
+
+    refs: list[weakref.ReferenceType[dict[str, TagValue]]] = []
+
+    def make_tracked_tags() -> Tags:
+        tags = TrackedTags({"artist": ["Test Artist"]})
+        refs.append(weakref.ref(tags))
+        return tags
+
+    def fake_get_tags(*_args: object, **_kwargs: object) -> Tags:
+        return make_tracked_tags()
+
+    def fake_parse_tags(
+        *_args: object, **_kwargs: object
+    ) -> tuple[Tags, tuple[str, ...]]:
+        return make_tracked_tags(), ()
+
+    monkeypatch.setattr("genplis.core.get_tags", fake_get_tags)
+    monkeypatch.setattr("genplis.executors.parse_tags", fake_parse_tags)
+
+    all_tags, _ = process_directory(
+        genplis_db,
+        genplis_db.cursor(),
+        music,
+        make_args(str(music), jobs=jobs),
+    )
+
+    assert all_tags == {}
+    gc.collect()
+    assert len(refs) == 1
+    assert all(ref() is None for ref in refs)
+    assert song.name in filter_file.with_suffix(".m3u").read_text().splitlines()
+
+
+def test_process_dir_discovers_filter_after_audio(
+    genplis_db: sqlite3.Connection,
+    make_args: Callable[..., Args],
+    file_mp3: Path,
+    tmp_path: Path,
+) -> None:
+    shutil.copy2(file_mp3, tmp_path / "aaa.mp3")
+    filter_file = tmp_path / "zzz.m3ug"
+    filter_file.write_text('artist = "Test Artist"\n', encoding="utf-8")
+
+    process_directory(
+        genplis_db,
+        genplis_db.cursor(),
+        tmp_path,
+        make_args(str(tmp_path), extended_m3u=False, include_source=False),
+    )
+
+    assert filter_file.with_suffix(".m3u").read_text() == "aaa.mp3\n"
 
 
 def test_process_dir_walks_nested_directories(
@@ -349,7 +421,11 @@ def test_process_dir_walks_nested_directories(
         shutil.copy2(file_mp3, song)
 
     all_tags, all_filters = process_directory(
-        genplis_db, genplis_db.cursor(), tmp_path, make_args(str(tmp_path))
+        genplis_db,
+        genplis_db.cursor(),
+        tmp_path,
+        make_args(str(tmp_path)),
+        retain_tags=True,
     )
 
     assert set(all_tags) == set(songs)
@@ -726,7 +802,11 @@ def test_empty_filter_includes_tagless_music_file(
     monkeypatch.setattr("genplis.core.get_tags", fake_get_tags)
 
     all_tags, all_filters = process_directory(
-        genplis_db, genplis_db.cursor(), music, make_args(str(music))
+        genplis_db,
+        genplis_db.cursor(),
+        music,
+        make_args(str(music)),
+        retain_tags=True,
     )
 
     assert all_tags == {song: {}}
@@ -792,11 +872,11 @@ def test_process_dir_prints_and_prunes_excluded_folder(
         str(tmp_path), exclude=[re.compile(r"/@eaDir/")], verbosity=Verbosity.VERBOSE
     )
     all_tags, all_filters = process_directory(
-        genplis_db, genplis_db.cursor(), tmp_path, args
+        genplis_db, genplis_db.cursor(), tmp_path, args, retain_tags=True
     )
 
     output = capsys.readouterr().out
-    assert f"Skipping {excluded} because of exclude pattern." in output
+    assert output.count(f"Skipping {excluded} because of exclude pattern.") == 1
     assert str(excluded / file_mp3.name) not in output
     assert all_tags == {}
     assert all_filters == {}
@@ -814,7 +894,9 @@ def test_process_dir_prunes_excluded_folder_without_verbose(
     shutil.copy2(file_mp3, excluded / file_mp3.name)
 
     args = make_args(str(tmp_path), exclude=[re.compile(r"/@eaDir/")])
-    all_tags, _ = process_directory(genplis_db, genplis_db.cursor(), tmp_path, args)
+    all_tags, _ = process_directory(
+        genplis_db, genplis_db.cursor(), tmp_path, args, retain_tags=True
+    )
 
     assert "Skipping" not in capsys.readouterr().out
     assert all_tags == {}
@@ -835,7 +917,9 @@ def test_process_dir_still_skips_excluded_files(
         exclude=[re.compile(r"skip-me\.mp3$")],
         verbosity=Verbosity.VERBOSE,
     )
-    all_tags, _ = process_directory(genplis_db, genplis_db.cursor(), tmp_path, args)
+    all_tags, _ = process_directory(
+        genplis_db, genplis_db.cursor(), tmp_path, args, retain_tags=True
+    )
 
     output = capsys.readouterr().out
     assert f"Skipping {tmp_path / 'skip-me.mp3'} because of exclude pattern." in output

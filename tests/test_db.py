@@ -360,7 +360,7 @@ def test_get_cached_tags_error_if_missing(genplis_db: sqlite3.Connection) -> Non
         get_cached_tags(genplis_db.cursor(), Path("/invalid/path/"))
 
 
-@pytest.mark.parametrize("stored_tags", ["not json", None])
+@pytest.mark.parametrize("stored_tags", ["not json", None, "null", "[]"])
 def test_get_cached_tags_error_if_data_is_invalid(
     genplis_db: sqlite3.Connection, stored_tags: str | None
 ) -> None:

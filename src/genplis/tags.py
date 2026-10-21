@@ -1,6 +1,6 @@
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Final
+from typing import Final, cast
 
 from tinytag import TinyTag, TinyTagException
 
@@ -51,32 +51,34 @@ def parse_tags(
         return None, tuple(messages)
 
     try:
-        raw_tags = TinyTag.get(file_path).as_dict()
+        tags = cast(Tags, TinyTag.get(file_path).as_dict())
     except (TinyTagException, OSError) as exc:
         messages.append(f"Skipping {file_path}: {exc}")
         return None, tuple(messages)
-    tags: Tags = {}
 
     ignored = {name.lower() for name in ignore}
 
-    # Sanitize tags:
-    # Remove ignored and large tags, they are likely lyrics or long comments
-    for key, value in raw_tags.items():
+    # Sanitize tags in place so rejected values (often lyrics or long
+    # comments) are released immediately instead of being kept alive in a
+    # second dictionary until the end of the scan.
+    for key in tuple(tags):
         if key.lower() in ignored:
             messages.append(
                 f"Removing tag {key} because it is configured to be ignored"
             )
+            del tags[key]
             continue
+        value = tags[key]
         if (
             max_size > 0
             and key not in AUDIO_PROPERTY_TAGS
-            and get_tag_size(value) > max_size
+            and exceeds_tag_size(value, max_size)
         ):
             messages.append(
                 f"Removing tag {key} because it's larger than {max_size} UTF-8 bytes"
             )
-            continue
-        tags[key] = value
+            del tags[key]
+            del value
     return tags, tuple(messages)
 
 
@@ -124,3 +126,27 @@ def get_tag_size(value: object) -> int:
     if isinstance(value, str):
         return len(value.encode("utf-8"))
     return len(str(value).encode("utf-8"))
+
+
+def exceeds_tag_size(value: object, max_size: int) -> bool:
+    """Return whether a tag value is larger than max_size UTF-8 bytes.
+
+    Avoids encoding large strings when their character count already proves
+    the answer. UTF-8 uses at most four bytes per code point, so a string with
+    more characters than the limit is always too large, and a string whose
+    length times four fits the limit can never exceed it.
+    """
+    if isinstance(value, list):
+        total = 0
+        for item in value:
+            if exceeds_tag_size(item, max_size - total):
+                return True
+            total += get_tag_size(item)
+        return False
+    if isinstance(value, str):
+        if len(value) > max_size:
+            return True
+        if len(value) * 4 <= max_size:
+            return False
+        return len(value.encode("utf-8")) > max_size
+    return len(str(value).encode("utf-8")) > max_size

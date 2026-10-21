@@ -51,38 +51,44 @@ resolve config + CLI arguments
         ↓
 open/create SQLite cache
         ↓
-walk PATH (prune excluded directories)
+walk PATH to discover .m3ug files (prune excluded directories)
         ↓
-for each file:
-    .m3ug  → parse rules in the main process
-    audio  → cache hit? reuse : queue for parsing
+parse every .m3ug file in the main process
+        ↓
+walk PATH again for audio files:
+    .m3ug  → skip (already parsed)
+    audio  → cache hit? apply every filter now : queue for parsing
+    keep only matching playlist entries, tagged with walk order
         ↓
 parse queued files (inline, or in worker processes)
         ↓
 write results through one WriteBatch in the main process
         ↓
-rebuild all_tags in walk order
+apply every filter to each result as it arrives
         ↓
 for each .m3ug file:
-    apply all rules to all audio files found in this run
-        ↓
-if any matches: write <stem>.m3u next to the .m3ug file
+    sort matches by walk order
+    if any: write <stem>.m3u next to the .m3ug file
 ```
 
-Rules are ANDed: `core.filter_songs` stops at the first failing rule. Each
+Rules are ANDed: `core.matches_rules` stops at the first failing rule. Each
 `RuleNode` looks up its tag, normalizes multi-value tags, and calls its own
 `check()`.
 
+Tags are not retained across files in a normal run. `process_directory` only
+keeps the matching `Path` or `PlaylistEntry` records. The `retain_tags` keyword
+exists for tests and debugging and restores the old all-tags return value.
+
 ## Parallel parsing
 
-`core.process_directory` walks and checks the cache in the main process. With
-`--jobs 1`, it calls `core.process_file` inline during the walk and keeps the
-old per-file verbose order. With more workers it resolves cache hits during
-the walk and queues misses and stale files. If fewer than
-`executors.MIN_PARALLEL_FILES` files are queued, `SequentialExecutor` parses
-them in the main process after the walk; otherwise `ProcessExecutor` sends
-`ParseItem` batches to worker processes. In both `--jobs > 1` cases the
-miss/stale diagnostics are printed after the walk.
+`core.process_directory` first discovers and parses every `.m3ug` file, then
+walks the audio files and checks the cache in the main process. With
+`--jobs 1`, it calls `core.process_file` inline during the audio walk. With
+more workers it resolves cache hits during the walk and queues misses and
+stale files. If fewer than `executors.MIN_PARALLEL_FILES` files are queued,
+`SequentialExecutor` parses them in the main process after the walk; otherwise
+`ProcessExecutor` sends `ParseItem` batches to worker processes. In both
+`--jobs > 1` cases the miss/stale diagnostics are printed after the walk.
 
 Invariants:
 
@@ -93,11 +99,15 @@ Invariants:
 - **Workers only parse tags.** They return tags and verbose messages. M3UG
   parsing, filtering, playlist generation, cache reads, and cache writes stay
   in the main process.
-- **Playlist order is walk order.** Cache hits are resolved during the walk and
-  misses arrive later, so `all_tags` is rebuilt from the recorded path order
-  before filtering. Results are consumed in submission order, so verbose lines
-  and cache rows stay in walk order for the files that needed parsing.
-- **`--jobs 1` is the old inline path.** It uses the same `WriteBatch` plumbing,
+- **Playlist order is walk order.** Each audio file gets a walk-order index.
+  Cache hits are evaluated during the walk and worker results are evaluated as
+  they arrive; the recorded matches are sorted by that index before playlists
+  are written. `all_tags` is only rebuilt (in the same order) when
+  `retain_tags=True`. Results are consumed in submission order, so verbose
+  lines and cache rows stay in walk order for the files that needed parsing.
+- **Tags are short-lived.** A file's tags are dropped after it has been
+  matched against every filter. Only matching playlist entries are retained.
+- **`--jobs 1` is the inline path.** It uses the same `WriteBatch` plumbing,
   so output, cache contents, and playlist bytes do not change.
 - **Flush points.** `WriteBatch` commits every `core.COMMIT_EVERY` writes
   (currently 128) and flushes at the end of the parse phase, on errors, and on
@@ -173,6 +183,8 @@ fails CI instead of silently rotting.
   mtimes.
 - Use the `make_args` fixture to build `core.Args` without going through
   argparse.
+- Pass `retain_tags=True` to `core.process_directory` when a test needs the
+  returned `all_tags` map. Normal runs release tags after filtering.
 - Monkeypatch `genplis.tags.TinyTag` (see `_patch_tinytag` in
   `tests/test_tags.py`) to test size filtering without crafting media files.
 - Test both success and error paths. `tests/test_m3ug.py` is the reference for
@@ -361,7 +373,7 @@ pending; see the roadmap.
 - [ ] Support ordering
 - [ ] Support OR conditionals
 - [x] Command for DB cleaning
-- [ ] Optimize memory usage
+- [x] Optimize memory usage
 - [ ] Optimize DB space
 - [ ] Improve Windows support (**HELP NEEDED!**)
 - [ ] Improve MacOS support (**HELP NEEDED!**)

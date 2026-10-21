@@ -6,6 +6,7 @@ from tinytag import TinyTagException
 
 from genplis.tags import (
     AUDIO_PROPERTY_TAGS,
+    exceeds_tag_size,
     get_audio_property_tags,
     get_tag_size,
     get_tags,
@@ -130,6 +131,16 @@ def test_get_tag_size_counts_utf8_bytes() -> None:
     assert get_tag_size("\u4e00") == 3
     assert get_tag_size("\U0001f600") == 4
     assert get_tag_size(["\u03b1", "abc"]) == 5
+
+
+def test_exceeds_tag_size() -> None:
+    assert exceeds_tag_size("", 0) is False
+    assert exceeds_tag_size("abc", 3) is False
+    assert exceeds_tag_size("abcd", 3) is True
+    assert exceeds_tag_size("\u03b1", 1) is True
+    assert exceeds_tag_size(["\u03b1", "abc"], 5) is False
+    assert exceeds_tag_size(["\u03b1", "abc"], 4) is True
+    assert exceeds_tag_size(123, 3) is False
 
 
 def test_get_tags_invalid_file(tmp_path: Path) -> None:

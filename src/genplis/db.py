@@ -239,7 +239,7 @@ def remove_missing_files(
 
     cursor.execute("SELECT path FROM files")
     missing: list[Path] = []
-    for (db_key,) in cursor.fetchall():
+    for (db_key,) in cursor:
         file_path = Path(db_key)
         if scope is not None and not file_path.is_relative_to(scope):
             continue
@@ -270,8 +270,11 @@ def get_cached_tags(cursor: sqlite3.Cursor, file_path: Path) -> Tags:
     row = cursor.fetchone()
     if row:
         try:
-            return cast(Tags, json.loads(row[0]))
+            tags = json.loads(row[0])
         except (TypeError, json.JSONDecodeError) as exc:
             raise GenplisDBError(f"{file_path}: invalid cached tag data") from exc
+        if not isinstance(tags, dict):
+            raise GenplisDBError(f"{file_path}: invalid cached tag data")
+        return cast(Tags, tags)
 
     raise GenplisDBError(f"{file_path} not found on DB")

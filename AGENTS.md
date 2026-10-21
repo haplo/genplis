@@ -180,8 +180,9 @@ from genplis.exceptions import GenplisError
 - Cache parsed tags in SQLite database
 - Parsing may run in worker processes (`executors.py`); keep all DB access in
   the main process and never pass a connection to a worker
-- Rebuild `all_tags` in walk order after parallel parsing so playlists follow
-  the directory walk
+- Merge parallel parse results back into walk order so playlists follow the
+  directory walk; normal runs release tags after filtering instead of keeping
+  an `all_tags` map
 - Filter out oversized tag values early (UTF-8 bytes, see `[tags] max_size`)
 - Use pathlib for efficient path operations
 - Consider memory usage for large music collections

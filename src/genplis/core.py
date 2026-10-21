@@ -3,7 +3,7 @@ import os
 import re
 import sqlite3
 import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from timeit import default_timer as timer
@@ -19,7 +19,7 @@ from .executors import (
     auto_workers,
     make_executor,
 )
-from .m3u import create_m3u, playlist_entry
+from .m3u import PlaylistEntry, create_m3u, playlist_entry
 from .m3ug import RuleNode, get_rating, parse_m3ug
 from .tags import AUDIO_PROPERTY_TAGS, get_audio_property_tags, get_tags
 from .types import Tags, TagValue, Verbosity
@@ -356,11 +356,90 @@ def process_path(conn: sqlite3.Connection, cursor: sqlite3.Cursor, args: Args) -
         sys.exit(1)
 
 
+def matches_rules(tags: Mapping[str, TagValue], rules: Sequence[RuleNode]) -> bool:
+    """Return True when every rule matches the given tags."""
+    return all(rule.apply(tags) for rule in rules)
+
+
+def _walk_files(
+    directory: Path,
+    args: Args,
+    *,
+    report_skips: bool = True,
+    only_m3ug: bool = False,
+) -> Iterator[Path]:
+    """Yield included files in directory walk order.
+
+    ``only_m3ug`` restricts the first scan to filter files without stat'ing
+    every audio file. ``report_skips`` is disabled for that scan so verbose
+    exclusion messages are printed once, by the audio scan.
+    """
+    for current_dir, dirnames, filenames in directory.walk():
+        current = Path(current_dir)
+
+        kept_dirs: list[str] = []
+        for name in dirnames:
+            folder = current / name
+            if is_excluded(folder, args, is_dir=True):
+                if report_skips and args.verbosity.is_verbose:
+                    print(f"Skipping {folder} because of exclude pattern.")
+                continue
+            kept_dirs.append(name)
+        dirnames[:] = kept_dirs
+
+        for name in filenames:
+            file = current / name
+            if only_m3ug and file.suffix.lower() != ".m3ug":
+                continue
+            if is_excluded(file, args):
+                if report_skips and args.verbosity.is_verbose:
+                    print(f"Skipping {file} because of exclude pattern.")
+                continue
+            # Path.walk reports symlinks to directories among the filenames.
+            if not file.is_file():
+                continue
+            yield file
+
+
+def _discover_filters(
+    conn: sqlite3.Connection,
+    cursor: sqlite3.Cursor,
+    directory: Path,
+    args: Args,
+) -> dict[Path, list[RuleNode]]:
+    """Parse every M3UG file before any audio file is filtered."""
+    all_filters: dict[Path, list[RuleNode]] = {}
+    for file in _walk_files(directory, args, report_skips=False, only_m3ug=True):
+        _, rules, _ = process_file(conn, cursor, file, args)
+        all_filters[file] = rules
+    return all_filters
+
+
+def _record_matches(
+    matches: dict[Path, list[tuple[int, Path | PlaylistEntry]]],
+    all_filters: Mapping[Path, Sequence[RuleNode]],
+    order: int,
+    file: Path,
+    tags: Tags,
+    *,
+    extended: bool,
+) -> None:
+    """Add a file to every filter it matches, tagged with its walk order."""
+    entry: Path | PlaylistEntry | None = None
+    for filter_file, rules in all_filters.items():
+        if matches_rules(tags, rules):
+            if entry is None:
+                entry = playlist_entry(file, tags) if extended else file
+            matches[filter_file].append((order, entry))
+
+
 def process_directory(
     conn: sqlite3.Connection,
     cursor: sqlite3.Cursor,
     directory: Path,
     args: Args,
+    *,
+    retain_tags: bool = False,
 ) -> tuple[dict[Path, Tags], dict[Path, list[RuleNode]]]:
     """Traverse the directory and process all files.
 
@@ -373,6 +452,12 @@ def process_directory(
     original M3UG text is embedded as comments at the top of the playlist.
     Folders that match an exclude pattern are skipped entirely.
 
+    With ``retain_tags`` False (the default), tags are released as soon as
+    each file has been matched against the filters and ``all_tags`` is empty.
+    Set it to True only when the caller needs the complete mapping, such as
+    tests or debugging; retaining it defeats the memory optimization for
+    large collections.
+
     """
     if not directory.is_dir():
         raise GenplisError(
@@ -381,59 +466,63 @@ def process_directory(
 
     start_time = timer()
 
-    all_filters: dict[Path, list[RuleNode]] = {}
-    tags_by_path: dict[Path, Tags | None] = {}
+    all_filters = _discover_filters(conn, cursor, directory, args)
+    matches: dict[Path, list[tuple[int, Path | PlaylistEntry]]] = {
+        filter_file: [] for filter_file in all_filters
+    }
+    retained: dict[int, tuple[Path, Tags]] | None = {} if retain_tags else None
+    processed = 0
     pending: list[ParseItem] = []
+    order = 0
     batch = db.WriteBatch(conn, every=COMMIT_EVERY)
     try:
-        for current_dir, dirnames, filenames in directory.walk():
-            current = Path(current_dir)
+        for file in _walk_files(directory, args):
+            if file.suffix.lower() == ".m3ug":
+                continue
 
-            kept_dirs: list[str] = []
-            for name in dirnames:
-                folder = current / name
-                if is_excluded(folder, args, is_dir=True):
-                    if args.verbosity.is_verbose:
-                        print(f"Skipping {folder} because of exclude pattern.")
+            current_order = order
+            order += 1
+
+            if args.jobs <= 1:
+                tags, _, _ = process_file(conn, cursor, file, args, batch=batch)
+                if tags is None:
                     continue
-                kept_dirs.append(name)
-            dirnames[:] = kept_dirs
+                processed += 1
+                if retained is not None:
+                    retained[current_order] = (file, tags)
+                _record_matches(
+                    matches,
+                    all_filters,
+                    current_order,
+                    file,
+                    tags,
+                    extended=args.extended_m3u,
+                )
+                continue
 
-            for name in filenames:
-                file = current / name
-                if is_excluded(file, args):
-                    if args.verbosity.is_verbose:
-                        print(f"Skipping {file} because of exclude pattern.")
-                    continue
-
-                # Path.walk reports symlinks to directories among the filenames.
-                if not file.is_file():
-                    continue
-
-                if args.jobs <= 1:
-                    tags, filters, _ = process_file(
-                        conn, cursor, file, args, batch=batch
+            last_modified = db.get_last_modified(file)
+            cache_status = db.get_cache_status(cursor, file, last_modified)
+            if cache_status is db.CacheStatus.HIT:
+                tags = db.get_cached_tags(cursor, file)
+                processed += 1
+                if retained is not None:
+                    retained[current_order] = (file, tags)
+                _record_matches(
+                    matches,
+                    all_filters,
+                    current_order,
+                    file,
+                    tags,
+                    extended=args.extended_m3u,
+                )
+            else:
+                pending.append(
+                    ParseItem(
+                        path=file,
+                        last_modified=last_modified,
+                        order=current_order,
                     )
-                    if tags is not None:
-                        tags_by_path[file] = tags
-                    if filters or file.suffix.lower() == ".m3ug":
-                        all_filters[file] = filters
-                    continue
-
-                if file.suffix.lower() == ".m3ug":
-                    _, filters, _ = process_file(conn, cursor, file, args)
-                    all_filters[file] = filters
-                    continue
-
-                # Keep every audio path in walk order; hits replace the
-                # placeholder now, misses replace it when their result lands.
-                tags_by_path[file] = None
-                last_modified = db.get_last_modified(file)
-                cache_status = db.get_cache_status(cursor, file, last_modified)
-                if cache_status is db.CacheStatus.HIT:
-                    tags_by_path[file] = db.get_cached_tags(cursor, file)
-                else:
-                    pending.append(ParseItem(path=file, last_modified=last_modified))
+                )
 
         if args.jobs > 1:
             executor = make_executor(args.jobs, len(pending), args.config.tags)
@@ -453,23 +542,50 @@ def process_directory(
                         last_modified=result.item.last_modified,
                         verbosity=args.verbosity,
                     )
-                    tags_by_path[result.item.path] = result.tags
+                    processed += 1
+                    if retained is not None:
+                        retained[result.item.order] = (
+                            result.item.path,
+                            result.tags,
+                        )
+                    _record_matches(
+                        matches,
+                        all_filters,
+                        result.item.order,
+                        result.item.path,
+                        result.tags,
+                        extended=args.extended_m3u,
+                    )
             except BaseException:
                 executor.close(cancel=True)
                 raise
             else:
                 executor.close()
+            pending.clear()
     finally:
         batch.flush()
 
-    all_tags = {path: tags for path, tags in tags_by_path.items() if tags is not None}
+    all_tags = (
+        {file: tags for _, (file, tags) in sorted(retained.items())}
+        if retained is not None
+        else {}
+    )
 
-    # Apply each filter to all songs to generate playlists
-    for filter_file, rules in all_filters.items():
-        files = filter_songs(all_tags, filter_file, rules, args.verbosity)
+    # Every filter has already been applied to every file. Sort the recorded
+    # matches by walk order (worker results can arrive out of order) and write
+    # each playlist.
+    for filter_file in all_filters:
+        matched = matches[filter_file]
+        matched.sort(key=lambda item: item[0])
+        if args.verbosity.is_verbose:
+            print(f"\nFiltering songs and generating playlist for {filter_file}")
+            print(f"Files that match the filter {filter_file}:")
+            for _, entry in matched:
+                path = entry.path if isinstance(entry, PlaylistEntry) else entry
+                print(f"  {path}")
         if args.verbosity.shows_progress:
-            print(f"Filter file {filter_file} matched {len(files)} songs")
-        if len(files) > 0:
+            print(f"Filter file {filter_file} matched {len(matched)} songs")
+        if matched:
             playlist_file = filter_file.with_suffix(".m3u")
             if args.verbosity.shows_progress:
                 print(f"Creating playlist {playlist_file}")
@@ -481,21 +597,21 @@ def process_directory(
                     "",
                     *source.splitlines(),
                 ]
-            entries = [playlist_entry(path, all_tags[path]) for path in files]
             create_m3u(
                 playlist_file,
-                entries,
+                (entry for _, entry in matched),
                 comments=comments,
                 overwrite=args.overwrite,
                 verbosity=args.verbosity,
                 extended=args.extended_m3u,
             )
+        matched.clear()
 
     end_time = timer()
     process_time = end_time - start_time
     used_memory = psutil.Process().memory_info().rss / (1024 * 1024)
     if args.verbosity.shows_normal_output:
-        print(f"Processed {len(all_tags)} files in {process_time:.3f} seconds")
+        print(f"Processed {processed} files in {process_time:.3f} seconds")
         print(f"Total RAM usage: {used_memory} MiB")
 
     return all_tags, all_filters
@@ -587,11 +703,7 @@ def filter_songs(
 
     filtered_songs: list[Path] = []
     for file, tags in files_and_tags.items():
-        for rule in rules:
-            if not rule.apply(tags):
-                break
-        else:
-            # only executed if all rules pass
+        if matches_rules(tags, rules):
             filtered_songs.append(file)
 
     if verbosity.is_verbose:

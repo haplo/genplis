@@ -62,13 +62,14 @@ edit the config file instead.
 1. Loads the config file (unless `--no-config`) and merges it with the
    command-line options.
 2. Opens or creates the cache database.
-3. Walks `PATH`, skipping excluded folders and files. A file that is not a
-   supported audio format and is not a `.m3ug` file is skipped silently
-   (`--verbose` explains why).
-4. Parses each audio file's tags, reusing cached tags when the file has not
-   changed, and parses every `.m3ug` file it finds.
-5. Applies each `.m3ug` file's rules to **all** audio files found during this
-   run, and writes a playlist if at least one song matches.
+3. Walks `PATH` to find and parse every `.m3ug` file, pruning excluded folders
+   and files.
+4. Walks `PATH` again for audio files, skipping unsupported formats silently
+   (`--verbose` explains why). It parses each file's tags, reusing cached tags
+   when the file has not changed, and applies every `.m3ug` file's rules as
+   soon as that file's tags are available.
+5. Writes a playlist for each `.m3ug` file that matched at least one song.
+   Matching entries are kept in directory-walk order.
 6. Prints how many files were processed, how long it took, and the process's
    RAM usage.
 
@@ -166,8 +167,6 @@ Genplis caches parsed tags in SQLite so later runs do not re-read every file.
   `--db` paths if you want to keep them separate.
 - **Resetting:** the database is disposable. Deleting it is always safe;
   genplis recreates it on the next run.
-- **Memory:** tags for the files in the current run are held in RAM while
-  filtering. Estimate about 10 MiB per 1,000 files, often less.
 
 ## Cleaning the cache
 
@@ -200,10 +199,11 @@ genplis prints that there is nothing to clean and exits.
 
 Normal runs print per-file cache updates, a line for each filter file with its
 match count, and a final summary. `--verbose` adds config/database paths,
-exclusion decisions, parsed rules, and the list of matching songs. `--jobs 1`
-keeps the old per-file order. With `--jobs` greater than 1, diagnostics for
-cache misses and cache updates are printed after the directory walk; a file's
-own diagnostics stay together.
+exclusion decisions, parsed rules, and the list of matching songs. M3UG rule
+diagnostics are printed while filters are discovered, before audio processing.
+With `--jobs 1`, audio diagnostics follow the walk order. With `--jobs` greater
+than 1, diagnostics for cache misses and cache updates are printed after the
+audio walk; a file's own diagnostics stay together.
 
 `-q` limits output to one line per filter file with its match count and, when
 a playlist is written, the line announcing it. `-qq` suppresses all normal

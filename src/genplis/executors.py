@@ -20,10 +20,16 @@ MAX_AUTO_WORKERS = 8
 
 @dataclass(frozen=True, slots=True)
 class ParseItem:
-    """One cache-miss or stale file queued for parsing."""
+    """One cache-miss or stale file queued for parsing.
+
+    ``order`` is the file's position in the directory walk. The main process
+    uses it to merge worker results back into walk order without retaining
+    every parsed tag.
+    """
 
     path: Path
     last_modified: int
+    order: int = 0
 
 
 @dataclass(frozen=True, slots=True)

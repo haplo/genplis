@@ -53,7 +53,7 @@ def _run(
     conn, cursor = setup_database_connection(db_path)
     try:
         create_files_table(cursor)
-        all_tags, _ = process_directory(conn, cursor, root, args)
+        all_tags, _ = process_directory(conn, cursor, root, args, retain_tags=True)
         rows = cursor.execute(
             "SELECT path, last_modified, tags FROM files ORDER BY path"
         ).fetchall()
@@ -298,7 +298,7 @@ def test_pipeline_caches_empty_tags_and_skips_unsupported(
     conn, cursor = setup_database_connection(tmp_path / "cache.db")
     try:
         create_files_table(cursor, get_cache_version(args.config.tags))
-        all_tags, _ = process_directory(conn, cursor, root, args)
+        all_tags, _ = process_directory(conn, cursor, root, args, retain_tags=True)
         rows = cursor.execute("SELECT path, tags FROM files ORDER BY path").fetchall()
     finally:
         conn.close()
