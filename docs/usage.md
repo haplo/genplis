@@ -104,7 +104,8 @@ Both forms also warn when the file matches the current exclude configuration.
 - Playlists are UTF-8 text, one path per line.
 - Paths are written relative to the playlist's directory, so nested filter
   files can use `../` entries. This keeps the playlist usable when the
-  collection is moved.
+  collection is moved. When no relative path exists (for example on different
+  Windows drives), the absolute path is written instead.
 - By default the original `.m3ug` text is embedded at the top as comments,
   prefixed with `# `. Every source line is prefixed, including blank lines
   (written as `#`), so directives such as `#EXTINF` in a filter file cannot be

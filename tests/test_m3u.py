@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from genplis.m3u import create_m3u
 
 
@@ -47,6 +49,22 @@ def test_no_comments_writes_only_entries(tmp_path: Path) -> None:
     create_m3u(playlist_file, [tmp_path / "song.mp3"])
 
     assert playlist_file.read_text(encoding="utf-8") == "song.mp3\n"
+
+
+def test_cross_drive_entry_falls_back_to_absolute(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    playlist_file = tmp_path / "playlist.m3u"
+    entry = tmp_path / "song.mp3"
+
+    def raise_value_error(_self: Path, *_args: object, **_kwargs: object) -> Path:
+        raise ValueError("path is on a different drive")
+
+    monkeypatch.setattr(Path, "relative_to", raise_value_error)
+
+    create_m3u(playlist_file, [entry])
+
+    assert playlist_file.read_text(encoding="utf-8") == f"{entry}\n"
 
 
 def test_existing_playlist_is_not_overwritten(tmp_path: Path) -> None:

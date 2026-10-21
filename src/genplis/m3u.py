@@ -29,6 +29,11 @@ def create_m3u(
         for comment in comments:
             playlist_file.write(f"# {comment}\n" if comment else "#\n")
         for entry in entries:
-            relative_entry = entry.relative_to(playlist_dir, walk_up=True)
-            playlist_file.write(str(relative_entry))
+            try:
+                playlist_entry = entry.relative_to(playlist_dir, walk_up=True)
+            except ValueError:
+                # Paths with no common root (for example different Windows
+                # drives) cannot be relative; fall back to the absolute path.
+                playlist_entry = entry
+            playlist_file.write(str(playlist_entry))
             playlist_file.write("\n")
