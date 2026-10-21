@@ -388,15 +388,34 @@ for the scale caveat.
 
 ## Playlist limits
 
-Two directives constrain how many entries are selected after ordering:
+Directives constrain how many entries are selected after ordering:
 
 ```text
 @LIMIT 50
+@LIMIT 3 PER artist
 @MAX-DURATION 2h
 ```
 
 `@LIMIT` takes a non-negative integer. `0` disables the count cap. The
 playlist stops after that many entries.
+
+`@LIMIT N PER tag` limits how many entries can share the same tag value. `PER`
+is case-insensitive, and `N` is a non-negative integer; `0` disables the
+per-tag cap. Tag values are normalized like sort values: multi-valued tags use
+their first non-empty value, text is compared case-insensitively, and
+numeric-looking strings are compared as numbers. Entries whose tag is missing
+or empty are excluded while a per-tag cap is active.
+
+A global cap and a per-tag cap can be used together:
+
+```text
+@LIMIT 100
+@LIMIT 3 PER artist
+```
+
+This keeps at most 100 entries overall and at most 3 per artist. Entries
+skipped by the per-tag cap do not count toward `@LIMIT` or `@MAX-DURATION`;
+selection continues with the next entry.
 
 `@MAX-DURATION` takes a duration literal or `0`. `0` disables the cap.
 Entries are added in playlist order until the next one would push the total
@@ -409,7 +428,7 @@ longer than the cap, it is still included.
 rating >= 4
 ```
 
-Both limits are selection constraints, not filters: they apply after ordering
+All limits are selection constraints, not filters: they apply after ordering
 and after `@DEDUPE`, and they do not change which songs match the rules.
 
 ## Removing duplicates

@@ -64,7 +64,7 @@ parse every .m3ug file in the main process:
 walk PATH again for audio files:
     .m3ug  → skip (already parsed)
     audio  → cache hit? apply every filter now : queue for parsing
-    keep matching entries with walk order, sort, dedupe and duration keys
+    keep matching entries with walk order, sort, dedupe, limit and duration keys
         ↓
 parse queued files (inline, or in worker processes)
         ↓
@@ -76,7 +76,7 @@ for each playable .m3ug file (@NO-PLAYLIST files are skipped):
     sort matches by @SORT (including random), or [output] sort
     equal keys keep walk order
     drop duplicate @DEDUPE keys, keeping the first entry
-    select with @LIMIT and @MAX-DURATION
+    select with @LIMIT (global and per-tag) and @MAX-DURATION
     if any: write <stem>.m3u next to the .m3ug file
 ```
 
@@ -99,8 +99,9 @@ inherited; core skips matching and writing for those files while still parsing
 them for includes.
 
 Tags are not retained across files in a normal run. `process_directory` only
-keeps matching `Match` records (the playlist entry, walk order, and normalized
-sort keys). The `retain_tags` keyword exists for tests and debugging and
+keeps matching `Match` records (the playlist entry, walk order, normalized
+sort keys, dedupe keys, per-tag limit key, and duration). The `retain_tags`
+keyword exists for tests and debugging and
 restores the old all-tags return value.
 
 ## Parallel parsing
@@ -320,9 +321,9 @@ configured `[output] sort` applies; an explicit spec (including an empty one
 for walk order) overrides it. The special `random` key must be last; core
 sorts the preceding keys, then shuffles equal runs with a per-playlist
 `random.Random(seed)`. The pipeline stores only the sort values, dedupe keys,
-and duration needed by each playlist, not the full tag dictionary. Add tests
-for direction, numeric strings, case folding, missing values, random seeds,
-and stability when changing this code.
+per-tag limit key, and duration needed by each playlist, not the full tag
+dictionary. Add tests for direction, numeric strings, case folding, missing
+values, random seeds, per-tag limits, and stability when changing this code.
 
 ### Changing CLI or config behavior
 
@@ -407,14 +408,14 @@ pending; see the roadmap.
   - [x] Tag size threshold to ignore
   - [x] Tags to ignore
   - [x] Example config in `examples/config.ini`
-- [ ] Improve M3UG grammar
+- [x] Improve M3UG grammar
   - [x] Ordering
   - [x] @OR operator
   - [x] @NOT operator
   - [x] Multi-tag glob (`[<tag1> | <tag2> | <tag3>] OP <value>`)
   - [x] Multi-value glob (`<tag> OP [<value1> | <value2> | <value3>]`)
   - [x] Playlist limits (`@LIMIT`, `@MAX-DURATION`)
-  - [ ] Limit N per <tag>
+  - [x] Limit N per <tag>
   - [x] Dedupe (`@DEDUPE`)
   - [x] Random sort
   - [x] Boolean literals

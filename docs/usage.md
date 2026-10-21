@@ -73,8 +73,8 @@ edit the config file instead.
    rules as soon as that file's tags are available.
 5. Writes a playlist for each `.m3ug` file that matched at least one song.
    Entries are ordered by the file's `@sort` directive, or by `[output] sort`
-   (default `filename`) when it has none. `@LIMIT` and `@MAX-DURATION` can cap
-   the selected entries after ordering.
+   (default `filename`) when it has none. `@LIMIT`, `@LIMIT N PER tag`, and
+   `@MAX-DURATION` can cap the selected entries after ordering.
 6. Prints how many files were processed, how long it took, and the process's
    RAM usage.
 
@@ -145,9 +145,9 @@ Both forms also warn when the file matches the current exclude configuration.
   integer seed) shuffles entries. See
   [Ordering](https://github.com/haplo/genplis/blob/main/docs/m3ug.md#ordering).
 - `@DEDUPE` keeps the first entry for each key after ordering; entries missing
-  a key are always kept. `@LIMIT` caps the number of entries and
-  `@MAX-DURATION` caps their total duration. These apply after ordering;
-  `0` disables either cap.
+  a key are always kept. `@LIMIT` caps the total number of entries,
+  `@LIMIT N PER tag` caps how many share one tag value, and `@MAX-DURATION`
+  caps their total duration. These apply after ordering; `0` disables any cap.
 - If no song matches, no playlist is written. An existing playlist is left
   untouched in that case.
 - Playlists are UTF-8 text. By default they are extended M3U files: the first

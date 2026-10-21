@@ -672,7 +672,8 @@ def test_process_dir_jobs_produce_identical_playlists(
         shutil.copy2(file_ogg, music / "song-b.mp3")
         filter_file = music / "favorites.m3ug"
         filter_file.write_text(
-            '@SORT random 42\n@DEDUPE title\n@LIMIT 5\nartist = "Test Artist"\n',
+            "@SORT random 42\n@DEDUPE title\n@LIMIT 5\n"
+            '@LIMIT 1 PER artist\nartist = "Test Artist"\n',
             encoding="utf-8",
         )
         process_directory(
@@ -851,6 +852,194 @@ def test_process_dir_limit_zero_is_unlimited(
     )
 
     assert entries == ["a.mp3", "b.mp3", "c.mp3"]
+
+
+def test_process_dir_applies_per_tag_limit_after_ordering(
+    genplis_db: sqlite3.Connection,
+    make_args: Callable[..., Args],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tracks: dict[str, Tags] = {
+        "a1.mp3": {"artist": ["A"], "title": ["1"]},
+        "b1.mp3": {"artist": ["B"], "title": ["2"]},
+        "a2.mp3": {"artist": ["A"], "title": ["3"]},
+        "b2.mp3": {"artist": ["B"], "title": ["4"]},
+        "a3.mp3": {"artist": ["A"], "title": ["5"]},
+    }
+
+    entries = _run_sort_test(
+        genplis_db,
+        make_args,
+        tmp_path,
+        monkeypatch,
+        tracks,
+        "@SORT title\n@LIMIT 2 PER artist\nartist = A\n@OR artist = B\n",
+    )
+
+    assert entries == ["a1.mp3", "b1.mp3", "a2.mp3", "b2.mp3"]
+
+
+def test_process_dir_per_tag_limit_excludes_missing_and_empty_tags(
+    genplis_db: sqlite3.Connection,
+    make_args: Callable[..., Args],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tracks: dict[str, Tags] = {
+        "a1.mp3": {"artist": ["A"], "title": ["1"]},
+        "missing.mp3": {"title": ["2"]},
+        "empty.mp3": {"artist": [""], "title": ["3"]},
+        "a2.mp3": {"artist": ["A"], "title": ["4"]},
+        "b1.mp3": {"artist": ["B"], "title": ["5"]},
+    }
+
+    entries = _run_sort_test(
+        genplis_db,
+        make_args,
+        tmp_path,
+        monkeypatch,
+        tracks,
+        "@SORT title\n@LIMIT 2 PER artist\n",
+    )
+
+    assert entries == ["a1.mp3", "a2.mp3", "b1.mp3"]
+
+
+def test_process_dir_per_tag_limit_normalizes_case_and_numbers(
+    genplis_db: sqlite3.Connection,
+    make_args: Callable[..., Args],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    artists: dict[str, Tags] = {
+        "a1.mp3": {"artist": ["Alpha"], "title": ["1"]},
+        "a2.mp3": {"artist": ["alpha"], "title": ["2"]},
+        "b1.mp3": {"artist": ["Beta"], "title": ["3"]},
+    }
+
+    assert _run_sort_test(
+        genplis_db,
+        make_args,
+        tmp_path,
+        monkeypatch,
+        artists,
+        "@SORT title\n@LIMIT 1 PER artist\n",
+    ) == ["a1.mp3", "b1.mp3"]
+
+    tracks: dict[str, Tags] = {
+        "t1.mp3": {"track": ["2"], "title": ["1"]},
+        "t2.mp3": {"track": 2, "title": ["2"]},
+        "t3.mp3": {"track": 3, "title": ["3"]},
+    }
+
+    assert _run_sort_test(
+        genplis_db,
+        make_args,
+        tmp_path,
+        monkeypatch,
+        tracks,
+        "@SORT title\n@LIMIT 1 PER track\n",
+    ) == ["t1.mp3", "t3.mp3"]
+
+
+def test_process_dir_per_tag_limit_uses_first_non_empty_value(
+    genplis_db: sqlite3.Connection,
+    make_args: Callable[..., Args],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tracks: dict[str, Tags] = {
+        "a1.mp3": {"artist": ["", "A"], "title": ["1"]},
+        "a2.mp3": {"artist": ["A"], "title": ["2"]},
+        "b1.mp3": {"artist": ["B"], "title": ["3"]},
+    }
+
+    entries = _run_sort_test(
+        genplis_db,
+        make_args,
+        tmp_path,
+        monkeypatch,
+        tracks,
+        "@SORT title\n@LIMIT 1 PER artist\n",
+    )
+
+    assert entries == ["a1.mp3", "b1.mp3"]
+
+
+def test_process_dir_combines_global_and_per_tag_limits(
+    genplis_db: sqlite3.Connection,
+    make_args: Callable[..., Args],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tracks: dict[str, Tags] = {
+        "a1.mp3": {"artist": ["A"], "title": ["1"]},
+        "b1.mp3": {"artist": ["B"], "title": ["2"]},
+        "a2.mp3": {"artist": ["A"], "title": ["3"]},
+        "b2.mp3": {"artist": ["B"], "title": ["4"]},
+        "a3.mp3": {"artist": ["A"], "title": ["5"]},
+    }
+
+    entries = _run_sort_test(
+        genplis_db,
+        make_args,
+        tmp_path,
+        monkeypatch,
+        tracks,
+        "@SORT title\n@LIMIT 3\n@LIMIT 2 PER artist\n",
+    )
+
+    assert entries == ["a1.mp3", "b1.mp3", "a2.mp3"]
+
+
+def test_process_dir_per_tag_limit_zero_disables_missing_exclusion(
+    genplis_db: sqlite3.Connection,
+    make_args: Callable[..., Args],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tracks: dict[str, Tags] = {
+        "a1.mp3": {"artist": ["A"], "title": ["1"]},
+        "missing.mp3": {"title": ["2"]},
+        "a2.mp3": {"artist": ["A"], "title": ["3"]},
+    }
+
+    entries = _run_sort_test(
+        genplis_db,
+        make_args,
+        tmp_path,
+        monkeypatch,
+        tracks,
+        "@SORT title\n@LIMIT 0 PER artist\n",
+    )
+
+    assert entries == ["a1.mp3", "missing.mp3", "a2.mp3"]
+
+
+def test_process_dir_per_tag_skips_do_not_consume_duration(
+    genplis_db: sqlite3.Connection,
+    make_args: Callable[..., Args],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tracks: dict[str, Tags] = {
+        "a1.mp3": {"artist": ["A"], "title": ["1"], "duration": 10},
+        "b1.mp3": {"artist": ["B"], "title": ["2"], "duration": 10},
+        "a2.mp3": {"artist": ["A"], "title": ["3"], "duration": 10},
+        "c1.mp3": {"artist": ["C"], "title": ["4"], "duration": 10},
+    }
+
+    entries = _run_sort_test(
+        genplis_db,
+        make_args,
+        tmp_path,
+        monkeypatch,
+        tracks,
+        "@SORT title\n@LIMIT 1 PER artist\n@MAX-DURATION 20\n",
+    )
+
+    assert entries == ["a1.mp3", "b1.mp3"]
 
 
 def test_process_dir_applies_max_duration_cap(

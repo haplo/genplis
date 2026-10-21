@@ -2,6 +2,7 @@
 @SORT rating desc, random 42
 @DEDUPE title
 @LIMIT 50
+@LIMIT 2 PER artist
 @MAX-DURATION 3h
 
 [genre | style] = [Metal | Rock | Synthwave]

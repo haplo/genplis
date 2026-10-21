@@ -12,6 +12,7 @@ from genplis.m3ug import (
     GreaterRuleNode,
     LesserOrEqualRuleNode,
     LesserRuleNode,
+    LimitPerTag,
     NameNode,
     NotEqualRuleNode,
     NotNode,
@@ -902,6 +903,50 @@ def test_limit_zero_is_unlimited() -> None:
     assert parse_m3ug("@LIMIT 0\n").limit == 0
 
 
+def test_limit_per_tag_directive() -> None:
+    parsed = parse_m3ug("@LIMIT 5 PER Artist\n")
+
+    assert parsed.limit is None
+    assert parsed.limit_per == LimitPerTag(5, "artist")
+
+
+def test_limit_per_tag_zero_disables_it() -> None:
+    assert parse_m3ug("@LIMIT 0 PER artist\n").limit_per == LimitPerTag(0, "artist")
+
+
+def test_global_and_per_tag_limits_coexist() -> None:
+    parsed = parse_m3ug("@LIMIT 10\n@LIMIT 3 PER artist\n")
+
+    assert parsed.limit == 10
+    assert parsed.limit_per == LimitPerTag(3, "artist")
+
+
+@pytest.mark.parametrize(
+    "directive",
+    [
+        "@LIMIT 5 PER",
+        "@LIMIT 5 PER artist extra",
+        "@LIMIT -1 PER artist",
+        "@LIMIT 1.5 PER artist",
+        "@LIMIT x PER artist",
+        '@LIMIT 5 PER "artist"',
+        "@LIMIT 5 PER [artist]",
+        "@LIMIT 5 PER artist,album",
+    ],
+)
+def test_invalid_per_tag_limit_is_an_error(directive: str) -> None:
+    with pytest.raises(GenplisM3UGException, match="@LIMIT"):
+        parse_m3ug(f"{directive}\n", "favorites.m3ug")
+
+
+def test_duplicate_per_tag_limit_is_an_error() -> None:
+    with pytest.raises(GenplisM3UGException, match="Duplicate @LIMIT"):
+        parse_m3ug(
+            "@LIMIT 2 PER artist\n@LIMIT 3 PER album\n",
+            "favorites.m3ug",
+        )
+
+
 def test_max_duration_zero_is_unlimited() -> None:
     assert parse_m3ug("@MAX-DURATION 0\n").max_duration == 0
 
@@ -1100,6 +1145,35 @@ def test_current_file_directive_wins_regardless_of_position(tmp_path: Path) -> N
 
     assert parsed.limit == 1
     assert parsed.sort == (SortKey("title"),)
+
+
+def test_per_tag_limit_merges_from_includes(tmp_path: Path) -> None:
+    base = tmp_path / "Base.m3ug"
+    main = tmp_path / "Main.m3ug"
+    base.write_text(
+        "@LIMIT 100\n@LIMIT 5 PER artist\n",
+        encoding="utf-8",
+    )
+    main.write_text(
+        "@INCLUDE Base.m3ug\n@LIMIT 2 PER album\n",
+        encoding="utf-8",
+    )
+
+    parsed = parse_m3ug(main.read_text(), str(main))
+
+    assert parsed.limit == 100
+    assert parsed.limit_per == LimitPerTag(2, "album")
+
+
+def test_per_tag_limit_zero_overrides_included_default(tmp_path: Path) -> None:
+    base = tmp_path / "Base.m3ug"
+    main = tmp_path / "Main.m3ug"
+    base.write_text("@LIMIT 5 PER artist\n", encoding="utf-8")
+    main.write_text("@INCLUDE Base.m3ug\n@LIMIT 0 PER artist\n", encoding="utf-8")
+
+    parsed = parse_m3ug(main.read_text(), str(main))
+
+    assert parsed.limit_per == LimitPerTag(0, "artist")
 
 
 def test_nested_include_merges_depth_first(tmp_path: Path) -> None:

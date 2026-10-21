@@ -884,11 +884,23 @@ UNSET = _Unset()
 
 
 @dataclass(frozen=True, slots=True)
+class LimitPerTag:
+    """A per-tag limit: keep at most count entries for each tag value."""
+
+    count: int
+    tag: str
+
+    def __str__(self) -> str:
+        return f"{self.count} per {self.tag}"
+
+
+@dataclass(frozen=True, slots=True)
 class Directives:
     """Directive values with unset markers for include merging."""
 
     sort: SortSpec | _Unset = UNSET
     limit: int | _Unset = UNSET
+    limit_per: LimitPerTag | _Unset = UNSET
     dedupe: tuple[str, ...] | _Unset = UNSET
     max_duration: float | _Unset = UNSET
 
@@ -898,6 +910,11 @@ def _merge_directives(base: Directives, override: Directives) -> Directives:
     return Directives(
         sort=base.sort if isinstance(override.sort, _Unset) else override.sort,
         limit=base.limit if isinstance(override.limit, _Unset) else override.limit,
+        limit_per=(
+            base.limit_per
+            if isinstance(override.limit_per, _Unset)
+            else override.limit_per
+        ),
         dedupe=(
             base.dedupe if isinstance(override.dedupe, _Unset) else override.dedupe
         ),
@@ -916,6 +933,7 @@ class M3UGFile:
     expression: FilterNode | None
     sort: SortSpec | None = None
     limit: int | None = None
+    limit_per: LimitPerTag | None = None
     dedupe: tuple[str, ...] | None = None
     max_duration: float | None = None
     no_playlist: bool = False
@@ -1011,6 +1029,7 @@ def _parse_m3ug_file(
     current_group: list[FilterNode] | None = None
     own_sort: SortSpec | _Unset = UNSET
     own_limit: int | _Unset = UNSET
+    own_limit_per: LimitPerTag | _Unset = UNSET
     own_max_duration: float | _Unset = UNSET
     own_dedupe: tuple[str, ...] | _Unset = UNSET
     own_no_playlist = False
@@ -1088,20 +1107,50 @@ def _parse_m3ug_file(
                     raise GenplisM3UGException(
                         "Directives cannot use rule modifiers", filename, n
                     )
-                if not isinstance(own_limit, _Unset):
-                    raise GenplisM3UGException(
-                        "Duplicate @LIMIT directive", filename, n
-                    )
                 raw_limit = rest.strip()
-                if not INT_RE.match(raw_limit):
+                parts = raw_limit.split()
+                if len(parts) == 1:
+                    if not isinstance(own_limit, _Unset):
+                        raise GenplisM3UGException(
+                            "Duplicate @LIMIT directive", filename, n
+                        )
+                    if not INT_RE.match(parts[0]):
+                        raise GenplisM3UGException(
+                            f"@LIMIT needs a non-negative integer, got: {raw_limit!r}",
+                            filename,
+                            n,
+                        )
+                    own_limit = int(parts[0])
+                    if verbosity.is_verbose:
+                        print(f"Parsed limit: {own_limit}")
+                elif len(parts) == 3 and parts[1].lower() == "per":
+                    if not isinstance(own_limit_per, _Unset):
+                        raise GenplisM3UGException(
+                            "Duplicate @LIMIT ... PER directive", filename, n
+                        )
+                    if not INT_RE.match(parts[0]):
+                        raise GenplisM3UGException(
+                            "@LIMIT ... PER needs a non-negative integer, "
+                            f"got: {raw_limit!r}",
+                            filename,
+                            n,
+                        )
+                    tag = parts[2].lower()
+                    if any(character in "[]\"'," for character in tag):
+                        raise GenplisM3UGException(
+                            f"Invalid @LIMIT ... PER tag: {parts[2]!r}",
+                            filename,
+                            n,
+                        )
+                    own_limit_per = LimitPerTag(int(parts[0]), tag)
+                    if verbosity.is_verbose:
+                        print(f"Parsed per-tag limit: {own_limit_per}")
+                else:
                     raise GenplisM3UGException(
-                        f"@LIMIT needs a non-negative integer, got: {raw_limit!r}",
+                        f"@LIMIT expects N or N PER tag, got: {raw_limit!r}",
                         filename,
                         n,
                     )
-                own_limit = int(raw_limit)
-                if verbosity.is_verbose:
-                    print(f"Parsed limit: {own_limit}")
                 is_directive = True
                 break
             if modifier == "@max-duration":
@@ -1300,6 +1349,7 @@ def _parse_m3ug_file(
     own_directives = Directives(
         sort=own_sort,
         limit=own_limit,
+        limit_per=own_limit_per,
         dedupe=own_dedupe,
         max_duration=own_max_duration,
     )
@@ -1321,6 +1371,7 @@ def _parse_m3ug_file(
         expression=expression,
         sort=None if isinstance(merged.sort, _Unset) else merged.sort,
         limit=None if isinstance(merged.limit, _Unset) else merged.limit,
+        limit_per=(None if isinstance(merged.limit_per, _Unset) else merged.limit_per),
         max_duration=(
             None if isinstance(merged.max_duration, _Unset) else merged.max_duration
         ),

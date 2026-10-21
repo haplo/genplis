@@ -24,6 +24,7 @@ from .executors import (
 from .m3u import PlaylistEntry, create_m3u, duration_seconds, playlist_entry
 from .m3ug import (
     FilterNode,
+    LimitPerTag,
     M3UGFile,
     NameNode,
     format_expression,
@@ -78,6 +79,7 @@ class Match:
     sort_values: SortValues = ()
     duration: float | None = None
     dedupe_values: SortValues = ()
+    limit_key: SortValue | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -497,21 +499,31 @@ def _dedupe_matches(matched: list[Match]) -> list[Match]:
 def _select_matches(
     matched: list[Match],
     limit: int | None,
+    limit_per: LimitPerTag | None,
     max_duration: float | None,
 ) -> list[Match]:
-    """Apply the playlist count and duration caps in order."""
+    """Apply the count, per-tag, and duration caps in order."""
     count_cap = limit if limit is not None and limit > 0 else None
+    per_tag_cap = limit_per if limit_per is not None and limit_per.count > 0 else None
     duration_cap = (
         max_duration if max_duration is not None and max_duration > 0 else None
     )
-    if count_cap is None and duration_cap is None:
+    if count_cap is None and per_tag_cap is None and duration_cap is None:
         return matched
 
     selected: list[Match] = []
+    per_tag_counts: dict[SortValue, int] = {}
     total_duration = 0.0
     for match in matched:
         if count_cap is not None and len(selected) >= count_cap:
             break
+        limit_key: SortValue | None = None
+        if per_tag_cap is not None:
+            limit_key = match.limit_key
+            if limit_key is None:
+                continue
+            if per_tag_counts.get(limit_key, 0) >= per_tag_cap.count:
+                continue
         duration = match.duration if match.duration is not None else 0.0
         if (
             duration_cap is not None
@@ -521,6 +533,8 @@ def _select_matches(
             break
         selected.append(match)
         total_duration += duration
+        if per_tag_cap is not None and limit_key is not None:
+            per_tag_counts[limit_key] = per_tag_counts.get(limit_key, 0) + 1
     return selected
 
 
@@ -593,6 +607,7 @@ def _record_matches(
     entry: Path | PlaylistEntry | None = None
     spec_cache: dict[SortSpec, SortValues] = {}
     dedupe_cache: dict[tuple[str, ...], SortValues] = {}
+    limit_key_cache: dict[str, SortValue | None] = {}
     for filter_file, parsed in all_filters.items():
         if parsed.no_playlist:
             continue
@@ -614,6 +629,12 @@ def _record_matches(
                         parsed.dedupe,
                     )
                 dedupe_values = dedupe_cache[parsed.dedupe]
+            limit_key: SortValue | None = None
+            if parsed.limit_per is not None and parsed.limit_per.count > 0:
+                tag = parsed.limit_per.tag
+                if tag not in limit_key_cache:
+                    limit_key_cache[tag] = _tag_values(file, tags, (tag,))[0]
+                limit_key = limit_key_cache[tag]
             matches[filter_file].append(
                 Match(
                     order,
@@ -621,6 +642,7 @@ def _record_matches(
                     spec_cache[spec],
                     duration,
                     dedupe_values,
+                    limit_key,
                 )
             )
 
@@ -785,7 +807,9 @@ def process_directory(
         _sort_matches(matched, spec)
         if parsed.dedupe:
             matched = _dedupe_matches(matched)
-        matched = _select_matches(matched, parsed.limit, parsed.max_duration)
+        matched = _select_matches(
+            matched, parsed.limit, parsed.limit_per, parsed.max_duration
+        )
         if args.verbosity.is_verbose:
             print(f"\nFiltering songs and generating playlist for {filter_file}")
             print(f"Sort order: {format_sort_spec(spec)}")
