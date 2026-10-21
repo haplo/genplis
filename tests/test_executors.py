@@ -20,7 +20,6 @@ from genplis.executors import (
     MIN_PARALLEL_FILES,
     ParseItem,
     ParseResult,
-    ParseSettings,
     ProcessExecutor,
     SequentialExecutor,
     auto_workers,
@@ -29,12 +28,8 @@ from genplis.executors import (
 from genplis.types import Tags, Verbosity
 
 
-def _settings() -> ParseSettings:
-    return ParseSettings(
-        max_size=1000,
-        ignore=frozenset(),
-        verbosity=Verbosity.NORMAL,
-    )
+def _settings() -> TagsConfig:
+    return TagsConfig()
 
 
 def _make_args(root: Path, db_path: Path, jobs: int) -> Args:
@@ -103,7 +98,7 @@ def test_make_executor_uses_processes_for_enough_work() -> None:
         executor.close()
 
 
-def test_ordered_process_pool_matches_sequential(
+def test_process_pool_matches_sequential(
     tmp_path: Path,
     file_mp3: Path,
     file_ogg: Path,
@@ -128,7 +123,7 @@ def test_ordered_process_pool_matches_sequential(
     assert parallel_rows == sequential_rows
 
 
-def test_ordered_process_pool_reports_worker_count(
+def test_process_pool_reports_worker_count(
     tmp_path: Path,
     file_mp3: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -177,7 +172,7 @@ def test_warm_directory_does_not_spawn_pool(
     assert len(tags) == 4
 
 
-def test_rows_are_visible_after_ordered_run(tmp_path: Path, file_mp3: Path) -> None:
+def test_rows_are_visible_after_inline_run(tmp_path: Path, file_mp3: Path) -> None:
     root = tmp_path / "music"
     root.mkdir()
     song = root / "song.mp3"

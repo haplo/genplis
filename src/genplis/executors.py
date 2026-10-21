@@ -5,11 +5,13 @@ import os
 from collections.abc import Iterator, Sequence
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
+from itertools import batched
 from pathlib import Path
 from typing import Protocol
 
+from .config import TagsConfig
 from .tags import parse_tags
-from .types import Tags, Verbosity
+from .types import Tags
 
 MIN_PARALLEL_FILES = 64
 BATCH_SIZE = 32
@@ -17,19 +19,9 @@ MAX_AUTO_WORKERS = 8
 
 
 @dataclass(frozen=True, slots=True)
-class ParseSettings:
-    """Settings passed to every worker process."""
-
-    max_size: int
-    ignore: frozenset[str]
-    verbosity: Verbosity
-
-
-@dataclass(frozen=True, slots=True)
 class ParseItem:
     """One cache-miss or stale file queued for parsing."""
 
-    index: int
     path: Path
     last_modified: int
 
@@ -51,15 +43,15 @@ class ParseExecutor(Protocol):
     def close(self, *, cancel: bool = False) -> None: ...
 
 
-_WORKER_SETTINGS: ParseSettings | None = None
+_WORKER_SETTINGS: TagsConfig | None = None
 
 
-def _init_worker(settings: ParseSettings) -> None:
+def _init_worker(settings: TagsConfig) -> None:
     global _WORKER_SETTINGS
     _WORKER_SETTINGS = settings
 
 
-def _parse_item(item: ParseItem, settings: ParseSettings) -> ParseResult:
+def _parse_item(item: ParseItem, settings: TagsConfig) -> ParseResult:
     tags, messages = parse_tags(
         item.path,
         max_size=settings.max_size,
@@ -79,13 +71,6 @@ def _parse_batch(items: Sequence[ParseItem]) -> list[ParseResult]:
     return [_parse_one(item) for item in items]
 
 
-def _chunked(
-    items: Sequence[ParseItem], size: int = BATCH_SIZE
-) -> Iterator[Sequence[ParseItem]]:
-    for start in range(0, len(items), size):
-        yield items[start : start + size]
-
-
 def auto_workers() -> int:
     """Return the default worker count: CPU affinity capped at eight."""
     try:
@@ -98,7 +83,7 @@ def auto_workers() -> int:
 class SequentialExecutor:
     """Parse in the main process, preserving walk order."""
 
-    def __init__(self, settings: ParseSettings) -> None:
+    def __init__(self, settings: TagsConfig) -> None:
         self._settings = settings
 
     def parse(self, items: Sequence[ParseItem]) -> Iterator[ParseResult]:
@@ -112,7 +97,7 @@ class SequentialExecutor:
 class ProcessExecutor:
     """Parse files in worker processes without touching the parent's DB."""
 
-    def __init__(self, workers: int, settings: ParseSettings) -> None:
+    def __init__(self, workers: int, settings: TagsConfig) -> None:
         self.workers = workers
         context = multiprocessing.get_context(
             "forkserver" if os.name == "posix" else "spawn"
@@ -125,7 +110,7 @@ class ProcessExecutor:
         )
 
     def parse(self, items: Sequence[ParseItem]) -> Iterator[ParseResult]:
-        for batch in self._pool.map(_parse_batch, list(_chunked(items))):
+        for batch in self._pool.map(_parse_batch, batched(items, BATCH_SIZE)):
             yield from batch
 
     def close(self, *, cancel: bool = False) -> None:
@@ -135,7 +120,7 @@ class ProcessExecutor:
 def make_executor(
     workers: int,
     pending: int,
-    settings: ParseSettings,
+    settings: TagsConfig,
 ) -> ParseExecutor:
     """Return a process pool for enough work, otherwise parse inline."""
     workers = max(1, min(workers, pending))

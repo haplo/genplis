@@ -15,7 +15,6 @@ from .config import Config, load_config
 from .exceptions import GenplisConfigError, GenplisError
 from .executors import (
     ParseItem,
-    ParseSettings,
     ProcessExecutor,
     auto_workers,
     make_executor,
@@ -370,14 +369,8 @@ def process_directory(
     start_time = timer()
 
     all_filters: dict[Path, list[RuleNode]] = {}
-    path_order: list[Path] = []
-    tags_by_path: dict[Path, Tags] = {}
+    tags_by_path: dict[Path, Tags | None] = {}
     pending: list[ParseItem] = []
-    settings = ParseSettings(
-        max_size=args.config.tags.max_size,
-        ignore=args.config.tags.ignore,
-        verbosity=args.verbosity,
-    )
     batch = db.WriteBatch(conn, every=COMMIT_EVERY)
     try:
         for current_dir, dirnames, filenames in directory.walk():
@@ -404,7 +397,6 @@ def process_directory(
                 if not file.is_file():
                     continue
 
-                path_order.append(file)
                 if args.jobs <= 1:
                     tags, filters, _ = process_file(
                         conn, cursor, file, args, batch=batch
@@ -420,23 +412,18 @@ def process_directory(
                     all_filters[file] = filters
                     continue
 
+                # Keep every audio path in walk order; hits replace the
+                # placeholder now, misses replace it when their result lands.
+                tags_by_path[file] = None
                 last_modified = db.get_last_modified(file)
                 cache_status = db.get_cache_status(cursor, file, last_modified)
                 if cache_status is db.CacheStatus.HIT:
                     tags_by_path[file] = db.get_cached_tags(cursor, file)
                 else:
-                    pending.append(
-                        ParseItem(
-                            index=len(path_order) - 1,
-                            path=file,
-                            last_modified=last_modified,
-                        )
-                    )
+                    pending.append(ParseItem(path=file, last_modified=last_modified))
 
-        if args.jobs <= 1:
-            all_tags = tags_by_path
-        else:
-            executor = make_executor(args.jobs, len(pending), settings)
+        if args.jobs > 1:
+            executor = make_executor(args.jobs, len(pending), args.config.tags)
             if isinstance(executor, ProcessExecutor) and args.verbosity.is_verbose:
                 print(f"Parsing with {executor.workers} worker processes")
             try:
@@ -459,12 +446,10 @@ def process_directory(
                 raise
             else:
                 executor.close()
-
-            # Hits were resolved during the walk and misses arrive later, so
-            # rebuild the mapping in walk order before filtering.
-            all_tags = {p: tags_by_path[p] for p in path_order if p in tags_by_path}
     finally:
         batch.flush()
+
+    all_tags = {path: tags for path, tags in tags_by_path.items() if tags is not None}
 
     # Apply each filter to all songs to generate playlists
     for filter_file, rules in all_filters.items():
