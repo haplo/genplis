@@ -181,6 +181,48 @@ def cache_tags_for_file(
         print(f"Updated cache for file: {file_path}")
 
 
+class WriteBatch:
+    """Own the commit cadence for cache writes.
+
+    ``every`` is the number of writes between commits. A value of 1 commits
+    after each write, matching the historical behaviour. A value of 0 commits
+    only when :meth:`flush` is called. Cache hits and unsupported files do not
+    advance the counter because they do not call :meth:`store`.
+
+    """
+
+    def __init__(self, conn: sqlite3.Connection, every: int = 1) -> None:
+        self._conn = conn
+        self._every = every
+        self._pending = 0
+
+    def store(
+        self,
+        cursor: sqlite3.Cursor,
+        file_path: Path,
+        tags: Tags,
+        *,
+        last_modified: int,
+        verbosity: Verbosity = Verbosity.NORMAL,
+    ) -> None:
+        """Write one cache row and commit when the batch is full."""
+        cache_tags_for_file(
+            cursor,
+            file_path,
+            tags,
+            last_modified=last_modified,
+            verbosity=verbosity,
+        )
+        self._pending += 1
+        if self._every and self._pending >= self._every:
+            self.flush()
+
+    def flush(self) -> None:
+        """Commit any pending writes and reset the counter."""
+        self._conn.commit()
+        self._pending = 0
+
+
 def remove_missing_files(
     cursor: sqlite3.Cursor, root: Path | None = None
 ) -> list[Path]:

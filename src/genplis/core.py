@@ -325,35 +325,39 @@ def process_directory(
 
     all_tags: dict[Path, Tags] = {}
     all_filters: dict[Path, list[RuleNode]] = {}
-    for current_dir, dirnames, filenames in directory.walk():
-        current = Path(current_dir)
+    batch = db.WriteBatch(conn)
+    try:
+        for current_dir, dirnames, filenames in directory.walk():
+            current = Path(current_dir)
 
-        kept_dirs: list[str] = []
-        for name in dirnames:
-            folder = current / name
-            if is_excluded(folder, args, is_dir=True):
-                if args.verbosity.is_verbose:
-                    print(f"Skipping {folder} because of exclude pattern.")
-                continue
-            kept_dirs.append(name)
-        dirnames[:] = kept_dirs
+            kept_dirs: list[str] = []
+            for name in dirnames:
+                folder = current / name
+                if is_excluded(folder, args, is_dir=True):
+                    if args.verbosity.is_verbose:
+                        print(f"Skipping {folder} because of exclude pattern.")
+                    continue
+                kept_dirs.append(name)
+            dirnames[:] = kept_dirs
 
-        for name in filenames:
-            file = current / name
-            if is_excluded(file, args):
-                if args.verbosity.is_verbose:
-                    print(f"Skipping {file} because of exclude pattern.")
-                continue
+            for name in filenames:
+                file = current / name
+                if is_excluded(file, args):
+                    if args.verbosity.is_verbose:
+                        print(f"Skipping {file} because of exclude pattern.")
+                    continue
 
-            # Path.walk reports symlinks to directories among the filenames.
-            if not file.is_file():
-                continue
+                # Path.walk reports symlinks to directories among the filenames.
+                if not file.is_file():
+                    continue
 
-            tags, filters, _ = process_file(conn, cursor, file, args)
-            if tags is not None:
-                all_tags[file] = tags
-            if filters or file.suffix.lower() == ".m3ug":
-                all_filters[file] = filters
+                tags, filters, _ = process_file(conn, cursor, file, args, batch=batch)
+                if tags is not None:
+                    all_tags[file] = tags
+                if filters or file.suffix.lower() == ".m3ug":
+                    all_filters[file] = filters
+    finally:
+        batch.flush()
 
     # Apply each filter to all songs to generate playlists
     for filter_file, rules in all_filters.items():
@@ -391,13 +395,22 @@ def process_directory(
 
 
 def process_file(
-    conn: sqlite3.Connection, cursor: sqlite3.Cursor, file: Path, args: Args
+    conn: sqlite3.Connection,
+    cursor: sqlite3.Cursor,
+    file: Path,
+    args: Args,
+    *,
+    batch: db.WriteBatch | None = None,
 ) -> tuple[Tags | None, list[RuleNode], db.CacheStatus]:
     """Process a single file.
 
     Returns a tuple in the form (tags, filters, cache_status), where tags is a
     dictionary, filters is always a list (empty for non-M3UG files) and
     cache_status is the state of the tag cache when the file was found.
+
+    When ``batch`` is given, cache writes go through it instead of committing
+    immediately. ``None`` preserves the single-file behaviour of committing
+    each write before returning.
 
     ``tags`` is ``None`` when the file is not a supported music file. An empty
     dictionary means the file is supported music but has no usable tags (for
@@ -436,14 +449,23 @@ def process_file(
         return None, [], cache_status
     # Cache supported files even when every tag was filtered out, so an empty
     # tag dictionary is not confused with "not a music file" next time.
-    db.cache_tags_for_file(
-        cursor,
-        file,
-        tags,
-        last_modified=last_modified,
-        verbosity=args.verbosity,
-    )
-    conn.commit()
+    if batch is not None:
+        batch.store(
+            cursor,
+            file,
+            tags,
+            last_modified=last_modified,
+            verbosity=args.verbosity,
+        )
+    else:
+        db.cache_tags_for_file(
+            cursor,
+            file,
+            tags,
+            last_modified=last_modified,
+            verbosity=args.verbosity,
+        )
+        conn.commit()
     return tags, [], cache_status
 
 
