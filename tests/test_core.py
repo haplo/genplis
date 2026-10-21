@@ -628,6 +628,42 @@ def test_process_dir_random_shuffles_equal_prefix_runs(
     assert set(entries[3:]) == {"b1.mp3", "b2.mp3"}
 
 
+def test_process_dir_jobs_produce_identical_playlists(
+    genplis_db: sqlite3.Connection,
+    make_args: Callable[..., Args],
+    file_mp3: Path,
+    file_ogg: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("genplis.executors.MIN_PARALLEL_FILES", 1)
+
+    def run(name: str, jobs: int) -> bytes:
+        music = tmp_path / name
+        music.mkdir()
+        shutil.copy2(file_mp3, music / "song-a.mp3")
+        shutil.copy2(file_ogg, music / "song-b.mp3")
+        filter_file = music / "favorites.m3ug"
+        filter_file.write_text(
+            '@SORT random 42\n@DEDUPE title\n@LIMIT 5\nartist = "Test Artist"\n',
+            encoding="utf-8",
+        )
+        process_directory(
+            genplis_db,
+            genplis_db.cursor(),
+            music,
+            make_args(
+                str(music),
+                jobs=jobs,
+                include_source=False,
+                extended_m3u=False,
+            ),
+        )
+        return filter_file.with_suffix(".m3u").read_bytes()
+
+    assert run("one", 1) == run("two", 2)
+
+
 def test_process_dir_sort_without_keys_uses_walk_order(
     genplis_db: sqlite3.Connection,
     make_args: Callable[..., Args],

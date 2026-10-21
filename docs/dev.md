@@ -54,12 +54,14 @@ open/create SQLite cache
         ↓
 walk PATH to discover .m3ug files (prune excluded directories)
         ↓
-parse every .m3ug file in the main process
+parse every .m3ug file in the main process:
+    recursively resolve @INCLUDE, detect cycles and depth
+    merge included directives as defaults, own directives last
         ↓
 walk PATH again for audio files:
     .m3ug  → skip (already parsed)
     audio  → cache hit? apply every filter now : queue for parsing
-    keep matching playlist entries with walk order and sort keys
+    keep matching entries with walk order, sort, dedupe and duration keys
         ↓
 parse queued files (inline, or in worker processes)
         ↓
@@ -67,9 +69,11 @@ write results through one WriteBatch in the main process
         ↓
 apply every filter to each result as it arrives
         ↓
-for each .m3ug file:
-    sort matches by its @sort, or [output] sort (default filename)
+for each playable .m3ug file (@NO-PLAYLIST files are skipped):
+    sort matches by @SORT (including random), or [output] sort
     equal keys keep walk order
+    drop duplicate @DEDUPE keys, keeping the first entry
+    select with @LIMIT and @MAX-DURATION
     if any: write <stem>.m3u next to the .m3ug file
 ```
 
@@ -309,10 +313,13 @@ and add tests next to the existing `fmps_rating` tests. Document the scale in
 
 `sorting.py` owns the sort grammar (`parse_sort_spec`), value normalization,
 and comparison. `M3UGFile.sort` is `None` when a file has no `@sort`, so the
-configured `[output] sort` applies; an explicit spec overrides it. The core
-pipeline computes sort values when a file matches and stores only those values,
-not the full tag dictionary. Add tests for direction, numeric strings, case
-folding, missing values, and stability when changing this code.
+configured `[output] sort` applies; an explicit spec (including an empty one
+for walk order) overrides it. The special `random` key must be last; core
+sorts the preceding keys, then shuffles equal runs with a per-playlist
+`random.Random(seed)`. The pipeline stores only the sort values, dedupe keys,
+and duration needed by each playlist, not the full tag dictionary. Add tests
+for direction, numeric strings, case folding, missing values, random seeds,
+and stability when changing this code.
 
 ### Changing CLI or config behavior
 
@@ -332,7 +339,7 @@ User docs are Markdown files under `docs/`:
 | File | Audience | Contents |
 | --- | --- | --- |
 | `usage.md` | users | running genplis, options, playlists, cache, cleaning |
-| `m3ug.md` | users | filter language, operators, examples, limitations |
+| `m3ug.md` | users | filter language, operators, sets, logic, ordering, limits, includes, examples |
 | `config.md` | users | every config setting and precedence |
 | `tags.md` | users | tag names, calculated properties, rating |
 | `scheduling.md` | users | running genplis daily with systemd or cron |
@@ -403,13 +410,14 @@ pending; see the roadmap.
   - [x] @NOT operator
   - [x] Multi-tag glob (`[<tag1> | <tag2> | <tag3>] OP <value>`)
   - [x] Multi-value glob (`<tag> OP [<value1> | <value2> | <value3>]`)
-  - [ ] Limit
+  - [x] Playlist limits (`@LIMIT`, `@MAX-DURATION`)
   - [ ] Limit N per <tag>
-  - [ ] Random sort
-  - [ ] Boolean literals
-  - [ ] "Starts/ends with" operator
-  - [ ] Regex operator
-  - [ ] Duration formats (`mm:ss`, `<n>m`)
+  - [x] Dedupe (`@DEDUPE`)
+  - [x] Random sort
+  - [x] Boolean literals
+  - [x] "Starts/ends with" operator
+  - [x] Regex operator
+  - [x] Duration formats (`mm:ss`, `<n>m`)
   - [x] Include other M3UG
   - [x] Abstract M3UG (doesn't generate an M3U, meant for include)
 - [x] Command for DB cleaning

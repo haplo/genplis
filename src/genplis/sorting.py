@@ -73,6 +73,8 @@ def parse_sort_spec(text: str) -> SortSpec:
             seed = None
             if len(components) == 2:
                 seed_text = components[1]
+                if seed_text.lower() in {"asc", "desc"}:
+                    raise SortSpecError("random cannot take a direction")
                 if not INT_RE.match(seed_text):
                     raise SortSpecError(
                         "random accepts only an optional non-negative integer seed"

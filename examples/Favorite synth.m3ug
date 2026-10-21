@@ -1,0 +1,8 @@
+# Favorites built from a shared include, with a reproducible shuffle.
+@INCLUDE "Favorite fragments.m3ug"
+@SORT random 7
+@DEDUPE title
+@LIMIT 25
+@MAX-DURATION 90m
+
+rating >= 3

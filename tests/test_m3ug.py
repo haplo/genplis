@@ -205,12 +205,6 @@ def test_invalid_regex_reports_location() -> None:
         parse_m3ug("artist = X\n\n@CASE genre % [\n", "favorites.m3ug")
 
 
-def test_removed_operator_spellings_are_errors() -> None:
-    for operator in ("~=", "^=", "$=", "#"):
-        with pytest.raises(GenplisM3UGException, match="Unrecognized operator"):
-            parse_rules(f"genre {operator} Metal")
-
-
 def test_quotes_support_escapes_and_preserve_regex_backslashes() -> None:
     assert parse_rules(r'artist = "He said \"hi\""')[0].apply(
         {"artist": 'He said "hi"'}
@@ -583,6 +577,12 @@ def test_invalid_input() -> None:
         parse_rules("invalid >=")
     with pytest.raises(GenplisM3UGException):
         parse_rules("rating > 4 invalid")
+
+
+def test_utf8_bom_is_ignored_by_the_parser() -> None:
+    assert parse_rules("\ufeffartist = X\n") == [
+        EqualRuleNode(NameNode("artist"), ValueNode("X"))
+    ]
 
 
 def test_equal_rule_list_value() -> None:

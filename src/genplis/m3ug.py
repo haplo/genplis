@@ -712,10 +712,13 @@ class EndsWithRuleNode(RuleNode):
         expected = self.value_node.text()
         if expected is None:
             return False
+        values = _string_values(tag_value)
+        if not expected:
+            return bool(values)
         return any(
             len(value) >= len(expected)
             and _text_equal(value[-len(expected) :], expected, self.case_sensitive)
-            for value in _string_values(tag_value)
+            for value in values
         )
 
 
@@ -913,8 +916,8 @@ class M3UGFile:
     expression: FilterNode | None
     sort: SortSpec | None = None
     limit: int | None = None
-    max_duration: float | None = None
     dedupe: tuple[str, ...] | None = None
+    max_duration: float | None = None
     no_playlist: bool = False
 
     @property
@@ -1002,6 +1005,8 @@ def _parse_m3ug_file(
     stack: tuple[Path, ...],
     depth: int,
 ) -> tuple[M3UGFile, Directives]:
+    if content.startswith("\ufeff"):
+        content = content[1:]
     and_groups: list[list[FilterNode]] = []
     current_group: list[FilterNode] | None = None
     own_sort: SortSpec | _Unset = UNSET
@@ -1332,6 +1337,8 @@ def parse_m3ug(
     *,
     include_loader: IncludeLoader | None = None,
 ) -> M3UGFile:
+    if content.startswith("\ufeff"):
+        content = content[1:]
     stack: tuple[Path, ...] = ()
     if filename != "N/A":
         stack = (Path(filename).expanduser().resolve(),)

@@ -63,7 +63,8 @@ edit the config file instead.
    command-line options.
 2. Opens or creates the cache database.
 3. Walks `PATH` to find and parse every `.m3ug` file, pruning excluded folders
-   and files.
+   and files. Includes are resolved recursively and their directives merged
+   as defaults for the including file.
 4. Walks `PATH` again for audio files, skipping unsupported formats silently
    (`--verbose` explains why). It parses each file's tags, reusing cached tags
    when the file has not changed, and applies every `.m3ug` file's rules as
@@ -76,8 +77,9 @@ edit the config file instead.
    RAM usage.
 
 A run only filters the files under `PATH`. Cached entries for other folders
-are not used to build playlists, and a `.m3ug` file does not pull in files from
-outside the scanned tree.
+are not used to build playlists, and a `.m3ug` file does not pull audio files
+in from outside the scanned tree. An `@INCLUDE` may read a filter file from
+outside `PATH`, but it only adds rules and defaults.
 
 ### Parallel parsing
 
@@ -127,7 +129,8 @@ Both forms also warn when the file matches the current exclude configuration.
   directory.
 - Files marked `@NO-PLAYLIST` are parsed and may be included, but they never
   produce an `.m3u` themselves. Any existing playlist is left untouched.
-- Only songs that match **all** rules are included.
+- Only songs that match the filter expression are included. Plain rules are
+  ANDed; `@OR`, `@NOT`, and sets can express alternatives.
 - Entry order comes from the file's `@sort` directive. Without one,
   `[output] sort` applies; its default is `filename`, the absolute path.
   Equal keys keep directory-walk order. `@sort random` (optionally with an

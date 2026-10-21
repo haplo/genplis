@@ -1,0 +1,5 @@
+# Include-only fragment of shared synthwave rules.
+@NO-PLAYLIST
+
+[artist | albumartist] = ["DANCE WITH THE DEAD" | Perturbator]
+@OR [genre | style] ~ [Synthwave | Retrowave]

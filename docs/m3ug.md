@@ -1,8 +1,8 @@
 # The M3UG filter language
 
 M3UG is the small language *genplis* uses to describe playlists. A `.m3ug`
-file contains one rule per line, and every rule must match a song for it to
-appear in the generated playlist.
+file contains one rule or directive per line, and the file's filter expression
+must match a song for it to appear in the generated playlist.
 
 This page is the language reference. For the tags you can use in rules, see
 [Tags](https://github.com/haplo/genplis/blob/main/docs/tags.md). For running
@@ -15,7 +15,8 @@ genplis and the generated playlist format, see
   becomes the playlist name: `Favorites.m3ug` generates `Favorites.m3u` in the
   same directory.
 - One file can define one playlist. To create several playlists, use several
-  `.m3ug` files.
+  `.m3ug` files. A file with `@NO-PLAYLIST` is a shared fragment and does not
+  produce a playlist of its own.
 - Filters are applied to every music file found under the `PATH` given on the
   command line (or configured in the config file), not just to the folder that
   contains the `.m3ug` file.
@@ -106,8 +107,8 @@ Details that matter when writing filters:
 | `>` | greater than | number only | number or numeric string |
 | `>=` | greater than or equal | number only | number or numeric string |
 
-There are no aliases. The old spellings `~`, `^=`, `$=`, `#`, and every
-other operator not in this table are rejected with `Unrecognized operator`.
+There are no aliases or alternative spellings. Any other operator is rejected
+with `Unrecognized operator`.
 
 ### Equality: `=`
 

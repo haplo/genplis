@@ -108,6 +108,9 @@ keeps longer lists as lists:
 - Several values: `=` and `~` match if **any** value matches; `!=` matches
   only if **all** values differ; numeric comparisons match if any value
   passes.
+- Sets on the right-hand side work the same way: `genre = [Metal | Rock]`
+  matches if any tag value equals either value. See
+  [Multi-value rules](https://github.com/haplo/genplis/blob/main/docs/m3ug.md#multi-value-rules).
 
 ## Calculated audio properties
 
