@@ -356,27 +356,29 @@ pending; see the roadmap.
     - [x] Run pre-commit on whole project
     - [x] Test on every supported Python version
 - [x] Documentation
-- [ ] Publish to PyPI! 🚀
 - [x] Example cron and systemd files and instructions on how to run periodically
-- [ ] Improve M3U generation
+- [x] Improve M3U generation
   - [x] Include original M3UG content as comment
   - [x] Support basic extended M3U tags: [`#EXTM3U`](https://datatracker.ietf.org/doc/html/rfc8216#section-4.3.1.1) and [`#EXTINF`](https://datatracker.ietf.org/doc/html/rfc8216#section-4.3.2.1)
 - [x] Parallel parsing of files
   - [x] Number of processes for parallel parsing
-- [ ] Support narrowing of valid tag names
 - [x] Config file support
   - [x] Default music collection path
   - [x] Default exclude
   - [x] Tag size threshold to ignore
   - [x] Tags to ignore
   - [x] Example config in `examples/config.ini`
-- [ ] Support ordering
-- [ ] Support OR conditionals
+- [ ] Improve M3UG grammar
+  - [ ] Support ordering
+  - [ ] Support OR conditionals
+  - [ ] Support limit
+  - [ ] Support random
 - [x] Command for DB cleaning
 - [x] Optimize memory usage
 - [ ] Optimize DB space
 - [ ] Improve Windows support (**HELP NEEDED!**)
 - [ ] Improve MacOS support (**HELP NEEDED!**)
+- [ ] Publish to PyPI! 🚀
 
 Got any ideas to make *genplis* more awesome?
 Feel free to [open an issue](https://github.com/haplo/genplis/issues).
