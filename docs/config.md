@@ -70,11 +70,17 @@ genplis: error: /home/me/.config/genplis/config.ini: [tags] max_size: expected a
 | --- | --- | --- | --- | --- |
 | `verbose` | boolean | `false` | `--verbose` / `--no-verbose` | Print config and database paths, skip decisions, parsed rules, and matching songs. |
 | `quiet` | boolean | `false` | `-q` / `--quiet` | Print only filter match counts and playlist creation. |
+| `jobs` | integer ≥ 0 | `0` | `--jobs` | Worker processes for cache misses and stale files. `0` = one per CPU (capped at 8), `1` = no pool. |
 
 `verbose = true` and `quiet = true` cannot be enabled at the same time. A
 command-line verbosity flag overrides the configured value, so
 `verbose = true` with `-q` runs quietly, and `quiet = true` with `-v` runs
 verbosely.
+
+`jobs` only affects files that need parsing. Cached files, M3UG parsing,
+filtering, and playlist generation stay in the main process, which also keeps
+the only database connection. Small runs do not start a pool. The worker count
+can be overridden with `--jobs` on the command line.
 
 ## `[collection]`
 

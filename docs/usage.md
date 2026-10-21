@@ -27,6 +27,7 @@ required.
 | `-v`, `--verbose`, `--no-verbose` | Print diagnostics: config and database paths, skipped files, parsed rules, matching songs. |
 | `-q`, `--quiet` | Reduce output. Once prints only filter match counts and playlist creation; twice (`-qq`) prints nothing except errors. Cannot be combined with `--verbose`. |
 | `--db PATH` | Use this SQLite database instead of the default cache location. |
+| `-j N`, `--jobs N` | Parse cache misses with `N` worker processes. `0` uses one worker per CPU, capped at eight; `1` disables the process pool. Default is `0`. |
 | `--clean` | Remove cache entries for files that no longer exist. See [Cleaning the cache](#cleaning-the-cache). |
 | `--overwrite`, `--no-overwrite` | Whether to replace an existing generated playlist. |
 | `--include-source`, `--no-include-source` | Whether to embed the original `.m3ug` text as comments in the playlist. |
@@ -73,6 +74,27 @@ edit the config file instead.
 A run only filters the files under `PATH`. Cached entries for other folders
 are not used to build playlists, and a `.m3ug` file does not pull in files from
 outside the scanned tree.
+
+### Parallel parsing
+
+Cache misses and stale entries can be parsed by several worker processes at
+once. This speeds up the first run and runs after files change; cached files
+are read directly from SQLite and do not use a worker.
+
+- `--jobs 0` (the default) uses one worker per available CPU, capped at eight.
+- `--jobs 1` keeps everything in the main process, which is useful for
+  debugging or when starting processes is undesirable.
+- `--jobs N` sets an explicit worker limit.
+
+The main process keeps the only database connection and writes all cache rows.
+M3UG parsing, filtering, and playlist generation also stay in the main process.
+Playlists and cache contents are the same for every value of `--jobs`; only
+the order of verbose diagnostics can differ when more than one worker is used,
+because results arrive as workers finish.
+
+Small runs stay inline: genplis does not start a process pool when only a few
+files need parsing. The setting is also available as `[general] jobs` in the
+config file.
 
 ### Inspecting one file
 
@@ -168,7 +190,9 @@ genplis prints that there is nothing to clean and exits.
 
 Normal runs print per-file cache updates, a line for each filter file with its
 match count, and a final summary. `--verbose` adds config/database paths,
-exclusion decisions, parsed rules, and the list of matching songs.
+exclusion decisions, parsed rules, and the list of matching songs. When more
+than one worker is parsing, verbose lines from different files may interleave;
+a file's own diagnostics are kept together.
 
 `-q` limits output to one line per filter file with its match count and, when
 a playlist is written, the line announcing it. `-qq` suppresses all normal

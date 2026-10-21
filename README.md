@@ -51,7 +51,9 @@ uv run genplis ~/Music
 
 Genplis reads the tags of every supported audio file, caches them in SQLite,
 applies the filter, and writes `~/Music/Favorites.m3u` if anything matched.
-Later runs only re-read files that changed.
+Later runs only re-read files that changed. Large cold scans parse files in
+parallel by default; see [Parallel parsing](https://github.com/haplo/genplis/blob/main/docs/usage.md#parallel-parsing)
+for `--jobs`.
 
 To see which tags a file actually has (useful when writing filters):
 
