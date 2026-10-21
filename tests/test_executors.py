@@ -1,5 +1,6 @@
 import os
 import shutil
+from collections import Counter
 from collections.abc import Iterator, Sequence
 from dataclasses import replace
 from pathlib import Path
@@ -7,9 +8,13 @@ from pathlib import Path
 import pytest
 
 import genplis.executors as executors
-from genplis.config import Config
+from genplis.config import Config, TagsConfig
 from genplis.core import Args, process_directory
-from genplis.db import create_files_table, setup_database_connection
+from genplis.db import (
+    create_files_table,
+    get_cache_version,
+    setup_database_connection,
+)
 from genplis.executors import (
     MAX_AUTO_WORKERS,
     MIN_PARALLEL_FILES,
@@ -261,6 +266,177 @@ def test_timings_line_reports_phases(
     assert "db=" in timing_line
     assert "filter=" in timing_line
     assert "playlist=" in timing_line
+
+
+def test_parallel_refreshes_only_stale_rows(
+    tmp_path: Path,
+    file_mp3: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "music"
+    root.mkdir()
+    for index in range(8):
+        shutil.copy2(file_mp3, root / f"song-{index}.mp3")
+    (root / "notes.txt").write_text("not music\n", encoding="utf-8")
+    filter_file = root / "favorites.m3ug"
+    filter_file.write_text('artist = "Test Artist"\n', encoding="utf-8")
+
+    monkeypatch.setattr(executors, "MIN_PARALLEL_FILES", 4)
+    db_path = tmp_path / "cache.db"
+    first_tags, first_rows = _run(root, db_path, jobs=1)
+    playlist = filter_file.with_suffix(".m3u").read_bytes()
+
+    for index in range(4, 8):
+        song = root / f"song-{index}.mp3"
+        mtime = song.stat().st_mtime + 10
+        os.utime(song, (mtime, mtime))
+
+    second_tags, second_rows = _run(root, db_path, jobs=2)
+
+    first = {Path(path).name: (modified, tags) for path, modified, tags in first_rows}
+    second = {Path(path).name: (modified, tags) for path, modified, tags in second_rows}
+    for index in range(4):
+        name = f"song-{index}.mp3"
+        assert second[name] == first[name]
+    for index in range(4, 8):
+        name = f"song-{index}.mp3"
+        assert second[name][0] > first[name][0]
+        assert second[name][1] == first[name][1]
+    assert "notes.txt" not in second
+    assert list(second_tags) == list(first_tags)
+    assert filter_file.with_suffix(".m3u").read_bytes() == playlist
+
+
+def test_parallel_rebuilds_tags_in_walk_order(
+    tmp_path: Path,
+    file_mp3: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "music"
+    root.mkdir()
+    for index in range(4):
+        shutil.copy2(file_mp3, root / f"song-{index}.mp3")
+    filter_file = root / "favorites.m3ug"
+    filter_file.write_text('artist = "Test Artist"\n', encoding="utf-8")
+
+    audio_order = [
+        Path(current) / name
+        for current, _dirs, names in root.walk()
+        for name in names
+        if name.endswith(".mp3")
+    ]
+    monkeypatch.setattr(executors, "MIN_PARALLEL_FILES", 2)
+    db_path = tmp_path / "cache.db"
+    _run(root, db_path, jobs=1)
+
+    for song in audio_order[-2:]:
+        mtime = song.stat().st_mtime + 10
+        os.utime(song, (mtime, mtime))
+
+    tags, _ = _run(
+        root,
+        db_path,
+        jobs=2,
+        order=ParseOrder.UNORDERED,
+    )
+
+    assert list(tags) == audio_order
+    playlist_entries = [
+        line
+        for line in filter_file.with_suffix(".m3u").read_text().splitlines()
+        if not line.startswith("#")
+    ]
+    assert playlist_entries == [path.name for path in audio_order]
+
+
+def test_pipeline_caches_empty_tags_and_skips_unsupported(
+    tmp_path: Path,
+    file_mp3: Path,
+) -> None:
+    root = tmp_path / "music"
+    root.mkdir()
+    songs = [root / "one.mp3", root / "two.mp3"]
+    for song in songs:
+        shutil.copy2(file_mp3, song)
+    unsupported = root / "notes.txt"
+    unsupported.write_text("not music\n", encoding="utf-8")
+
+    ignored = frozenset(
+        {
+            "artist",
+            "bitrate",
+            "channels",
+            "duration",
+            "encoder_settings",
+            "filename",
+            "filesize",
+            "genre",
+            "is_lossless",
+            "mime_type",
+            "samplerate",
+            "title",
+        }
+    )
+    args = replace(
+        _make_args(root, tmp_path / "cache.db", jobs=2),
+        config=Config(tags=TagsConfig(ignore=ignored)),
+    )
+    conn, cursor = setup_database_connection(tmp_path / "cache.db")
+    try:
+        create_files_table(cursor, get_cache_version(args.config.tags))
+        all_tags, _ = process_directory(conn, cursor, root, args)
+        rows = cursor.execute("SELECT path, tags FROM files ORDER BY path").fetchall()
+    finally:
+        conn.close()
+
+    assert all_tags == {song: {} for song in songs}
+    assert [Path(path).name for path, _tags in rows] == ["one.mp3", "two.mp3"]
+    assert [tags for _path, tags in rows] == ["{}", "{}"]
+    assert str(unsupported) not in {path for path, _tags in rows}
+
+
+def test_verbose_diagnostics_match_between_orders(
+    tmp_path: Path,
+    file_mp3: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    root = tmp_path / "music"
+    root.mkdir()
+    for index in range(4):
+        shutil.copy2(file_mp3, root / f"song-{index}.mp3")
+
+    monkeypatch.setattr(executors, "MIN_PARALLEL_FILES", 4)
+    config = Config(tags=TagsConfig(max_size=1, ignore=frozenset({"artist"})))
+
+    diagnostics: dict[ParseOrder, Counter[str]] = {}
+    for order in (ParseOrder.ORDERED, ParseOrder.UNORDERED):
+        args = replace(
+            _make_args(root, tmp_path / f"{order}.db", jobs=2),
+            verbosity=Verbosity.VERBOSE,
+            config=config,
+            parse_order=order,
+        )
+        conn, cursor = setup_database_connection(tmp_path / f"{order}.db")
+        try:
+            create_files_table(cursor, get_cache_version(config.tags))
+            process_directory(conn, cursor, root, args)
+        finally:
+            conn.close()
+        output = capsys.readouterr().out
+        diagnostics[order] = Counter(
+            line
+            for line in output.splitlines()
+            if line.startswith(("Removing tag", "Skipping", "Updated cache"))
+        )
+
+    assert diagnostics[ParseOrder.ORDERED] == diagnostics[ParseOrder.UNORDERED]
+    assert any(
+        "configured to be ignored" in line for line in diagnostics[ParseOrder.ORDERED]
+    )
+    assert any(
+        "larger than 1 UTF-8 bytes" in line for line in diagnostics[ParseOrder.ORDERED]
+    )
 
 
 class _InterruptingExecutor:
