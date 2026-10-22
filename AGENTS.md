@@ -164,6 +164,7 @@ from genplis.exceptions import GenplisError
 - Tag parsing: `src/genplis/tags.py`
 - M3UG parsing: `src/genplis/m3ug.py`
 - M3U generation: `src/genplis/m3u.py`
+- Tag statistics: `src/genplis/stats.py`
 - Exceptions: `src/genplis/exceptions.py`
 - Shared type aliases: `src/genplis/types.py`
 

@@ -62,6 +62,25 @@ Use `--verbose` for extra detail about skipped or removed tags:
 uv run genplis --verbose /path/to/song.mp3
 ```
 
+To inventory the tags used across a whole collection, including how many
+files have each one, run:
+
+```bash
+uv run genplis --tag-stats ~/Music
+```
+
+Add `-t TAG` to see every distinct value of a tag and how many files contain
+it:
+
+```bash
+uv run genplis -t genre ~/Music
+```
+
+The report uses the same `*` marker for calculated properties and respects
+`[tags] ignore` and `[tags] max_size`. See
+[Tag statistics](https://github.com/haplo/genplis/blob/main/docs/usage.md#inspecting-tags-across-a-collection)
+for the full behavior.
+
 ## Tag names
 
 - Names are matched case-insensitively. `Artist`, `artist`, and `ARTIST` all

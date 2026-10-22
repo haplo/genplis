@@ -34,6 +34,7 @@ src/genplis/
     m3ug.py         filter, directive and @sort parser, rule nodes
     sorting.py      sort specs, value normalization, comparison
     m3u.py          playlist writer
+    stats.py        tag statistics collector and report renderer
     files.py        modification-time helper
     json.py         JSON encoder for cached tags
     exceptions.py   exception hierarchy
@@ -105,6 +106,12 @@ keeps matching `Match` records (the playlist entry, walk order, normalized
 sort keys, dedupe keys, per-tag limit key, and duration). The `retain_tags`
 keyword exists for tests and debugging and
 restores the old all-tags return value.
+
+`--tag-stats` uses the same walk and cache path with an empty filter map, so
+no `.m3ug` file is parsed and no playlist is written. Each supported file's
+tags are passed to `stats.TagStatsCollector`, which keeps only aggregate
+counters; the tags are still released after every file. `-t/--tag` selects
+tags whose distinct values are kept without the usual cardinality cap.
 
 ## Parallel parsing
 
@@ -429,7 +436,7 @@ pending; see the roadmap.
 - [x] Command for DB cleaning
 - [x] Optimize memory usage
 - [ ] Optimize DB space
-- [ ] Display all available tags, with stats
+- [x] Display all available tags, with stats
 - [ ] Debug M3UG
 - [ ] Improve Windows support (**HELP NEEDED!**)
 - [ ] Improve MacOS support (**HELP NEEDED!**)

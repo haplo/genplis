@@ -53,6 +53,8 @@ def make_args() -> Callable[..., Args]:
         extended_m3u: bool = True,
         clean: bool = False,
         jobs: int = 1,
+        display_tags: bool = False,
+        tags: tuple[str, ...] = (),
     ) -> Args:
         return Args(
             path=Path(path_str),
@@ -65,6 +67,8 @@ def make_args() -> Callable[..., Args]:
             extended_m3u=extended_m3u,
             clean=clean,
             jobs=jobs,
+            display_tags=display_tags,
+            tags=tags,
         )
 
     return _make_args

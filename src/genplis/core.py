@@ -39,6 +39,12 @@ from .sorting import (
     format_sort_spec,
     normalize_sort_value,
 )
+from .stats import (
+    TagStatsCollector,
+    full_tag_names,
+    render_tag_details,
+    render_tag_stats,
+)
 from .tags import AUDIO_PROPERTY_TAGS, get_audio_property_tags, get_tags
 from .types import Tags, TagValue, Verbosity
 
@@ -68,6 +74,8 @@ class Args:
     clean: bool = False
     config_disabled: bool = False
     jobs: int = 1
+    display_tags: bool = False
+    tags: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -200,7 +208,8 @@ def setup_argparse() -> argparse.ArgumentParser:
         default=None,
         metavar="N",
     )
-    parser.add_argument(
+    mode_group = parser.add_mutually_exclusive_group()
+    mode_group.add_argument(
         "--clean",
         help=(
             "Remove cache entries for files that no longer exist. With PATH, "
@@ -208,6 +217,27 @@ def setup_argparse() -> argparse.ArgumentParser:
             "without PATH, clean the whole database."
         ),
         action="store_true",
+    )
+    mode_group.add_argument(
+        "--tag-stats",
+        dest="display_tags",
+        help=(
+            "Show every tag found in the collection with file counts. "
+            "No playlists are written."
+        ),
+        action="store_true",
+    )
+    parser.add_argument(
+        "-t",
+        "--tag",
+        dest="tags",
+        help=(
+            "Show every distinct value of TAG with file counts. Implies "
+            "--tag-stats and may be repeated."
+        ),
+        action="append",
+        default=None,
+        metavar="TAG",
     )
     parser.add_argument(
         "--overwrite",
@@ -263,6 +293,18 @@ def resolve_args(args: argparse.Namespace, config: Config) -> Args:
     Command-line values take precedence. Excludes are special: when any
     --exclude option is present, it replaces the config file's exclude list.
     """
+    if args.clean and args.tags:
+        raise GenplisConfigError("--tag cannot be combined with --clean")
+
+    requested_tags: list[str] = []
+    for raw_tag in args.tags or ():
+        name = raw_tag.strip().lower()
+        if not name:
+            raise GenplisConfigError("tag name must not be empty")
+        requested_tags.append(name)
+    tags = tuple(dict.fromkeys(requested_tags))
+    display_tags = args.display_tags or bool(tags)
+
     if args.path is not None:
         path = args.path
     elif args.clean:
@@ -310,6 +352,8 @@ def resolve_args(args: argparse.Namespace, config: Config) -> Args:
         clean=args.clean,
         config_disabled=args.no_config,
         jobs=_resolve_jobs(args, config),
+        display_tags=display_tags,
+        tags=tags,
     )
 
 
@@ -342,6 +386,56 @@ def get_calculated_tags(tags: Mapping[str, TagValue]) -> Tags:
     return calculated
 
 
+def _select_display_tags(
+    display_tags: Mapping[str, TagValue],
+    requested: Sequence[str],
+) -> tuple[Tags, tuple[str, ...]]:
+    """Limit displayed tags to the requested names and report misses."""
+    names = tuple(
+        dict.fromkeys(name.strip().lower() for name in requested if name.strip())
+    )
+    wanted: set[str] = set()
+    for name in names:
+        wanted.add(name)
+        if not name.startswith("*"):
+            wanted.add(f"*{name}")
+
+    selected: Tags = {
+        key: value for key, value in display_tags.items() if key.lower() in wanted
+    }
+    found: set[str] = set()
+    for key in selected:
+        lowered = key.lower()
+        found.add(lowered)
+        if lowered.startswith("*"):
+            found.add(lowered[1:])
+    missing = tuple(name for name in names if name not in found)
+    return selected, missing
+
+
+def display_file_tags(
+    path: Path,
+    tags: Mapping[str, TagValue],
+    cache_status: db.CacheStatus,
+    requested: Sequence[str] = (),
+) -> None:
+    """Print the tags of a single music file, optionally filtered by name."""
+    print(f"{path} detected as music file")
+    print(f"Cache status: {CACHE_STATUS_MESSAGES[cache_status]}")
+    print("Parsed tags:")
+    display_tags: Tags = {
+        key: value for key, value in tags.items() if key not in AUDIO_PROPERTY_TAGS
+    }
+    display_tags.update(get_calculated_tags(tags))
+    missing: tuple[str, ...] = ()
+    if requested:
+        display_tags, missing = _select_display_tags(display_tags, requested)
+    for key, value in sorted(display_tags.items(), key=lambda tag: tag[0]):
+        print(f"    {key} = {value}")
+    for name in missing:
+        print(f"Tag '{name}' was not found. It may be hidden by [tags] ignore.")
+
+
 def process_path(conn: sqlite3.Connection, cursor: sqlite3.Cursor, args: Args) -> None:
     """Process an arbitrary path through genplis.
 
@@ -357,18 +451,7 @@ def process_path(conn: sqlite3.Connection, cursor: sqlite3.Cursor, args: Args) -
     elif path.is_file():
         tags, parsed, cache_status = process_file(conn, cursor, path, args)
         if tags is not None and args.verbosity.shows_normal_output:
-            print(f"{path} detected as music file")
-            print(f"Cache status: {CACHE_STATUS_MESSAGES[cache_status]}")
-
-            print("Parsed tags:")
-            display_tags = {
-                key: value
-                for key, value in tags.items()
-                if key not in AUDIO_PROPERTY_TAGS
-            }
-            display_tags.update(get_calculated_tags(tags))
-            for key, value in sorted(display_tags.items(), key=lambda t: t[0]):
-                print(f"    {key} = {value}")
+            display_file_tags(path, tags, cache_status)
         if (
             parsed is not None or path.suffix.lower() == ".m3ug"
         ) and args.verbosity.shows_normal_output:
@@ -398,6 +481,56 @@ def process_path(conn: sqlite3.Connection, cursor: sqlite3.Cursor, args: Args) -
             file=sys.stderr,
         )
         sys.exit(1)
+
+
+def display_tag_stats(
+    conn: sqlite3.Connection,
+    cursor: sqlite3.Cursor,
+    args: Args,
+) -> None:
+    """Print tag statistics for a collection or a single audio file."""
+    path = args.path
+    if path is None:
+        raise GenplisError("Attempted to display tag statistics but no path was given")
+
+    if path.is_dir():
+        collector = TagStatsCollector(full_tags=full_tag_names(args.tags))
+        if args.verbosity is not Verbosity.REALLY_QUIET:
+            print(f"Tag statistics for {path}")
+        process_directory(
+            conn,
+            cursor,
+            path,
+            args,
+            filters={},
+            stats=collector,
+        )
+        if args.verbosity is not Verbosity.REALLY_QUIET:
+            report = collector.report()
+            print(
+                render_tag_details(report, args.tags)
+                if args.tags
+                else render_tag_stats(report)
+            )
+        return
+
+    if not path.is_file():
+        raise GenplisError(f"{path} must be either a directory or a file")
+
+    if path.suffix.lower() == ".m3ug":
+        raise GenplisError(
+            "Tag statistics require a directory or an audio file, not a .m3ug filter"
+        )
+
+    tags, _, cache_status = process_file(conn, cursor, path, args)
+    if tags is None:
+        if args.verbosity is not Verbosity.REALLY_QUIET:
+            print(f"{path} is not a supported music file")
+        return
+    if args.verbosity is not Verbosity.REALLY_QUIET:
+        display_file_tags(path, tags, cache_status, args.tags)
+    if is_excluded(path, args) and args.verbosity.shows_normal_output:
+        print("WARNING: This file is excluded by current configuration.")
 
 
 def matches_rules(tags: Mapping[str, TagValue], expression: FilterNode | None) -> bool:
@@ -655,6 +788,7 @@ def process_directory(
     *,
     retain_tags: bool = False,
     filters: Mapping[Path, M3UGFile] | None = None,
+    stats: TagStatsCollector | None = None,
 ) -> tuple[dict[Path, Tags], dict[Path, M3UGFile]]:
     """Traverse the directory and process all files.
 
@@ -678,6 +812,10 @@ def process_directory(
     tests or debugging; retaining it defeats the memory optimization for
     large collections.
 
+    When ``stats`` is given, each supported file's tags are also recorded in
+    the collector. The collector keeps only aggregate counters, so tags are
+    still released after every file.
+
     """
     if not directory.is_dir():
         raise GenplisError(
@@ -697,6 +835,25 @@ def process_directory(
     pending: list[ParseItem] = []
     order = 0
     batch = db.WriteBatch(conn, every=COMMIT_EVERY)
+
+    def handle_tags(current_order: int, file: Path, tags: Tags) -> None:
+        """Record one successfully parsed file in every consumer."""
+        nonlocal processed
+        processed += 1
+        if retained is not None:
+            retained[current_order] = (file, tags)
+        if stats is not None:
+            stats.record_file(tags, get_calculated_tags(tags))
+        _record_matches(
+            matches,
+            all_filters,
+            current_order,
+            file,
+            tags,
+            extended=args.extended_m3u,
+            default_sort=args.config.output.sort,
+        )
+
     try:
         for file in _walk_files(directory, args):
             if file.suffix.lower() == ".m3ug":
@@ -709,36 +866,14 @@ def process_directory(
                 tags, _, _ = process_file(conn, cursor, file, args, batch=batch)
                 if tags is None:
                     continue
-                processed += 1
-                if retained is not None:
-                    retained[current_order] = (file, tags)
-                _record_matches(
-                    matches,
-                    all_filters,
-                    current_order,
-                    file,
-                    tags,
-                    extended=args.extended_m3u,
-                    default_sort=args.config.output.sort,
-                )
+                handle_tags(current_order, file, tags)
                 continue
 
             last_modified = db.get_last_modified(file)
             cache_status = db.get_cache_status(cursor, file, last_modified)
             if cache_status is db.CacheStatus.HIT:
                 tags = db.get_cached_tags(cursor, file)
-                processed += 1
-                if retained is not None:
-                    retained[current_order] = (file, tags)
-                _record_matches(
-                    matches,
-                    all_filters,
-                    current_order,
-                    file,
-                    tags,
-                    extended=args.extended_m3u,
-                    default_sort=args.config.output.sort,
-                )
+                handle_tags(current_order, file, tags)
             else:
                 pending.append(
                     ParseItem(
@@ -766,20 +901,10 @@ def process_directory(
                         last_modified=result.item.last_modified,
                         verbosity=args.verbosity,
                     )
-                    processed += 1
-                    if retained is not None:
-                        retained[result.item.order] = (
-                            result.item.path,
-                            result.tags,
-                        )
-                    _record_matches(
-                        matches,
-                        all_filters,
+                    handle_tags(
                         result.item.order,
                         result.item.path,
                         result.tags,
-                        extended=args.extended_m3u,
-                        default_sort=args.config.output.sort,
                     )
             except BaseException:
                 executor.close(cancel=True)
@@ -1027,7 +1152,10 @@ def _run(args: Args) -> None:
             conn.commit()
 
             if args.path is not None:
-                process_path(conn, cursor, args)
+                if args.display_tags:
+                    display_tag_stats(conn, cursor, args)
+                else:
+                    process_path(conn, cursor, args)
             if args.clean:
                 clean_database(
                     conn,
@@ -1047,6 +1175,8 @@ def main() -> None:
 
     if raw_args.quiet and raw_args.verbose:
         parser.error("--quiet cannot be combined with --verbose")
+    if raw_args.clean and raw_args.tags:
+        parser.error("--tag cannot be combined with --clean")
 
     try:
         config = Config() if raw_args.no_config else load_config(raw_args.config)

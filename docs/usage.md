@@ -29,6 +29,8 @@ that `PATH` is required.
 | `--db PATH` | Use this SQLite database instead of the default cache location. |
 | `-j N`, `--jobs N` | Parse cache misses with `N` worker processes. `0` uses one worker per CPU, capped at eight; `1` disables the process pool. Default is `0`. |
 | `--clean` | Remove cache entries for files that no longer exist. See [Cleaning the cache](#cleaning-the-cache). |
+| `--tag-stats` | Show every tag found in the collection with file counts. No playlists are written. |
+| `-t TAG`, `--tag TAG` | Show every distinct value of `TAG` with file counts. Implies `--tag-stats` and may be repeated. |
 | `--overwrite`, `--no-overwrite` | Whether to replace an existing generated playlist. |
 | `--include-source`, `--no-include-source` | Whether to embed the original `.m3ug` text as comments in the playlist. |
 | `--extended-m3u`, `--no-extended-m3u` | Whether to write `#EXTM3U` and `#EXTINF` metadata. Enabled by default; `--no-extended-m3u` writes a plain list of paths. |
@@ -130,6 +132,86 @@ scans the file's directory for audio files using only this filter, so
 may satisfy includes, but no playlist is written for it.
 
 Both forms also warn when the file matches the current exclude configuration.
+
+### Inspecting tags across a collection
+
+```bash
+uv run genplis --tag-stats ~/Music
+```
+
+This walks the collection, reuses the tag cache, and prints every tag that at
+least one supported file has:
+
+```text
+Tag statistics for /home/me/Music
+2 of 2 supported files have embedded tags
+
+Embedded tags
+Tag               Files  Coverage  Distinct  Examples
+----------------  -----  --------  --------  --------------------------------
+artist                2    100.0%         1  Test Artist
+genre                 2    100.0%         4  Electronic, Retrowave, Synthwave
+title                 2    100.0%         1  Test
+
+Calculated tags
+Tag           Files  Coverage  Distinct  Examples
+------------  -----  --------  --------  ----------------------------------------
+*bitrate          2    100.0%         2  112, 127.998
+*duration         2    100.0%         2  1, 3.239...
+```
+
+- `Files` is the number of files that have the tag. `Coverage` uses all
+  supported files as the denominator.
+- `Distinct` is the number of different values. It is capped for very common
+  high-cardinality tags such as `title`; a `+` marks a capped count.
+- `Examples` shows a few values, ordered by how many files contain them.
+- Calculated audio properties are listed separately with the same `*` prefix
+  used by single-file inspection.
+- `[tags] ignore` and `[tags] max_size` still apply, so the report shows what
+  filters can actually use. Ignored tags are not listed.
+- `.m3ug` files are not parsed and no playlists are written or overwritten.
+- The tag cache is updated normally, so a stats run also warms the cache for
+  later playlist runs.
+- With `-q`, the table is still printed but progress lines are suppressed.
+  With `-qq`, nothing is printed. A single audio file uses the normal detailed
+  listing instead of the collection table.
+- Tag statistics cannot be combined with `--clean`.
+
+Use `-t/--tag` to focus on one or more tags and see every distinct value:
+
+```bash
+uv run genplis -t genre ~/Music
+uv run genplis --tag-stats -t genre -t year ~/Music
+```
+
+```text
+Tag statistics for /home/me/Music
+2 of 2 supported files have embedded tags
+
+Tag: genre (embedded)
+Files: 2 of 2 (100.0%)
+Distinct values: 4
+
+Value                             Files  Coverage
+--------------------------------  -----  --------
+Electronic                            1     50.0%
+Retrowave                             1     50.0%
+Synthwave                             1     50.0%
+Synthwave; Retrowave; Electronic      1     50.0%
+
+A file can contain more than one value, so coverage values can add up to more than 100%.
+
+Files without this tag: 0 (0.0%)
+```
+
+Values are counted once per file, so a file with several genres contributes
+to each of them. Values are ordered by file count, highest first. Every
+distinct value is listed, but extremely long values are shortened in the
+table; the file count still refers to the full value. A
+requested tag that does not exist prints a message and is not an error. Tag
+names are case-insensitive. Use `-t '*rating'` to select only the calculated
+rating; `-t rating` shows both the embedded `rating` and the calculated
+`*rating` when both are present.
 
 ## Generated playlists
 

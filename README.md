@@ -69,6 +69,13 @@ To see which tags a file actually has (useful when writing filters):
 uv run genplis ~/Music/some-song.mp3
 ```
 
+To inventory every tag in the collection, or every value of one tag:
+
+```bash
+uv run genplis --tag-stats ~/Music
+uv run genplis -t genre ~/Music
+```
+
 Filter values are case-insensitive by default; add `@CASE` when case matters.
 Rating scales vary between players, so check a real file before trusting a
 rule. The references below cover the details and the common pitfalls.
@@ -77,7 +84,7 @@ rule. The references below cover the details and the common pitfalls.
 
 | Guide | Contents |
 | --- | --- |
-| [Usage](https://github.com/haplo/genplis/blob/main/docs/usage.md) | Options, single-file inspection, generated playlists, the tag cache, `--clean` |
+| [Usage](https://github.com/haplo/genplis/blob/main/docs/usage.md) | Options, single-file inspection, tag statistics, generated playlists, the tag cache, `--clean` |
 | [Configuration](https://github.com/haplo/genplis/blob/main/docs/config.md) | Config file location, every setting, precedence, annotated example |
 | [M3UG reference](https://github.com/haplo/genplis/blob/main/docs/m3ug.md) | Filter language: operators, sets, OR/NOT, ordering, limits, includes, examples |
 | [Tags](https://github.com/haplo/genplis/blob/main/docs/tags.md) | Available tag names, calculated audio properties, rating handling |
