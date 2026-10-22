@@ -10,6 +10,7 @@ from .m3ug import (
     AndNode,
     FilterNode,
     IncludeInfo,
+    LimitPerTag,
     M3UGFile,
     NotNode,
     OrNode,
@@ -20,7 +21,7 @@ from .m3ug import (
     ValueNode,
     is_number,
 )
-from .sorting import SortSpec, format_sort_spec
+from .sorting import SortSpec, SortValue, SortValues, format_sort_spec
 from .types import TagValue
 
 
@@ -67,6 +68,32 @@ class FileTrace:
     consulted: tuple[TagLookup, ...]
     skipped: bool = False
     reason: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class PlaylistInput:
+    """The playlist settings and per-file values used for one filter."""
+
+    filter_file: Path
+    sort: SortSpec
+    sort_values: SortValues
+    sort_is_default: bool
+    dedupe: tuple[str, ...] | None
+    dedupe_values: SortValues
+    limit: int | None
+    limit_per: LimitPerTag | None
+    limit_key: SortValue | None
+    max_duration: float | None
+    duration: float | None
+    no_playlist: bool
+    exclusion: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class PlaylistInputsTrace:
+    """Playlist inputs for every filter considered by a trace."""
+
+    inputs: tuple[PlaylistInput, ...]
 
 
 def _filename_label(filename: str | None) -> str:
@@ -590,3 +617,73 @@ def format_tags_consulted(consulted: tuple[TagLookup, ...], *, indent: str = "")
             detail = f" (key {lookup.key})"
         lines.append(f"{indent}  {lookup.requested}{detail}")
     return "\n".join(lines)
+
+
+def _format_playlist_value(value: SortValue | None) -> str:
+    if value is None:
+        return "<missing>"
+    return repr(value)
+
+
+def format_playlist_input(entry: PlaylistInput) -> str:
+    """Render the deterministic playlist inputs for one filter."""
+    lines = ["playlist inputs:"]
+    sort_suffix = " (default)" if entry.sort_is_default else ""
+    lines.append(f"  sort: {format_sort_spec(entry.sort)}{sort_suffix}")
+    names = [key.name for key in entry.sort if not key.is_random]
+    for name, value in zip(names, entry.sort_values, strict=True):
+        suffix = " (sorts last)" if value is None else ""
+        lines.append(f"    {name} = {_format_playlist_value(value)}{suffix}")
+    for key in entry.sort:
+        if key.is_random:
+            seed = "unseeded" if key.seed is None else f"seed {key.seed}"
+            lines.append(f"    random: {seed}")
+
+    if entry.dedupe is not None:
+        if not entry.dedupe:
+            lines.append("  dedupe: (disabled)")
+        else:
+            lines.append(f"  dedupe: {', '.join(entry.dedupe)}")
+            for name, value in zip(entry.dedupe, entry.dedupe_values, strict=True):
+                suffix = " (kept)" if value is None else ""
+                lines.append(f"    {name} = {_format_playlist_value(value)}{suffix}")
+
+    if entry.limit is not None:
+        suffix = " (disabled)" if entry.limit == 0 else ""
+        lines.append(f"  limit: {entry.limit}{suffix}")
+
+    if entry.limit_per is not None:
+        per_tag = entry.limit_per
+        suffix = " (disabled)" if per_tag.count == 0 else ""
+        lines.append(f"  per-tag limit: {per_tag.count} per {per_tag.tag}{suffix}")
+        if per_tag.count > 0:
+            if entry.limit_key is None:
+                lines.append(f"    {per_tag.tag} = <missing> (file would be skipped)")
+            else:
+                lines.append(
+                    f"    {per_tag.tag} = {_format_playlist_value(entry.limit_key)}"
+                )
+
+    if entry.max_duration is not None:
+        suffix = " (disabled)" if entry.max_duration == 0 else ""
+        lines.append(f"  max duration: {_format_seconds(entry.max_duration)}s{suffix}")
+        if entry.duration is None:
+            lines.append("    target duration: 0s (missing)")
+        else:
+            lines.append(f"    target duration: {_format_seconds(entry.duration)}s")
+
+    if entry.no_playlist:
+        lines.append("  no playlist: yes (@NO-PLAYLIST)")
+
+    if entry.no_playlist:
+        lines.append("  selection: no playlist (@NO-PLAYLIST)")
+    elif entry.exclusion is not None:
+        lines.append(f"  selection: excluded: {entry.exclusion}")
+    else:
+        lines.append("  selection: not simulated; use --trace-full")
+    return "\n".join(lines)
+
+
+def format_playlist_inputs(trace: PlaylistInputsTrace) -> str:
+    """Render playlist inputs for several filters."""
+    return "\n\n".join(format_playlist_input(entry) for entry in trace.inputs)

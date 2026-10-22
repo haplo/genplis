@@ -16,8 +16,10 @@ import psutil
 from . import db
 from .config import Config, load_config
 from .diagnostics import (
+    PlaylistInput,
     format_file_trace,
     format_filter_tree,
+    format_playlist_input,
     format_tags_consulted,
     trace_file,
 )
@@ -594,6 +596,42 @@ def _trace_filters(
     raise GenplisError(f"{path} must be a .m3ug file or a directory")
 
 
+def build_playlist_input(
+    filter_file: Path,
+    parsed: M3UGFile,
+    target: Path,
+    tags: Tags,
+    args: Args,
+) -> PlaylistInput:
+    """Resolve the deterministic playlist inputs for a traced file."""
+    spec = parsed.sort if parsed.sort is not None else args.config.output.sort
+    dedupe_values: SortValues = ()
+    if parsed.dedupe:
+        dedupe_values = _tag_values(target, tags, parsed.dedupe)
+    limit_key: SortValue | None = None
+    exclusion: str | None = None
+    if parsed.limit_per is not None and parsed.limit_per.count > 0:
+        tag = parsed.limit_per.tag
+        limit_key = _tag_values(target, tags, (tag,))[0]
+        if limit_key is None:
+            exclusion = f"per-tag limit key {tag!r} is missing; file would be skipped"
+    return PlaylistInput(
+        filter_file=filter_file,
+        sort=spec,
+        sort_values=_sort_values(target, tags, spec),
+        sort_is_default=parsed.sort is None,
+        dedupe=parsed.dedupe,
+        dedupe_values=dedupe_values,
+        limit=parsed.limit,
+        limit_per=parsed.limit_per,
+        limit_key=limit_key,
+        max_duration=parsed.max_duration,
+        duration=duration_seconds(tags.get("duration")),
+        no_playlist=parsed.no_playlist,
+        exclusion=exclusion,
+    )
+
+
 def trace_path(conn: sqlite3.Connection, cursor: sqlite3.Cursor, args: Args) -> None:
     """Print an annotated evaluation of one audio file against filters."""
     target = args.trace_path
@@ -618,7 +656,11 @@ def trace_path(conn: sqlite3.Connection, cursor: sqlite3.Cursor, args: Args) -> 
         return
 
     traces = [
-        (filter_file, trace_file(parsed, tags))
+        (
+            filter_file,
+            trace_file(parsed, tags),
+            build_playlist_input(filter_file, parsed, target, tags, args),
+        )
         for filter_file, parsed in all_filters.items()
     ]
     if not quiet:
@@ -636,17 +678,18 @@ def trace_path(conn: sqlite3.Connection, cursor: sqlite3.Cursor, args: Args) -> 
         except ValueError:
             print(f"WARNING: {target} is outside the scan root {scan_root}.")
 
-        for filter_file, traced in traces:
+        for filter_file, traced, playlist_input in traces:
             print()
             print(f"Filter: {filter_file}")
             print(format_tags_consulted(traced.consulted))
             print(format_file_trace(traced, title=str(filter_file)))
+            print(format_playlist_input(playlist_input))
             print("MATCH" if traced.passed else "NO MATCH")
 
         if len(traces) > 1:
             print()
             print("Summary:")
-            for filter_file, traced in traces:
+            for filter_file, traced, _playlist_input in traces:
                 result = "MATCH" if traced.passed else "NO MATCH"
                 print(f"  {result} {filter_file}")
 
