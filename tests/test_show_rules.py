@@ -8,6 +8,7 @@ import pytest
 from genplis.config import CollectionConfig, Config
 from genplis.core import Args, Mode, main, resolve_args, setup_argparse, show_rules
 from genplis.exceptions import GenplisConfigError, GenplisError
+from genplis.output import Output, Theme
 from genplis.types import Verbosity
 
 
@@ -46,6 +47,30 @@ def test_show_rules_prints_one_tree(
     assert "    artist = X (line 1)" in output
     assert "    rating >= 4 (line 2)" in output
     assert "    sort: filename (default)" in output
+
+
+def test_show_rules_verbose_uses_color(
+    make_args: Callable[..., Args],
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    filter_file = tmp_path / "favorites.m3ug"
+    filter_file.write_text("@SORT artist\nartist = X\n", encoding="utf-8")
+
+    show_rules(
+        _args(
+            make_args,
+            tmp_path,
+            filters=(filter_file,),
+            verbosity=Verbosity.VERBOSE,
+        ),
+        Output.create(sys.stdout, color=True, theme=Theme.DARK),
+    )
+
+    output = capsys.readouterr().out
+    assert f"\x1b[1;38;5;255m{filter_file}\x1b[0m" in output
+    assert "\x1b[38;5;208mParsed sort:\x1b[0m" in output
+    assert "\x1b[38;5;220martist\x1b[0m" in output
 
 
 def test_show_rules_directory_prints_each_filter(

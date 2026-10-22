@@ -597,7 +597,11 @@ def display_file_tags(
         )
 
 
-def _parse_filter_file(filter_file: Path, args: Args) -> M3UGFile:
+def _parse_filter_file(
+    filter_file: Path,
+    args: Args,
+    output: Output | None = None,
+) -> M3UGFile:
     """Parse one .m3ug filter without touching the cache."""
     if filter_file.suffix.lower() != ".m3ug":
         raise GenplisError(f"{filter_file} is not a .m3ug filter")
@@ -607,6 +611,7 @@ def _parse_filter_file(filter_file: Path, args: Args) -> M3UGFile:
         filter_file.read_text(encoding="utf-8-sig"),
         str(filter_file),
         args.verbosity,
+        output=output,
     )
 
 
@@ -620,7 +625,7 @@ def _parse_selected_filters(
 
     parsed_filters: dict[Path, M3UGFile] = {}
     for filter_file in args.filters:
-        parsed = _parse_filter_file(filter_file, args)
+        parsed = _parse_filter_file(filter_file, args, output)
         parsed_filters[filter_file] = parsed
         if args.verbosity.shows_normal_output:
             output.line(
@@ -691,7 +696,7 @@ def show_rules(args: Args, output: Output | None = None) -> None:
     out = Output.plain() if output is None else output
     if args.filters:
         for filter_file in args.filters:
-            parsed = _parse_filter_file(filter_file, args)
+            parsed = _parse_filter_file(filter_file, args, out)
             if args.verbosity is not Verbosity.REALLY_QUIET:
                 out.line(
                     format_filter_tree(
@@ -718,6 +723,7 @@ def show_rules(args: Args, output: Output | None = None) -> None:
             filter_file.read_text(encoding="utf-8-sig"),
             str(filter_file),
             args.verbosity,
+            output=out,
         )
         if args.verbosity is not Verbosity.REALLY_QUIET:
             out.line(
@@ -740,11 +746,12 @@ def _trace_filters(
     conn: sqlite3.Connection,
     cursor: sqlite3.Cursor,
     args: Args,
+    output: Output,
 ) -> dict[Path, M3UGFile]:
     """Resolve the filters a trace should evaluate."""
     if args.filters:
         return {
-            filter_file: _parse_filter_file(filter_file, args)
+            filter_file: _parse_filter_file(filter_file, args, output)
             for filter_file in args.filters
         }
 
@@ -756,7 +763,7 @@ def _trace_filters(
             f"{path} must be a directory; use --filter FILE to trace a single "
             ".m3ug filter"
         )
-    return _discover_filters(conn, cursor, path, args)
+    return _discover_filters(conn, cursor, path, args, output)
 
 
 def build_playlist_input(
@@ -837,7 +844,7 @@ def _prepare_traces(
     tags: Tags,
     output: Output,
 ) -> tuple[dict[Path, M3UGFile], list[FilterTraceItem]] | None:
-    all_filters = _trace_filters(conn, cursor, args)
+    all_filters = _trace_filters(conn, cursor, args, output)
     if not all_filters:
         if args.verbosity is not Verbosity.REALLY_QUIET:
             output.line(
@@ -1356,11 +1363,12 @@ def _discover_filters(
     cursor: sqlite3.Cursor,
     directory: Path,
     args: Args,
+    output: Output | None = None,
 ) -> dict[Path, M3UGFile]:
     """Parse every M3UG file before any audio file is filtered."""
     all_filters: dict[Path, M3UGFile] = {}
     for file in _walk_files(directory, args, report_skips=False, only_m3ug=True):
-        _, parsed, _ = process_file(conn, cursor, file, args)
+        _, parsed, _ = process_file(conn, cursor, file, args, output=output)
         if parsed is not None:
             all_filters[file] = parsed
     return all_filters
@@ -1475,7 +1483,7 @@ def process_directory(
     start_time = timer()
 
     if filters is None:
-        all_filters = _discover_filters(conn, cursor, directory, args)
+        all_filters = _discover_filters(conn, cursor, directory, args, out)
         if args.verbosity.is_verbose:
             for filter_file, parsed in all_filters.items():
                 out.line(
@@ -1769,7 +1777,12 @@ def process_file(
 
     if file.suffix.lower() == ".m3ug":
         content = file.read_text(encoding="utf-8-sig")
-        parsed = parse_m3ug(content, str(file), args.verbosity)
+        parsed = parse_m3ug(
+            content,
+            str(file),
+            args.verbosity,
+            output=output,
+        )
         return None, parsed, db.CacheStatus.MISS
 
     last_modified = db.get_last_modified(file)

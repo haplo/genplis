@@ -1,3 +1,5 @@
+from collections.abc import Callable
+from io import StringIO
 from pathlib import Path
 
 import pytest
@@ -22,10 +24,12 @@ from genplis.m3ug import (
     SourceLocation,
     StartsWithRuleNode,
     ValueNode,
+    _highlight_m3ug_content,
     get_rating,
     parse_duration_literal,
     parse_m3ug,
 )
+from genplis.output import Output, Palette, Theme
 from genplis.sorting import SortKey
 from genplis.types import Verbosity
 
@@ -671,6 +675,123 @@ def test_verbose_parse_reports_line_numbers(
     output = capsys.readouterr().out
     assert "Ignoring line 1: comment" in output
     assert "Ignoring line 2: empty" in output
+
+
+def test_verbose_parse_uses_palette() -> None:
+    stream = StringIO()
+    parse_m3ug(
+        (
+            "# comment\n"
+            "\n"
+            "@SORT artist\n"
+            "@LIMIT 5 PER Artist\n"
+            "@DEDUPE genre\n"
+            "@NO-PLAYLIST\n"
+            "artist = X\n"
+        ),
+        "Favorites.m3ug",
+        Verbosity.VERBOSE,
+        output=Output(
+            stream=stream,
+            palette=Palette(theme=Theme.DARK, enabled=True),
+        ),
+    )
+
+    output = stream.getvalue()
+    assert "\x1b[1;38;5;255mFavorites.m3ug\x1b[0m" in output
+    assert "\x1b[38;5;244mIgnoring line 1: comment\x1b[0m" in output
+    assert "\x1b[38;5;244mIgnoring line 2: empty\x1b[0m" in output
+    assert "\x1b[38;5;208mParsed sort:\x1b[0m" in output
+    assert "\x1b[38;5;220martist\x1b[0m" in output
+    assert "\x1b[38;5;208mParsed per-tag limit:\x1b[0m" in output
+    assert "\x1b[38;5;220m5 per artist\x1b[0m" in output
+    assert "\x1b[38;5;208mParsed no-playlist file\x1b[0m" in output
+
+
+def test_highlight_content_colors_directives_comments_and_rules() -> None:
+    palette = Palette(theme=Theme.DARK, enabled=True)
+    content = (
+        "# note\n"
+        "@SORT artist\n"
+        "@OR @NOT genre = Metal\n"
+        '[artist | album] ~ "Metal"\n'
+        "invalid line\n"
+    )
+
+    output = _highlight_m3ug_content(content, palette)
+
+    assert "\x1b[38;5;244m# note\x1b[0m" in output
+    assert "\x1b[38;5;208m@SORT\x1b[0m \x1b[38;5;220martist\x1b[0m" in output
+    assert (
+        "\x1b[38;5;208m@OR\x1b[0m \x1b[38;5;208m@NOT\x1b[0m "
+        "\x1b[38;5;51mgenre\x1b[0m \x1b[1m=\x1b[0m "
+        "\x1b[38;5;220mMetal\x1b[0m" in output
+    )
+    assert (
+        "\x1b[38;5;51m[artist | album]\x1b[0m \x1b[1m~\x1b[0m "
+        '\x1b[38;5;220m"Metal"\x1b[0m' in output
+    )
+    assert "\x1b[38;5;244minvalid line\x1b[0m" in output
+
+
+def test_highlight_content_preserves_literal_text(
+    strip_ansi: Callable[[str], str],
+) -> None:
+    content = (
+        "# note\n"
+        "\n"
+        "@SORT artist\n"
+        "@OR @NOT genre = Metal\n"
+        '[artist | album] ~ "Metal"\n'
+        "invalid line\n"
+    )
+    palette = Palette(theme=Theme.DARK, enabled=True)
+
+    assert strip_ansi(_highlight_m3ug_content(content, palette)) == content
+
+
+def test_verbose_include_uses_palette(tmp_path: Path) -> None:
+    main = tmp_path / "Main.m3ug"
+    base = (tmp_path / "Base.m3ug").resolve()
+    main.write_text("@INCLUDE Base.m3ug\n", encoding="utf-8")
+
+    def loader(_path: Path) -> str:
+        return "genre = Metal\n"
+
+    stream = StringIO()
+    parse_m3ug(
+        main.read_text(encoding="utf-8"),
+        str(main),
+        Verbosity.VERBOSE,
+        include_loader=loader,
+        output=Output(
+            stream=stream,
+            palette=Palette(theme=Theme.DARK, enabled=True),
+        ),
+    )
+
+    output = stream.getvalue()
+    assert "\x1b[38;5;208mIncluded\x1b[0m" in output
+    assert f"\x1b[1;38;5;255m{base}\x1b[0m" in output
+
+
+def test_verbose_color_preserves_plain_output(
+    strip_ansi: Callable[[str], str],
+) -> None:
+    def run(enabled: bool) -> str:
+        stream = StringIO()
+        parse_m3ug(
+            "# comment\n\n@SORT artist\n@LIMIT 5 PER Artist\ngenre = Metal\n",
+            "Favorites.m3ug",
+            Verbosity.VERBOSE,
+            output=Output(
+                stream=stream,
+                palette=Palette(theme=Theme.DARK, enabled=enabled),
+            ),
+        )
+        return stream.getvalue()
+
+    assert strip_ansi(run(True)) == run(False)
 
 
 def test_invalid_input() -> None:

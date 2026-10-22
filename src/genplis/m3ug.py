@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import ClassVar, Literal, Protocol, Self, TypeGuard
 
 from .exceptions import GenplisM3UGException
+from .output import Output, Palette
 from .sorting import (
     FLOAT_RE,
     INT_RE,
@@ -1139,6 +1140,94 @@ def _read_include(
     )
 
 
+_M3UG_MODIFIERS = frozenset({"@case", "@or", "@not"})
+
+
+def _highlight_m3ug_content(content: str, palette: Palette) -> str:
+    """Syntax-highlight literal M3UG source while preserving its text."""
+    if not palette.enabled:
+        return content
+    return "\n".join(
+        _highlight_m3ug_line(line, palette) for line in content.split("\n")
+    )
+
+
+def _highlight_m3ug_line(line: str, palette: Palette) -> str:
+    stripped = line.lstrip()
+    if not stripped:
+        return line
+    indent = line[: len(line) - len(stripped)]
+    if stripped.startswith("#"):
+        return f"{indent}{palette.source(stripped)}"
+    if stripped.startswith("@"):
+        return f"{indent}{_highlight_m3ug_directive(stripped, palette)}"
+    return f"{indent}{_highlight_m3ug_rule(stripped, palette)}"
+
+
+def _highlight_m3ug_directive(text: str, palette: Palette) -> str:
+    position = 0
+    pieces: list[str] = []
+    while position < len(text) and text[position] == "@":
+        end = position
+        while end < len(text) and not text[end].isspace():
+            end += 1
+        word = text[position:end]
+        if word.lower() not in _M3UG_MODIFIERS:
+            break
+        pieces.append(palette.directive(word))
+        position = end
+        whitespace_end = position
+        while whitespace_end < len(text) and text[whitespace_end].isspace():
+            whitespace_end += 1
+        pieces.append(text[position:whitespace_end])
+        position = whitespace_end
+
+    if position == 0:
+        end = 0
+        while end < len(text) and not text[end].isspace():
+            end += 1
+        word = text[:end]
+        rest = text[end:]
+        whitespace = rest[: len(rest) - len(rest.lstrip())]
+        value = rest[len(whitespace) :]
+        if not value:
+            return palette.directive(word)
+        return f"{palette.directive(word)}{whitespace}{palette.value(value)}"
+
+    remainder = text[position:]
+    if remainder:
+        pieces.append(_highlight_m3ug_rule(remainder, palette))
+    return "".join(pieces)
+
+
+def _highlight_m3ug_rule(text: str, palette: Palette) -> str:
+    parts = _split_rule_line(text)
+    if len(parts) != 3:
+        return palette.source(text)
+    tag, operator, value = parts
+    if operator not in OPERATORS:
+        return palette.source(text)
+
+    tag_end = len(tag)
+    operator_start = text.find(operator, tag_end)
+    if operator_start < 0:
+        return palette.source(text)
+    operator_end = operator_start + len(operator)
+    value_start = text.find(value, operator_end)
+    if value_start < 0:
+        return palette.source(text)
+    value_end = value_start + len(value)
+
+    return (
+        palette.tag(tag)
+        + text[tag_end:operator_start]
+        + palette.operator(operator)
+        + text[operator_end:value_start]
+        + palette.value(value)
+        + text[value_end:]
+    )
+
+
 def _parse_m3ug_file(
     content: str,
     filename: str,
@@ -1146,7 +1235,10 @@ def _parse_m3ug_file(
     include_loader: IncludeLoader | None,
     stack: tuple[Path, ...],
     depth: int,
+    output: Output | None = None,
 ) -> tuple[M3UGFile, Directives]:
+    out = Output.plain() if output is None else output
+    palette = out.palette
     if content.startswith("\ufeff"):
         content = content[1:]
     and_groups: list[list[FilterNode]] = []
@@ -1162,20 +1254,20 @@ def _parse_m3ug_file(
     includes: list[IncludeInfo] = []
 
     if verbosity.is_verbose:
-        print(f"Parsing M3UG file {filename}:")
-        print("----------------")
-        print(content.ljust(4))
-        print("----------------")
+        out.line(f"Parsing M3UG file {palette.title(filename)}:")
+        out.line(palette.source("----------------"))
+        out.line(_highlight_m3ug_content(content.ljust(4), palette))
+        out.line(palette.source("----------------"))
     for n, line in enumerate(content.splitlines(), 1):
         # ignore comments
         stripped = line.lstrip()
         if stripped.startswith("#"):
             if verbosity.is_verbose:
-                print(f"Ignoring line {n}: comment")
+                out.line(palette.source(f"Ignoring line {n}: comment"))
             continue
         elif not stripped.strip():
             if verbosity.is_verbose:
-                print(f"Ignoring line {n}: empty")
+                out.line(palette.source(f"Ignoring line {n}: empty"))
             continue
 
         text = stripped.strip()
@@ -1223,7 +1315,10 @@ def _parse_m3ug_file(
                     )
                 own_sort = _parse_sort_directive(rest, filename, n)
                 if verbosity.is_verbose:
-                    print(f"Parsed sort: {format_sort_spec(own_sort)}")
+                    out.line(
+                        f"{palette.directive('Parsed sort:')} "
+                        f"{palette.value(format_sort_spec(own_sort))}"
+                    )
                 is_directive = True
                 break
             if modifier == "@limit":
@@ -1246,7 +1341,10 @@ def _parse_m3ug_file(
                         )
                     own_limit = int(parts[0])
                     if verbosity.is_verbose:
-                        print(f"Parsed limit: {own_limit}")
+                        out.line(
+                            f"{palette.directive('Parsed limit:')} "
+                            f"{palette.value(str(own_limit))}"
+                        )
                 elif len(parts) == 3 and parts[1].lower() == "per":
                     if not isinstance(own_limit_per, _Unset):
                         raise GenplisM3UGException(
@@ -1268,7 +1366,10 @@ def _parse_m3ug_file(
                         )
                     own_limit_per = LimitPerTag(int(parts[0]), tag)
                     if verbosity.is_verbose:
-                        print(f"Parsed per-tag limit: {own_limit_per}")
+                        out.line(
+                            f"{palette.directive('Parsed per-tag limit:')} "
+                            f"{palette.value(str(own_limit_per))}"
+                        )
                 else:
                     raise GenplisM3UGException(
                         f"@LIMIT expects N or N PER tag, got: {raw_limit!r}",
@@ -1296,7 +1397,10 @@ def _parse_m3ug_file(
                     )
                 own_max_duration = duration
                 if verbosity.is_verbose:
-                    print(f"Parsed max duration: {own_max_duration}")
+                    out.line(
+                        f"{palette.directive('Parsed max duration:')} "
+                        f"{palette.value(str(own_max_duration))}"
+                    )
                 is_directive = True
                 break
             if modifier == "@dedupe":
@@ -1322,7 +1426,13 @@ def _parse_m3ug_file(
                         keys.append(key)
                 own_dedupe = tuple(keys)
                 if verbosity.is_verbose:
-                    print(f"Parsed dedupe: {', '.join(own_dedupe) or 'disabled'}")
+                    dedupe_keys = ", ".join(own_dedupe)
+                    dedupe_value = (
+                        palette.value(dedupe_keys)
+                        if dedupe_keys
+                        else palette.source("disabled")
+                    )
+                    out.line(f"{palette.directive('Parsed dedupe:')} {dedupe_value}")
                 is_directive = True
                 break
             if modifier == "@no-playlist":
@@ -1341,7 +1451,7 @@ def _parse_m3ug_file(
                 own_no_playlist = True
                 no_playlist_seen = True
                 if verbosity.is_verbose:
-                    print("Parsed no-playlist file")
+                    out.line(palette.directive("Parsed no-playlist file"))
                 is_directive = True
                 break
             if modifier == "@include":
@@ -1391,6 +1501,7 @@ def _parse_m3ug_file(
                     include_loader,
                     (*stack, resolved),
                     depth + 1,
+                    output=out,
                 )
                 included_directives.append(included_directive_values)
                 includes.append(
@@ -1402,7 +1513,10 @@ def _parse_m3ug_file(
                     )
                 )
                 if verbosity.is_verbose:
-                    print(f"Included {included_target}")
+                    out.line(
+                        f"{palette.directive('Included')} "
+                        f"{palette.title(str(included_target))}"
+                    )
                 is_directive = True
                 break
             raise GenplisM3UGException(f"Unrecognized directive: {first}", filename, n)
@@ -1518,6 +1632,7 @@ def parse_m3ug(
     verbosity: Verbosity = Verbosity.NORMAL,
     *,
     include_loader: IncludeLoader | None = None,
+    output: Output | None = None,
 ) -> M3UGFile:
     if content.startswith("\ufeff"):
         content = content[1:]
@@ -1531,5 +1646,6 @@ def parse_m3ug(
         include_loader,
         stack,
         0,
+        output=output,
     )
     return parsed

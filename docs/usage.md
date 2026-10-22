@@ -412,8 +412,8 @@ terminal provides it and otherwise assumes dark. The `[general] color` and
 plain unless color is forced, so logs and generated documentation stay free of
 escape codes.
 
-Tag names, tag values, rule trees, traces, tag statistics, progress lines,
-warnings, and errors all use the same semantic palette.
+Tag names, tag values, rule trees, traces, tag statistics, verbose diagnostics,
+progress lines, warnings, and errors all use the same semantic palette.
 
 ## See also
 
