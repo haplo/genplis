@@ -33,7 +33,7 @@ genplis ~/Music --filter ~/Music/Metal.m3ug
 Other playlists are left untouched. Repeat `--filter` to select several
 filters.
 
-# Find tags for your filters
+## Find tags for your filters
 
 To see the tags available in one song:
 
