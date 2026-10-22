@@ -8,7 +8,7 @@ Genplis generates M3U playlists from the tags and audio properties in your
 local music files. Write your rules in a `.m3ug` file, run Genplis, and it
 writes a matching `.m3u` playlist next to it.
 
-## Your first playlist
+## Quickstart
 
 ### 1. Install
 
@@ -47,7 +47,7 @@ When songs match, `~/Music/Metal.m3u` appears next to your filter. Open it in
 a player that supports local M3U playlists. Run Genplis again after adding
 music or changing tags to refresh your playlists.
 
-If nothing matches, no playlist is written. Check your actual tags with:
+If nothing matches, no playlist is written. Check the tags of a song with:
 
 ```bash
 genplis ~/Music/some-song.mp3
