@@ -90,7 +90,7 @@ The guides below are the same Markdown sources used by the website.
 | Guide | Contents |
 | --- | --- |
 | [Usage](https://github.com/haplo/genplis/blob/main/docs/usage.md) | Common commands, tag inspection, playlist behavior, troubleshooting, cache cleaning |
-| [Configuration](https://github.com/haplo/genplis/blob/main/docs/config.md) | Config file location, every setting, precedence, annotated example |
+| [Configuration](https://github.com/haplo/genplis/blob/main/docs/config.md) | Config locations, precedence, all settings and defaults, cache invalidation |
 | [M3UG reference](https://github.com/haplo/genplis/blob/main/docs/m3ug.md) | Rule syntax, operators, ordering, dedupe, limits, includes, filter debugging |
 | [Tags](https://github.com/haplo/genplis/blob/main/docs/tags.md) | Tag names and units, multi-value rules, ratings, statistics, missing tags |
 | [Scheduling](https://github.com/haplo/genplis/blob/main/docs/scheduling.md) | Systemd and cron setup, logs, missed runs, troubleshooting |

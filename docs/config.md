@@ -1,132 +1,100 @@
 # Configuration reference
 
-Genplis reads optional settings from an INI file. The annotated starter file
-is [`examples/config.ini`](https://github.com/haplo/genplis/blob/main/examples/config.ini):
-copy it to `$XDG_CONFIG_HOME/genplis/config.ini` (usually
-`~/.config/genplis/config.ini`) and edit it. Every setting is optional; when
-the file is missing, genplis uses the defaults below.
-
-For the command-line options and how they interact with these settings, see
-[Usage](usage.md).
+Configuration is optional: genplis works without a config file, and every
+setting has a default. To save your preferences, copy the
+[annotated example](https://github.com/haplo/genplis/blob/main/examples/config.ini)
+to `~/.config/genplis/config.ini` (the usual location) and edit the settings
+you need. For everyday commands, see [Usage](usage.md).
 
 ## Location and loading
 
-| Situation | What genplis reads |
+| Command-line option | Configuration used |
 | --- | --- |
-| No option | `$XDG_CONFIG_HOME/genplis/config.ini`, or `~/.config/genplis/config.ini` when `XDG_CONFIG_HOME` is unset |
-| `--config FILE` | That file. A missing explicit file is an error. |
-| `--no-config` | Nothing; built-in defaults are used. |
+| None | `$XDG_CONFIG_HOME/genplis/config.ini`, usually `~/.config/genplis/config.ini` |
+| `--config FILE` | The named file; an error if it doesn't exist |
+| `--no-config` | Built-in defaults only |
 
-A missing default config file is not an error. `--config` and `--no-config`
-cannot be used together. Running with `--verbose` prints which config file was
-used, if any.
+A missing default file is fine. `--config` and `--no-config` cannot be
+combined. Use `--verbose` to see which config file was loaded.
 
 ## Precedence
+
+Settings are chosen in this order:
 
 1. Command-line options.
 2. The config file.
 3. Built-in defaults.
 
-For booleans, the command-line switches are `--verbose`/`--no-verbose`,
-`--color`/`--no-color`, `--overwrite`/`--no-overwrite`,
-`--include-source`/`--no-include-source`, and
-`--extended-m3u`/`--no-extended-m3u`. If neither form is given, the config
-value is used.
-
-`PATH` is special: it may be omitted when `[collection] path` is set. If a path
-is given on the command line, it wins. `--filter` selects `.m3ug` files
-explicitly; `PATH` then remains the directory to scan, and a `.m3ug` file
-cannot be passed as `PATH`. `--exclude` is also special: any `--exclude` option
-replaces the entire configured list rather than adding to it.
-
-`@SORT` is also special: a directive in a `.m3ug` file overrides
-`[output] sort` for that playlist. The configured/built-in value only applies
-to playlists without an `@SORT` line.
+The tables below list the CLI overrides. On/off switches work in both
+directions: for example, `--overwrite` overrides `overwrite = false`, and
+`--no-overwrite` overrides `overwrite = true`. An omitted option leaves the
+configured value in effect.
 
 ## File format
 
-The file is standard INI syntax with a few strict rules:
+- Use a UTF-8 INI file; a byte-order mark is accepted. Comments can start
+  with `#` or `;` on their own lines.
+- Section and option names ignore case. Unknown names and duplicate
+  sections or options are errors, helping catch typos.
+- **Paths** expand `~`; relative paths start at the config file's directory,
+  not the directory where you run genplis.
+- **Lists** (`exclude` and `ignore`) use one indented entry per line. Blank
+  lines are ignored; commas are literal, except in `sort`.
+- **Boolean settings** accept `true`/`false`, `yes`/`no`, `on`/`off`, or
+  `1`/`0`, ignoring case. `jobs` and `max_size` accept non-negative integers.
+- There is no variable interpolation: `%` is literal and needs no escaping.
 
-- **Encoding:** UTF-8. A byte-order mark is accepted.
-- **Sections and options:** names are case-insensitive, so `[Tags]` and
-  `[tags]`, `MAX_SIZE` and `max_size` are equivalent.
-- **Unknown names are errors.** Unknown sections and unknown options make
-  genplis exit with an error instead of being ignored, which catches typos.
-- **Duplicate sections are errors**, even when only the case differs.
-- **No interpolation.** The percent sign is an ordinary character, so regexes
-  such as `/100%/` work as written.
-- **Lists are one entry per line.** For `exclude` and `ignore`, each non-empty
-  line is one entry. Commas are part of the value, not separators. The
-  `[output] sort` option is the exception: it uses the comma-separated key
-  list described below, the same syntax as `@SORT`.
-- **Paths** may start with `~`. Relative paths are resolved against the config
-  file's directory, not the current working directory.
-
-Booleans accept `true`/`false`, `yes`/`no`, `on`/`off`, and `1`/`0`, in any
-case. Integers must be whole numbers within the documented range.
-
-Errors identify the file and, where relevant, the section and option, for
-example:
-
-```text
-genplis: error: /home/me/.config/genplis/config.ini: [tags] max_size: expected an integer, got 'many'
-```
+Invalid settings stop the run with an error identifying the config file
+and, where relevant, the section and option.
 
 ## `[general]`
 
-| Option | Type | Default | CLI equivalent | Description |
-| --- | --- | --- | --- | --- |
-| `verbose` | boolean | `false` | `--verbose` / `--no-verbose` | Print config and database paths, skip decisions, rule trees, matching songs, and cache updates. |
-| `quiet` | boolean | `false` | `-q` / `--quiet` | Print only filter match counts and playlist creation. |
-| `jobs` | integer ≥ 0 | `0` | `--jobs` | Worker processes for cache misses and stale files. `0` = one per CPU (capped at 8), `1` = no pool. |
-| `color` | boolean | `true` | `--color` / `--no-color` | Allow colors when stdout is an interactive terminal. `false` disables color everywhere. |
-| `theme` | `auto`, `dark`, or `light` | `auto` | `--theme` | Color palette for the terminal background. `auto` reads `COLORFGBG` and assumes dark when unknown. |
+| Option | Default | CLI override | Purpose |
+| --- | --- | --- | --- |
+| `verbose` | `false` | `--verbose` / `--no-verbose` | Show config/cache paths, rule trees, matches, skipped files, and cache updates. |
+| `quiet` | `false` | `-q` / `--quiet` | Show only filter counts and playlist creation during normal runs. |
+| `jobs` | `0` | `-j` / `--jobs` | Parsing workers: `0` = automatic (one per CPU, capped at 8); `1` = no multiprocessing. |
+| `color` | `true` | `--color` / `--no-color` | Allow colors on interactive terminals; `false` disables them. |
+| `theme` | `auto` | `--theme` | Terminal background: `auto`, `dark`, or `light`. |
 
-`verbose = true` and `quiet = true` cannot be enabled at the same time. A
-command-line verbosity flag overrides the configured value, so
-`verbose = true` with `-q` runs quietly, and `quiet = true` with `-v` runs
-verbosely.
+Don't enable both `verbose` and `quiet`. A command-line verbosity flag
+overrides the configured mode, so `-q` can silence a verbose configuration
+and `-v` can override a quiet one. See [Output controls](usage.md#control-output-and-get-help)
+for normal progress output and `-qq`.
 
-`jobs` only affects files that need parsing. Cached files, M3UG parsing,
-filtering, and playlist generation stay in the main process, which also keeps
-the only database connection. Small runs do not start a pool. The worker count
-can be overridden with `--jobs` on the command line.
+`jobs` only affects uncached or changed audio files; small runs may not start
+worker processes. An explicit positive number sets the worker limit without
+changing playlist results. See the [Parsing pipeline](dev.md#parsing-pipeline)
+for implementation details.
 
-`color = true` allows colors when stdout is an interactive terminal; redirected
-output stays plain. Set it to `false` to always disable color. The `NO_COLOR`
-environment variable also disables automatic color, while `--color` and
-`--no-color` override both. `theme` selects colors for a dark or light terminal
-background. The default `auto` reads the background field from `COLORFGBG`
-when available, falling back to `dark` when the variable is missing, malformed,
-or does not describe a supported background color.
+Redirected output is normally plain. `NO_COLOR` disables automatic color;
+`--color` and `--no-color` override both this variable and the config setting.
+The `auto` theme reads `COLORFGBG` when available and falls back to `dark`
+when the terminal background is unknown.
 
 ## `[collection]`
 
-| Option | Type | Default | CLI equivalent | Description |
-| --- | --- | --- | --- | --- |
-| `path` | path | none | `PATH` | Music collection to scan when `PATH` is omitted. |
-| `exclude` | list of regexes | empty | `--exclude` (replaces) | Paths to skip. |
+| Option | Default | CLI override | Purpose |
+| --- | --- | --- | --- |
+| `path` | None | `PATH` | Collection to scan when no command-line path is given. |
+| `exclude` | Empty list | `-e` / `--exclude` | Skip matching file and folder paths; replaces the configured list. |
 
 ### `path`
 
-Setting this makes `PATH` optional on the command line:
+Set a default collection so you can run plain `genplis`:
 
 ```ini
 [collection]
 path = ~/Music
 ```
 
-Relative paths are resolved against the config file's directory. This is what
-lets a timer or service run plain `genplis` with no arguments; see [Running
-genplis on a schedule](scheduling.md).
+A command-line path overrides this setting. `--filter` selects filters, not
+the collection to scan; see [Regenerate one playlist](usage.md#regenerate-one-playlist).
+This default also makes [scheduled runs](scheduling.md) simpler.
 
 ### `exclude`
 
-One regular expression per line, matched with `re.search` against the full
-path. Files and folders matching any pattern are skipped. A matching folder is
-pruned, so its contents are never scanned. Folder paths are also tested with a
-trailing path separator, which is why patterns such as `/@eaDir/` match the
-folder itself.
+Use **Python regular expressions, not shell wildcards**, one per line:
 
 ```ini
 [collection]
@@ -136,150 +104,99 @@ exclude =
     \.tmp$
 ```
 
-These are Python regular expressions, not shell globs. A pattern is a search,
-not a full-path match, so `.tmp$` matches any path ending in `.tmp`. Blank
-lines are ignored and `%` needs no escaping.
+A pattern searches the full path; any match skips the file or folder.
+Excluded folders aren't scanned. Folder paths are also tested with a
+trailing separator, so `/@eaDir/` matches the folder itself. `\.tmp$` matches
+paths ending in `.tmp`.
 
-Any `--exclude` on the command line replaces this whole list.
+**Any command-line `--exclude` replaces the whole configured list.** To add
+a permanent exclusion without losing the others, edit this list instead.
 
 ## `[tags]`
 
-| Option | Type | Default | CLI equivalent | Description |
-| --- | --- | --- | --- | --- |
-| `max_size` | integer ≥ 0 | `1000` | none | Maximum UTF-8 size of a tag value, in bytes. `0` disables the limit. |
-| `ignore` | list of names | empty | none | Tag names to discard before caching and filtering. |
+| Option | Default | CLI override | Purpose |
+| --- | --- | --- | --- |
+| `max_size` | `1000` | None | Maximum combined UTF-8 size of a tag's values, in bytes; `0` disables the limit. |
+| `ignore` | Empty list | None | Tag names to discard before caching and filtering. |
 
 ### `max_size`
 
-Tag values larger than this many UTF-8 encoded bytes are discarded before
-caching. Multi-valued tags are measured as the sum of their values. A value
-exactly at the limit is kept. This usually removes lyrics and long comments.
+Values above the limit are discarded, often removing lyrics or long comments.
+For multi-valued tags, sizes are added together; a total exactly at the limit
+is kept. The limit measures UTF-8 bytes, not characters.
 
-- `max_size = 0` disables the size limit entirely.
-- Calculated audio properties (`filename`, `filesize`, `duration`, and so on)
-  are never discarded by this limit. They can still be excluded through
-  `ignore`.
-- The comparison is against the encoded byte length, so non-ASCII text counts
-  more than one byte per character.
-- Changing this value invalidates the tag cache, because it changes which tags
-  are stored.
+Calculated audio properties are exempt from this limit, but can be removed
+with `ignore`. See [Missing or discarded tags](tags.md#missing-or-discarded-tags)
+for how discarded values affect filters.
 
 ### `ignore`
 
-One tag name per line. Names are case-insensitive. Ignored tags are dropped
-before the size check and are not cached, so filters behave as if the tag did
-not exist.
+List tag names without quotes or commas; matching ignores case:
 
 ```ini
 [tags]
 ignore =
     comment
-    encoder
-    encoder_settings
     lyrics
 ```
 
-Calculated values are controlled by their unprefixed names: put `filename` or
-`filesize` in this list to remove them, not `*filename`. Ignoring `rating`
-drops the raw tag, but a rating can still be derived from `fmps_rating`;
-ignore both names to hide ratings entirely.
-
-Changing `ignore` invalidates the cache.
+Ignored tags are removed before size checking. For calculated properties,
+use the unprefixed name: `duration`, not `*duration`. Ignoring `rating`
+removes the raw tag but doesn't prevent calculation from `fmps_rating`;
+ignore both names to hide ratings entirely. See [Rating](tags.md#rating).
 
 ## `[database]`
 
-| Option | Type | Default | CLI equivalent | Description |
-| --- | --- | --- | --- | --- |
-| `path` | path | `$XDG_CACHE_HOME/genplis/genplis.db` | `--db` | Location of the SQLite tag cache. |
+| Option | Default | CLI override | Purpose |
+| --- | --- | --- | --- |
+| `path` | `$XDG_CACHE_HOME/genplis/genplis.db` | `--db` | Location of the SQLite tag cache. |
 
-The default is usually `~/.cache/genplis/genplis.db`. `~` is expanded and
-relative paths are resolved against the config file. The database is
-disposable; deleting it only costs a re-parse on the next run. See
-[Usage](usage.md#cleaning-the-cache) for
-cache behavior and cleaning.
+The usual location is `~/.cache/genplis/genplis.db`. Like other configured
+paths, it expands `~` and resolves relative to the config file. The cache is
+disposable; see [Cleaning the cache](usage.md#cleaning-the-cache) for behavior
+and maintenance.
 
 ## `[output]`
 
-| Option | Type | Default | CLI equivalent | Description |
-| --- | --- | --- | --- | --- |
-| `overwrite` | boolean | `true` | `--overwrite` / `--no-overwrite` | Replace playlists that already exist. |
-| `include_source` | boolean | `true` | `--include-source` / `--no-include-source` | Embed the `.m3ug` source as comments at the top of the playlist. |
-| `extended_m3u` | boolean | `true` | `--extended-m3u` / `--no-extended-m3u` | Write an `#EXTM3U` header and `#EXTINF` metadata for every entry. |
-| `sort` | sort keys | `filename` | none | Default entry order. A `.m3ug` file's `@SORT` directive overrides it. |
+| Option | Default | CLI override | Purpose |
+| --- | --- | --- | --- |
+| `overwrite` | `true` | `--overwrite` / `--no-overwrite` | Replace existing playlists; `false` leaves them untouched with a warning. |
+| `include_source` | `true` | `--include-source` / `--no-include-source` | Embed the `.m3ug` source as playlist comments. |
+| `extended_m3u` | `true` | `--extended-m3u` / `--no-extended-m3u` | Write `#EXTM3U` / `#EXTINF` metadata; `false` writes a plain list of paths. |
+| `sort` | `filename` | None | Default playlist order, unless the filter has `@SORT`. |
 
-With `overwrite = false`, an existing playlist is left untouched and a warning
-is printed.
-
-With `include_source = false`, the generated `.m3u` contains no record of the
-rules that produced it.
-
-With `extended_m3u = true` (the default), the playlist starts with `#EXTM3U`
-and each entry is preceded by `#EXTINF:<seconds>,<artist> - <title>`. The title
-falls back to the title tag, the artist tag, and finally the file name; an
-unknown duration is written as `-1`. Set it to `false` to write a plain list
-with one path per line:
-
-```ini
-[output]
-extended_m3u = false
-```
+See [Generated playlists](usage.md#generated-playlists) for output behavior.
 
 ### `sort`
 
-Default entry order for playlists that do not contain an `@SORT` directive.
-The value is a comma-separated list of tag names, highest-priority key first.
-Each key may be followed by `asc` (the default) or `desc`:
+Use the same comma-separated keys as `@SORT`, highest priority first. Each
+key can take `asc` (the default) or `desc`:
 
 ```ini
 [output]
 sort = artist, album, disc, track, title
 ```
 
-The special key `filename` means the absolute path of the file. The default is
-`filename`, which gives a stable path order rather than depending on the
-filesystem's directory-walk order.
+Other useful values:
 
-```ini
-[output]
-sort = *rating desc, artist, album, disc, track, title
-```
+| Setting | Effect |
+| --- | --- |
+| `sort = *rating desc, artist, title` | Highest calculated ratings first |
+| `sort = random 42` | Reproducible shuffle; omit the seed to vary each run |
+| `sort = artist, random` | Shuffle within each artist |
+| `sort =` | Keep directory-walk order |
 
-An `@SORT` line in a `.m3ug` file replaces this setting for that playlist; the
-two are not combined. Set the option to an empty value to preserve
-directory-walk order for playlists without `@SORT`:
-
-```ini
-[output]
-sort =
-```
-
-The `random` key accepts the same syntax as `@SORT`: it must be last and may
-take an optional integer seed. With preceding keys it shuffles equal-key runs;
-on its own it shuffles the whole playlist.
-
-```ini
-[output]
-sort = artist, random 42
-```
-
-Missing values sort after present values for that key; lower-priority keys
-still break ties (including when both entries are missing the same key), and
-equal keys keep directory-walk order. Numeric-looking values sort numerically,
-other text sorts case-insensitively, and multi-valued tags use their first
-non-empty value. See
-[Ordering](m3ug.md#ordering)
-for the full key semantics and examples.
+The default `filename` sorts by absolute path. A filter's `@SORT` line
+**replaces**, rather than extends, this setting. See [Ordering](m3ug.md#ordering)
+for random-key restrictions, missing values, and other comparison rules.
 
 ## Settings that invalidate the cache
 
-Changing either of these discards all cached tags and forces a full re-parse:
-
-- `[tags] max_size`
-- `[tags] ignore`
-
-The cache also resets when the tag library version or genplis's cache format
-changes. This is automatic; no manual cleanup is needed. The first run after
-such a change is slower.
+Changing `[tags] max_size` or `[tags] ignore` discards all cached tags and
+forces a full re-parse, because those settings change what is stored. The
+cache also resets when the tag library version or genplis's cache format
+changes. This happens automatically; the next run is slower, but no manual
+cleanup is needed.
 
 ## See also
 
