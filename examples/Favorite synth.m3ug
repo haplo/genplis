@@ -1,6 +1,6 @@
 # Favorites built from a shared include, with a reproducible shuffle.
 @INCLUDE "Favorite fragments.m3ug"
-rating >= 3
+*rating >= 3
 
 # Change 7 to a different number to get a different ordering
 @SORT random 7

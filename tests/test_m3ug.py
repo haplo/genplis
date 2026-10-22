@@ -10,6 +10,7 @@ from genplis.m3ug import (
     ContainsRuleNode,
     EndsWithRuleNode,
     EqualRuleNode,
+    EvaluationTags,
     GreaterOrEqualRuleNode,
     GreaterRuleNode,
     LesserOrEqualRuleNode,
@@ -31,7 +32,7 @@ from genplis.m3ug import (
 )
 from genplis.output import Output, Palette, Theme
 from genplis.sorting import SortKey
-from genplis.types import Verbosity
+from genplis.types import Tags, Verbosity
 
 
 def parse_rules(
@@ -868,8 +869,31 @@ def test_get_rating_without_rating_tags() -> None:
     assert get_rating({"title": ["Test"]}) is None
 
 
-def test_get_rating_returns_none_when_raw_rating_tag_exists() -> None:
-    assert get_rating({"rating": 4, "fmps_rating": ["0.8"]}) is None
+def test_get_rating_ignores_raw_rating_tag() -> None:
+    assert get_rating({"rating": 100, "fmps_rating": ["0.8"]}) == 4
+
+
+@pytest.mark.parametrize("cached", [False, True])
+@pytest.mark.parametrize(
+    ("source", "raw", "expected"),
+    [
+        ("*RATING = 4", {"rating": 100, "FMPS_RATING": ["0.8"]}, True),
+        ("rating = 100", {"rating": 100, "fmps_rating": ["0.8"]}, True),
+        ("*rating >= 4", {"rating": 100}, False),
+        ("*artist = X", {"artist": "X"}, False),
+        ("*duration >= 1m", {"duration": 90}, True),
+        ("*duration >= 1m", {"duration": ["1000"], "*duration": 30}, False),
+        ("*is_lossless = false", {"is_lossless": False}, True),
+        ("[*rating | genre] = [4 | Metal]", {"fmps_rating": ["0.8"]}, True),
+    ],
+)
+def test_explicit_calculated_tags(
+    cached: bool, source: str, raw: Tags, expected: bool
+) -> None:
+    tags = EvaluationTags(raw) if cached else raw
+    expression = parse_m3ug(source).expression
+    assert expression is not None
+    assert expression.apply(tags) is expected
 
 
 def test_find_rating_uses_raw_rating_tag() -> None:
@@ -911,7 +935,7 @@ def test_mixed_case_rating_tags_are_case_insensitive() -> None:
         pytest.approx(4.0),
     )
     assert get_rating({"FMPS_RATING": ["0.8"]}) == pytest.approx(4.0)
-    assert get_rating({"RATING": 4, "FMPS_RATING": ["0.8"]}) is None
+    assert get_rating({"RATING": 4, "FMPS_RATING": ["0.8"]}) == 4
 
 
 def test_find_rating_from_single_item_fmps_rating_list() -> None:

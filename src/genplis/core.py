@@ -608,7 +608,10 @@ def display_file_tags(
     out.line(f"Cache status: {_format_cache_status(cache_status, palette)}")
     out.line(palette.title("Parsed tags:"))
     shown_tags: Tags = {
-        key: value for key, value in tags.items() if key not in AUDIO_PROPERTY_TAGS
+        key: value
+        for key, value in tags.items()
+        if not key.startswith("*")
+        and (key not in AUDIO_PROPERTY_TAGS or f"*{key}" in tags)
     }
     shown_tags.update(get_calculated_tags(tags))
     missing: tuple[str, ...] = ()
@@ -1135,7 +1138,7 @@ def _tag_values(
     """Resolve normalized values for tag names and the filename pseudo-tag."""
     values: list[SortValue | None] = []
     for name in names:
-        if name.lower() == "filename":
+        if name.lower() in {"filename", "*filename"}:
             raw: TagValue = os.path.abspath(file)
         else:
             _, raw = NameNode(name).find(tags)

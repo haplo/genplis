@@ -167,7 +167,7 @@ def format_rule_value(rule: RuleNode) -> str:
     text = _format_value(rule.value_node)
     value = rule.value_node.value
     if (
-        rule.name_node.name.lower() == "duration"
+        rule.name_node.name.lower() in {"duration", "*duration"}
         and is_number(value)
         and rule.value_node.literal is not None
     ):
@@ -593,6 +593,11 @@ def _format_lookup(lookup: TagLookup, palette: Palette) -> str:
             text += f" {palette.source(f'({lookup.note})')}"
         return text
     if lookup.source == "calculated":
+        if lookup.requested not in {"rating", "*rating"}:
+            return (
+                f"calculated {palette.tag(lookup.requested[1:])} = "
+                f"{palette.value(_format_value_or_missing(lookup.normalized))}"
+            )
         source = lookup.key or "fmps_rating"
         return (
             f"calculated rating = "

@@ -199,6 +199,48 @@ def test_directory_reuses_song_values_between_playlists(
     assert genre.normalizations == 1
 
 
+def test_calculated_rating_directives_work_from_cache(
+    tmp_path: Path,
+    genplis_db: sqlite3.Connection,
+    make_args: Callable[..., Args],
+) -> None:
+    cursor = genplis_db.cursor()
+    for name, raw, fmps in (
+        ("a.mp3", 100, "0.6"),
+        ("b.mp3", 20, "1.0"),
+        ("c.mp3", 10, "1.0"),
+        ("d.mp3", 80, "0.8"),
+    ):
+        song = tmp_path / name
+        song.touch()
+        db.cache_tags_for_file(cursor, song, {"rating": raw, "fmps_rating": [fmps]})
+    genplis_db.commit()
+    filters = {
+        tmp_path / "dedupe.m3ug": parse_m3ug(
+            "@SORT *rating desc, *filename\n@DEDUPE *rating\n*rating >= 4"
+        ),
+        tmp_path / "limit.m3ug": parse_m3ug(
+            "@SORT *rating desc, *filename\n@LIMIT 1 PER *rating\n*rating >= 4"
+        ),
+    }
+    process_directory(
+        genplis_db,
+        cursor,
+        tmp_path,
+        make_args(str(tmp_path), include_source=False, extended_m3u=False),
+        filters=filters,
+    )
+    for name in ("dedupe.m3u", "limit.m3u"):
+        assert (tmp_path / name).read_text() == "b.mp3\nd.mp3\n"
+
+
+def test_explicit_filename_sort_uses_absolute_path() -> None:
+    path = Path("song.flac")
+    assert _sort_values(path, {"filename": "wrong"}, parse_sort_spec("*filename")) == (
+        str(path.absolute()).casefold(),
+    )
+
+
 def test_predicates_share_results_between_songs_and_equivalent_rules() -> None:
     expressions = [parse_m3ug("genre = metal").expression for _ in range(2)]
     cache = PredicateCache(expressions)

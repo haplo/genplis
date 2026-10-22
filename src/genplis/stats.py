@@ -187,7 +187,9 @@ class TagStatsCollector:
     ) -> None:
         """Record the embedded and calculated tags of one supported file."""
         self.files += 1
-        embedded = _collect_values(tags, exclude=AUDIO_PROPERTY_TAGS)
+        excluded = {name for name in AUDIO_PROPERTY_TAGS if f"*{name}" not in tags}
+        excluded.update(name for name in tags if name.startswith("*"))
+        embedded = _collect_values(tags, exclude=frozenset(excluded))
         if embedded:
             self.files_with_embedded += 1
         self._record_values(self._embedded, embedded)

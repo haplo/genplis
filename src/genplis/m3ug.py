@@ -18,6 +18,7 @@ from .sorting import (
     format_sort_spec,
     parse_sort_spec,
 )
+from .tags import AUDIO_PROPERTY_TAGS
 from .types import TagValue, Verbosity
 
 logger = logging.getLogger(__name__)
@@ -121,6 +122,31 @@ def _find_tag(
     return None, None
 
 
+def _find_calculated_tag(
+    tags: Mapping[str, TagValue], name: str
+) -> tuple[str | None, TagValue]:
+    if name == "*rating":
+        return "fmps_rating", get_rating(tags)
+    if name[1:] in AUDIO_PROPERTY_TAGS:
+        key, value = _find_tag(tags, name)
+        if key is not None:
+            return key, value
+        key, value = _find_tag(tags, name[1:])
+        # Embedded metadata is list-valued; audio properties are scalars.
+        if not isinstance(value, list):
+            return key, value
+    return None, None
+
+
+def _resolve_tag(tags: Mapping[str, TagValue], name: str) -> TagValue:
+    if name.startswith("*"):
+        return _find_calculated_tag(tags, name)[1]
+    key, value = _find_tag(tags, name)
+    if name == "rating" and key is None:
+        return get_rating(tags)
+    return value
+
+
 class EvaluationTags(Mapping[str, TagValue]):
     """A read-only song view that reuses tag resolution across filters.
 
@@ -164,10 +190,7 @@ class EvaluationTags(Mapping[str, TagValue]):
         name = name.lower()
         found = self._found.get(name)
         if found is None:
-            key, value = self._lookup(name)
-            if name == "rating" and key is None:
-                value = get_rating(self)
-            found = name, value
+            found = name, _resolve_tag(self, name)
             self._found[name] = found
         return found
 
@@ -184,18 +207,13 @@ class EvaluationTags(Mapping[str, TagValue]):
 def get_rating(tags: Mapping[str, TagValue]) -> float | None:
     """Return a rating calculated from known rating alias tags.
 
-    Returns None when no alias tag is present, or when the tags already
-    contain a raw ``rating`` tag. In the latter case the raw value is used
-    directly, so there is no calculated rating to report.
+    Returns None when no usable alias tag is present. A raw ``rating`` tag
+    does not affect this calculation; unprefixed lookup handles its precedence.
 
     Ratings are normalized to a 0 to 5 stars range. If you know of a rating
     tag that is missing, feel free to open an issue with a PR to add support
     for it.
     """
-    rating_key, _ = _find_tag(tags, "rating")
-    if rating_key is not None:
-        return None
-
     fmps_key, raw_fmps_rating = _find_tag(tags, "fmps_rating")
     fmps_rating = normalize(raw_fmps_rating) if fmps_key is not None else None
     if isinstance(fmps_rating, list):
@@ -505,23 +523,14 @@ class NameNode:
         if isinstance(tags, EvaluationTags):
             return tags._find(self.name)
         normalized_name = self.name.lower()
-        key, value = _find_tag(tags, normalized_name)
-        # handle special cases
-        if normalized_name == "rating":
-            if key is not None:
-                return normalized_name, value
-            return normalized_name, get_rating(tags)
-        if key is not None:
-            return normalized_name, value
-        # default case is no match, no value found
-        return normalized_name, None
+        return normalized_name, _resolve_tag(tags, normalized_name)
 
     def lookup(self, tags: Mapping[str, TagValue]) -> TagLookup:
         """Look up this tag and record how the value was obtained."""
         normalized_name = self.name.lower()
         key, raw = _find_tag(tags, normalized_name)
-        if normalized_name == "rating":
-            if key is not None:
+        if normalized_name in {"rating", "*rating"}:
+            if normalized_name == "rating" and key is not None:
                 return TagLookup(
                     requested=normalized_name,
                     key=key,
@@ -548,6 +557,15 @@ class NameNode:
                 normalized=None,
                 source="missing",
                 note=note,
+            )
+        if normalized_name.startswith("*"):
+            key, raw = _find_calculated_tag(tags, normalized_name)
+            return TagLookup(
+                requested=normalized_name,
+                key=key,
+                raw=raw,
+                normalized=normalize(raw),
+                source="calculated" if raw is not None else "missing",
             )
         if key is not None:
             return TagLookup(
@@ -1712,7 +1730,8 @@ def _parse_m3ug_file(
         if tag_names is None:
             tag_names = (NameNode.build(tag, filename, n),)
         duration_only = all(
-            name_node.name.lower() == "duration" for name_node in tag_names
+            name_node.name.lower() in {"duration", "*duration"}
+            for name_node in tag_names
         )
         value_set = _parse_value_set(
             value, mode, filename, n, allow_duration=duration_only

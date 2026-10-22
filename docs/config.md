@@ -241,7 +241,7 @@ filesystem's directory-walk order.
 
 ```ini
 [output]
-sort = rating desc, artist, album, disc, track, title
+sort = *rating desc, artist, album, disc, track, title
 ```
 
 An `@SORT` line in a `.m3ug` file replaces this setting for that playlist; the

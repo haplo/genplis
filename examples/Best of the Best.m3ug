@@ -1,7 +1,6 @@
 # 5-star songs
-# genplis try to normalize ratings to 0-5, but the actual rating tag depends on your
-# music player. If ratings are not working feel free to open an issue!
-rating >= 5
+# *rating normalizes to 0-5; raw rating scales vary by player.
+*rating >= 5
 @LIMIT 50
 # different ordering on each generation, get surprised!
 @SORT random

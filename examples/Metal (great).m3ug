@@ -1,5 +1,4 @@
 # great metal songs (4-star or better)
 genre ~ "Metal"
-# genplis try to normalize ratings to 0-5, but the actual rating tag depends on your
-# music player. If ratings are not working feel free to open an issue!
-rating >= 4
+# *rating normalizes to 0-5; raw rating scales vary by player.
+*rating >= 4

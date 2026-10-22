@@ -40,7 +40,7 @@ For example:
 
 ```text
 genre ~ "Heavy Metal"
-rating >= 4
+*rating >= 4
 ```
 
 A file may also contain directives such as `@SORT`; they control the playlist
@@ -220,7 +220,7 @@ work as expected.
 
 ## Duration literals
 
-Rules whose left-hand side is only the `duration` tag accept duration
+Rules whose left-hand side is only `duration` or `*duration` accept duration
 literals instead of plain seconds:
 
 ```text
@@ -228,6 +228,7 @@ duration >= 10m
 duration < 1h30m
 duration >= 2m15s
 duration <= 1:30
+*duration >= 10m
 ```
 
 | Form | Meaning |
@@ -255,10 +256,10 @@ negates the rule on its line:
 ```text
 genre = Metal
 @OR genre = Rock
-rating >= 4
+*rating >= 4
 ```
 
-This means `(genre = Metal OR genre = Rock) AND rating >= 4`. A plain rule
+This means `(genre = Metal OR genre = Rock) AND *rating >= 4`. A plain rule
 starts a new AND group; consecutive `@OR` rules join the current group. `@OR`
 cannot be the first rule, and `@NOT` always applies to one rule, never to a
 group. There are no parentheses or nested groups.
@@ -279,8 +280,8 @@ genre = Metal
 @OR genre = Rock
 ```
 
-`@NOT rating >= 4` matches unrated songs because a missing tag makes the
-comparison false. `rating < 4` does not match them.
+`@NOT *rating >= 4` matches songs without a calculated rating because a missing
+tag makes the comparison false. `*rating < 4` does not match them.
 
 ## Ordering
 
@@ -307,7 +308,7 @@ one line.
 @SORT artist, album, disc, track, title
 
 # Highest rated first, then album order
-@SORT rating desc, artist, album, disc, track, title
+@SORT *rating desc, artist, album, disc, track, title
 ```
 
 `duration` and `filename` are ordinary sort keys too:
@@ -382,9 +383,10 @@ keep directory-walk order.
 
 Numeric-looking values sort numerically, so `track` values `2` and `10` come
 out in the expected order. Other text sorts case-insensitively. Multi-valued
-tags use their first non-empty value. `rating` uses the same raw-or-derived
-handling as filters; see [Rating](tags.md#rating)
-for the scale caveat.
+tags use their first non-empty value. A `*` prefix selects the calculated
+value, just as in rules; `*filename` also sorts by the absolute path.
+Use `*rating` for normalized 0–5 ratings. Unprefixed `rating` retains its
+raw-or-derived behavior; see [Rating](tags.md#rating).
 
 ## Playlist limits
 
@@ -405,6 +407,8 @@ per-tag cap. Tag values are normalized like sort values: multi-valued tags use
 their first non-empty value, text is compared case-insensitively, and
 numeric-looking strings are compared as numbers. Entries whose tag is missing
 or empty are excluded while a per-tag cap is active.
+The tag may have a `*` prefix to select a calculated value, for example
+`@LIMIT 3 PER *rating`.
 
 A global cap and a per-tag cap can be used together:
 
@@ -425,7 +429,7 @@ longer than the cap, it is still included.
 ```text
 @LIMIT 100
 @MAX-DURATION 1h30m
-rating >= 4
+*rating >= 4
 ```
 
 All limits are selection constraints, not filters: they apply after ordering
@@ -445,6 +449,7 @@ text is compared case-insensitively, and numeric-looking strings are compared
 as numbers. After ordering, the **first** entry for each key is kept and later
 duplicates are dropped. Entries that are missing any key are always kept, so
 `@DEDUPE title` never removes a song without a title.
+Keys may have a `*` prefix to select calculated values, as in rules and sorting.
 
 Dedupe runs before `@LIMIT` and `@MAX-DURATION`, so duplicate entries do not
 consume either cap. `@DEDUPE` with no tags disables dedupe; this is useful when
@@ -477,12 +482,12 @@ genre = Metal
 
 # Main.m3ug
 @INCLUDE Base.m3ug
-rating >= 4
-@OR rating = 5
+*rating >= 4
+@OR *rating = 5
 ```
 
 This matches metal songs rated 4 or 5; the included `genre = Metal` is not
-part of the `rating` OR group. `@INCLUDE` cannot be used under `@OR` or
+part of the `*rating` OR group. `@INCLUDE` cannot be used under `@OR` or
 `@NOT`.
 
 ### Directive merging
@@ -522,7 +527,7 @@ Use `@NO-PLAYLIST` for include fragments and other filter-only files:
 ```text
 @NO-PLAYLIST
 genre = Metal
-rating >= 4
+*rating >= 4
 ```
 
 The file is still parsed and may be included by other files, but genplis does
@@ -540,12 +545,17 @@ are the same. Three groups are worth knowing about:
   `original_year`. These come from the audio file.
 - **Calculated audio properties** such as `filename`, `duration`, `bitrate`,
   `samplerate`, `channels`, `bitdepth`, `filesize`, `mime_type`, and
-  `is_lossless`. Use them **without** the `*` that genplis prints when
-  inspecting a file: write `duration >= 600`, not `*duration >= 600`.
-- **`rating`**, which uses the raw `rating` tag when present and otherwise
-  derives one from `fmps_rating`. See
-  [Tags](tags.md#rating) for
-  the scale caveats.
+  `is_lossless`. Prefix them with `*` to force the calculated value:
+  `*duration >= 600`. Unprefixed names remain supported, but an embedded tag
+  with the same name takes precedence.
+- **`*rating`**, the recommended way to filter and sort by normalized 0–5
+  ratings, calculated from `fmps_rating` even when a raw `rating` exists.
+  Unprefixed `rating` uses the raw tag when present and otherwise falls back
+  to the calculated value. Raw rating scales vary; see [Tags](tags.md#rating).
+
+The `*` prefix is not a wildcard. It works in tag sets too, for example
+`[*filename | comment] ~ Live`. Only calculated names are available with
+this prefix: `*artist` is missing even if an embedded `artist` exists.
 
 An unknown or absent tag is not an error: the rule simply does not match
 (except for `!=`, which does match).
@@ -572,26 +582,26 @@ carry the release year. Inspect a file to see which one you have.
 
 ```text
 # 4-star songs or better
-rating >= 4
+*rating >= 4
 ```
 
 And the stricter version:
 
 ```text
 # 5-star songs
-rating >= 5
+*rating >= 5
 ```
 
-Rating scales differ between players. If `rating >= 4` matches nothing or
-everything, inspect your files first; see
-[Tags](tags.md#rating).
+`*rating` uses the normalized 0–5 scale, currently derived from `fmps_rating`.
+Files with only a raw `rating` have no calculated rating; inspect your files
+first if nothing matches. See [Tags](tags.md#rating).
 
 ### Great metal songs
 
 ```text
 # great metal songs (4-star or better)
 genre ~ "Metal"
-rating >= 4
+*rating >= 4
 ```
 
 Both rules must pass. Because `~` is a substring test, this also matches
@@ -642,7 +652,7 @@ Combining several conditions:
 ```text
 genre ~ Synthwave
 year >= 2010
-rating >= 4
+*rating >= 4
 duration < 480
 ```
 
@@ -656,7 +666,8 @@ uv run genplis /path/to/song.mp3
 
 Calculated values are printed with a `*` prefix (`*duration`, `*filename`,
 `*rating`) to show that they were not embedded in the file.
-Use the names **without** the `*` in filters.
+Use these names directly in filters to force calculated values. Names without
+`*` remain supported, but embedded tags take precedence.
 
 ### Show parsed rules
 

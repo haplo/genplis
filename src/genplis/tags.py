@@ -92,7 +92,15 @@ def parse_tags(
         return None, tuple(diagnostics)
 
     try:
-        tags = cast(Tags, TinyTag.get(file_path).as_dict())
+        audio = TinyTag.get(file_path)
+        tags = cast(Tags, audio.as_dict())
+        # as_dict() can replace an audio property with embedded metadata of
+        # the same name. Preserve the calculated value for explicit lookup.
+        for name in AUDIO_PROPERTY_TAGS:
+            if name in tags and hasattr(audio, name):
+                value = cast(TagValue, getattr(audio, name))
+                if tags[name] != value:
+                    tags[f"*{name}"] = value
     except (TinyTagException, OSError) as exc:
         diagnostics.append(TagDiagnostic(TagDiagnosticKind.SKIP, file_path, str(exc)))
         return None, tuple(diagnostics)
@@ -103,7 +111,7 @@ def parse_tags(
     # comments) are released immediately instead of being kept alive in a
     # second dictionary until the end of the scan.
     for key in tuple(tags):
-        if key.lower() in ignored:
+        if key.lower().removeprefix("*") in ignored:
             diagnostics.append(
                 TagDiagnostic(
                     TagDiagnosticKind.REMOVE,
@@ -117,7 +125,7 @@ def parse_tags(
         value = tags[key]
         if (
             max_size > 0
-            and key not in AUDIO_PROPERTY_TAGS
+            and key.removeprefix("*") not in AUDIO_PROPERTY_TAGS
             and exceeds_tag_size(value, max_size)
         ):
             diagnostics.append(
@@ -171,7 +179,12 @@ def get_audio_property_tags(tags: Mapping[str, TagValue]) -> Tags:
     Calculated tags are prefixed with ``*`` to distinguish them from tags
     embedded in the file.
     """
-    return {f"*{name}": tags[name] for name in AUDIO_PROPERTY_TAGS if name in tags}
+    calculated: Tags = {}
+    for name in AUDIO_PROPERTY_TAGS:
+        value = tags.get(f"*{name}", tags.get(name))
+        if value is not None and not isinstance(value, list):
+            calculated[f"*{name}"] = value
+    return calculated
 
 
 def get_tag_size(value: object) -> int:

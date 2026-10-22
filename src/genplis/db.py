@@ -17,7 +17,7 @@ from .types import Tags, Verbosity
 
 DB_NAME = "genplis.db"
 # Bump this when the way genplis extracts or stores tags changes.
-CACHE_SCHEMA_VERSION = 2
+CACHE_SCHEMA_VERSION = 3
 
 
 class CacheStatus(StrEnum):

@@ -86,6 +86,18 @@ def test_calculated_rating_is_reported() -> None:
     assert "rating (calculated)" in format_tags_consulted(result.consulted)
 
 
+def test_explicit_calculated_tags_are_traced() -> None:
+    result = trace(
+        "*rating >= 4\n*duration >= 1m",
+        {"rating": 100, "fmps_rating": ["0.8"], "duration": 90},
+    )
+    assert result.passed is True
+    output = format_file_trace(result)
+    assert "calculated rating = 4.0 (from fmps_rating)" in output
+    assert "*duration >= 1m (60s)" in output
+    assert "calculated duration = 90" in output
+
+
 def test_case_sensitivity_and_actual_key_casing() -> None:
     result = trace("@CASE artist = X\n", {"Artist": "X"})
 

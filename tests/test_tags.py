@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 from pytest import approx
-from tinytag import TinyTagException
+from tinytag import TinyTag, TinyTagException
 
 from genplis.output import Output, Palette, Theme
 from genplis.tags import (
@@ -35,6 +35,30 @@ def _patch_tinytag(monkeypatch: pytest.MonkeyPatch, raw_tags: Tags) -> None:
         "genplis.tags.TinyTag.get",
         lambda _path: _FakeTinyTag(raw_tags),
     )
+
+
+@pytest.mark.parametrize("ignored", [False, True])
+def test_parse_preserves_calculated_property_on_embedded_collision(
+    monkeypatch: pytest.MonkeyPatch, ignored: bool
+) -> None:
+    audio = TinyTag()
+    audio.duration = 90
+    audio.other["duration"] = ["1000"]
+    monkeypatch.setattr("genplis.tags.TinyTag.is_supported", lambda _path: True)
+    monkeypatch.setattr("genplis.tags.TinyTag.get", lambda _path: audio)
+
+    tags, _ = parse_tags(
+        Path("song.flac"), ignore=frozenset({"duration"}) if ignored else frozenset()
+    )
+    assert tags is not None
+    if ignored:
+        assert "duration" not in tags
+        assert "*duration" not in tags
+        assert "*duration" not in get_audio_property_tags(tags)
+    else:
+        assert tags["duration"] == ["1000"]
+        assert tags["*duration"] == 90
+        assert get_audio_property_tags(tags)["*duration"] == 90
 
 
 def test_get_tags_mp3(file_mp3: Path) -> None:

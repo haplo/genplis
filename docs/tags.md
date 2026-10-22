@@ -31,9 +31,11 @@ Parsed tags:
     track = ['2']
 ```
 
-The `*` marks a calculated value; **leave it off in filters**. Write
-`duration >= 1m`, not `*duration >= 1m`. Brackets show a list of tag values,
-even when there is only one.
+The `*` marks a calculated value and can be used in filters: write
+`*duration >= 1m` to explicitly select the calculated playing time.
+Unprefixed names such as `duration` still work, but an embedded tag with the
+same name takes precedence. Brackets show a list of tag values, even when
+there is only one.
 
 Add `--verbose` for diagnostics about skipped files or discarded tags when
 they are parsed. For collection-wide commands, see
@@ -71,8 +73,10 @@ not the labels in your music player's interface. For example, `year` and
 
 ## Calculated audio properties
 
-These properties don't require embedded metadata. The table uses their
-filter names, without the display-only `*` prefix.
+These properties don't require embedded metadata. Prefix any name below with
+`*` in a rule, sort key, dedupe key, or per-tag limit to force the calculated
+value, even if an embedded tag has the same name. Unprefixed names remain
+supported.
 
 | Name | Meaning | Unit / type |
 | --- | --- | --- |
@@ -94,7 +98,7 @@ samplerate >= 44100
 is_lossless = true
 ```
 
-`duration` also accepts [duration literals](m3ug.md#duration-literals) such
+Both `duration` and `*duration` accept [duration literals](m3ug.md#duration-literals) such
 as `10m` or `1:30`. Use `= true` or `= false` for `is_lossless`, not text
 operators such as `~`.
 
@@ -106,8 +110,8 @@ it may be relative if the file was read using a relative path. Sorting by
 ## Using tags in rules
 
 - **Tag names ignore case:** `Artist` and `artist` are the same. Names have
-  no wildcards; use the spelling from inspection, such as `albumartist` or
-  `original_year`.
+  no wildcards; a leading `*` selects a calculated value, not a wildcard match.
+  Use the spelling from inspection, such as `albumartist` or `original_year`.
 - **Text values ignore case by default:** `genre = metal` matches `Metal`.
   Add `@CASE` to a rule when case matters.
 - **Numbers in rules should be unquoted:** `track = 7` matches a tag stored
@@ -134,23 +138,22 @@ value; see [Ordering](m3ug.md#ordering).
 
 ## Rating
 
-**Check your rating scale before using a rating filter.** Music players may
-store ratings on a 0–5, 0–100, or 0–255 scale. Genplis chooses the value as
-follows:
+**Use `*rating` for a normalized 0–5 rating**, for example:
 
-| Available tags | Value used by `rating` rules | Displayed as |
-| --- | --- | --- |
-| `rating` is present | The raw value, **without rescaling**, even if `fmps_rating` also exists | `rating` |
-| No `rating`, but a numeric `fmps_rating` | `fmps_rating × 5`, converting the usual 0.0–1.0 scale to 0–5 | `*rating` |
-| Neither usable source | Missing; `rating >= 4` does not match | Not listed |
+```text
+*rating >= 4
+@SORT *rating desc, artist, album, track
+```
 
-For a 0–5 scale, use `rating >= 4` for four stars or better. For a 0–100
-scale, choose an appropriate threshold such as `rating >= 80` instead.
-In either case the filter name is `rating`, never `*rating`.
+Each music player stores ratings in a different way, as there is no real
+standard. Some use 0-1 range, others 0-5, 0-100, 0-255... Genplis calculates
+`*rating` from a variety of tags, normalizing their range to a scale of 0–5
+stars (with decimals). If you have files with ratings that genplis does not
+recognize, please [open an issue](https://github.com/haplo/genplis/issues)!
 
-A non-numeric `fmps_rating` produces no calculated rating. Ignoring the raw
-`rating` tag still allows the fallback; ignore both `rating` and `fmps_rating`
-to hide ratings entirely. See [Ignored tags](config.md#ignore).
+If you know exactly which rating tag your files use, you can just use it
+instead of `*rating`, just be aware of the range. Use `--tag <tag-name>`
+to see all the values in your collection and infer the range.
 
 ## Reading tag statistics
 
@@ -175,7 +178,8 @@ values. A requested tag that isn't found prints a message, not an error.
 
 Tag names are case-insensitive. `-t rating` shows both embedded `rating` and
 calculated `*rating` when present; use `-t '*rating'` for only the calculated
-form. This `*` selects a report category, not a filter name or wildcard.
+form. As in filters, this `*` explicitly selects the calculated value; it is
+not a wildcard.
 
 Reports use the same tag settings as filters and update the cache without
 writing playlists.

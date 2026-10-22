@@ -37,6 +37,18 @@ def test_full_tag_names_includes_calculated_form() -> None:
     )
 
 
+def test_audio_property_collision_reports_both_values() -> None:
+    collector = TagStatsCollector(full_tags={"duration", "*duration"})
+    collector.record_file({"duration": ["1000"], "*duration": 90}, {"*duration": 90})
+    report = collector.report()
+    assert [(stat.name, stat.values) for stat in report.embedded] == [
+        ("duration", (TagValueStat("1000", 1),))
+    ]
+    assert [(stat.name, stat.values) for stat in report.calculated] == [
+        ("*duration", (TagValueStat("90", 1),))
+    ]
+
+
 def test_collector_counts_files_and_deduplicates_values_per_file() -> None:
     collector = TagStatsCollector(full_tags={"genre"})
     collector.record_file(

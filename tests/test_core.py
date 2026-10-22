@@ -311,9 +311,9 @@ def test_get_calculated_tags_omits_missing_rating() -> None:
     assert get_calculated_tags({"title": ["Test"]}) == {}
 
 
-def test_get_calculated_tags_omits_rating_when_raw_rating_exists() -> None:
+def test_get_calculated_tags_includes_rating_when_raw_rating_exists() -> None:
     tags = {"rating": 4, "fmps_rating": ["0.8"]}
-    assert get_calculated_tags(tags) == {}
+    assert get_calculated_tags(tags) == {"*rating": 4.0}
 
 
 def test_get_calculated_tags_adds_audio_properties() -> None:
@@ -359,7 +359,7 @@ def test_process_path_prints_calculated_rating(
     assert "    *rating = 4.0" in capsys.readouterr().out
 
 
-def test_process_path_omits_calculated_rating_when_raw_rating_exists(
+def test_process_path_prints_calculated_rating_when_raw_rating_exists(
     genplis_db: sqlite3.Connection,
     make_args: Callable[..., Args],
     file_mp3: Path,
@@ -375,7 +375,7 @@ def test_process_path_omits_calculated_rating_when_raw_rating_exists(
 
     output = capsys.readouterr().out
     assert "    rating = 4" in output
-    assert "*rating" not in output
+    assert "    *rating = 4.0" in output
 
 
 def test_process_path_stars_audio_properties(
