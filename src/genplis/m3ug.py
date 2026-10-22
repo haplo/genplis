@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import logging
+import math
 import re
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import ClassVar, Literal, Protocol, Self, TypeGuard
@@ -128,8 +129,13 @@ class EvaluationTags(Mapping[str, TagValue]):
     case-insensitive lookups and rule normalization are cached separately.
     """
 
-    def __init__(self, tags: Mapping[str, TagValue]) -> None:
+    def __init__(
+        self,
+        tags: Mapping[str, TagValue],
+        predicates: PredicateCache | None = None,
+    ) -> None:
         self._tags = tags
+        self._predicates = predicates
         self._index: dict[str, tuple[str, TagValue]] | None = None
         self._found: dict[str, tuple[str, TagValue]] = {}
         self._normalized: dict[str, tuple[str, TagValue]] = {}
@@ -648,6 +654,7 @@ class RuleNode:
     ) -> None:
         self.name_node = name
         self.value_node = value
+        self._cacheable_values = type(name) is NameNode and type(value) is ValueNode
         self.case_sensitive = case_sensitive
         self._warning_state = warning_state if warning_state is not None else [False]
         self.source = source
@@ -719,11 +726,15 @@ class RuleNode:
             ) from exc
 
     def apply(self, tags: Mapping[str, TagValue]) -> bool:
-        if isinstance(tags, EvaluationTags):
+        if isinstance(tags, EvaluationTags) and self._cacheable_values:
             tag_name, tag_value = tags._normalize(self.name_node.name)
-        else:
-            tag_name, raw_value = self.name_node.find(tags)
-            tag_value = self.value_node.normalize(raw_value)
+            if self.IS_TEXT and _has_boolean(tag_value):
+                self._warn_boolean(tag_name)
+            if tags._predicates is not None:
+                return tags._predicates.check(self, tag_value)
+            return self.check(tag_value)
+        tag_name, raw_value = self.name_node.find(tags)
+        tag_value = self.value_node.normalize(raw_value)
         if self.IS_TEXT and _has_boolean(tag_value):
             self._warn_boolean(tag_name)
         return self.check(tag_value)
@@ -1115,6 +1126,98 @@ class M3UGFile:
     def rules(self) -> tuple[RuleNode, ...]:
         """Return the leaf rules, flattened for diagnostics and tests."""
         return _leaf_rules(self.expression)
+
+
+type _PredicateKey = tuple[type[RuleNode], str, type[object], RuleValue, bool]
+type _PredicateValue = tuple[
+    type[object], str | float | int | bool | tuple[str, ...] | None
+]
+
+_CACHEABLE_RULE_TYPES = (
+    EqualRuleNode,
+    NotEqualRuleNode,
+    ContainsRuleNode,
+    StartsWithRuleNode,
+    EndsWithRuleNode,
+    RegexRuleNode,
+    LesserRuleNode,
+    LesserOrEqualRuleNode,
+    GreaterRuleNode,
+    GreaterOrEqualRuleNode,
+)
+
+
+class PredicateCache:
+    """Share bounded, pure built-in rule comparisons in one scan.
+
+    The total entry budget is divided among distinct predicates, capped per
+    predicate. Once full, a cache keeps its existing values and evaluates new
+    ones normally. Keys larger than 256 characters and non-finite numbers are
+    never retained. Discard the cache when the scan's rules change.
+    """
+
+    def __init__(
+        self,
+        expressions: Iterable[FilterNode | None],
+        *,
+        max_entries: int = 16384,
+        max_per_predicate: int = 1024,
+    ) -> None:
+        if max_entries < 0 or max_per_predicate < 0:
+            raise ValueError("predicate cache limits must be non-negative")
+        shared: dict[_PredicateKey, dict[_PredicateValue, bool]] = {}
+        self._by_rule: dict[int, dict[_PredicateValue, bool]] = {}
+        # Keep registered nodes alive so their ids cannot be recycled while
+        # this cache is in use, even if the caller releases its expression.
+        self._rules: list[RuleNode] = []
+        for expression in expressions:
+            for rule in _leaf_rules(expression):
+                if (
+                    type(rule) not in _CACHEABLE_RULE_TYPES
+                    or not rule._cacheable_values
+                ):
+                    continue
+                expected = rule.value_node.value
+                key = (
+                    type(rule),
+                    rule.name_node.name.lower(),
+                    type(expected),
+                    expected,
+                    rule.case_sensitive,
+                )
+                self._by_rule[id(rule)] = shared.setdefault(key, {})
+                self._rules.append(rule)
+        self._limit = (
+            min(max_per_predicate, max_entries // len(shared)) if shared else 0
+        )
+
+    def check(self, rule: RuleNode, value: TagValue) -> bool:
+        """Return a comparison result without caching lookups or warnings."""
+        cache = self._by_rule.get(id(rule))
+        if cache is None or self._limit == 0:
+            return rule.check(value)
+        if isinstance(value, str):
+            if len(value) > 256:
+                return rule.check(value)
+        elif isinstance(value, list):
+            if (
+                len(value) > 256
+                or any(not isinstance(item, str) for item in value)
+                or sum(len(item) for item in value) > 256
+            ):
+                return rule.check(value)
+        elif isinstance(value, float):
+            if not math.isfinite(value):
+                return rule.check(value)
+        elif isinstance(value, int) and value.bit_length() > 256:
+            return rule.check(value)
+        key = type(value), tuple(value) if isinstance(value, list) else value
+        result = cache.get(key)
+        if result is None:
+            result = rule.check(value)
+            if len(cache) < self._limit:
+                cache[key] = result
+        return result
 
 
 def _parse_sort_directive(raw_value: str, filename: str, line: int) -> SortSpec:

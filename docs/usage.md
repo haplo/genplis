@@ -109,8 +109,11 @@ file from outside the scan root, but it only adds rules and defaults.
 
 During filtering, each song's tag lookups, calculated rating, and rule-value
 normalization are reused across filters. This also applies to cached songs;
-the temporary values are released after that song has been processed. No
-extra configuration or cache rebuild is needed.
+the per-song lookup view is released after that song has been processed.
+Comparisons also reuse results for repeated tag values across songs and
+equivalent rules. This in-memory cache is bounded and discarded at the end
+of each scan; it does not retain every song's tags. No extra configuration
+or cache rebuild is needed.
 
 To regenerate only one filter, name it with `--filter`; the scan root is still
 `PATH` (or the configured collection):

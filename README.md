@@ -54,8 +54,8 @@ Genplis reads the tags of every supported audio file, caches them in SQLite,
 applies the filter, and writes `~/Music/Favorites.m3u` if anything matched.
 Later runs only re-read files that changed. Large cold scans parse files in
 parallel by default; see [Parallel parsing](https://github.com/haplo/genplis/blob/main/docs/usage.md#parallel-parsing)
-for `--jobs`. Filtering also reuses each song's tag lookups and calculated
-rating across playlists; see [What a run does](https://github.com/haplo/genplis/blob/main/docs/usage.md#what-a-run-does).
+for `--jobs`. Filtering reuses tag lookups and bounded comparison results
+across playlists and songs; see [What a run does](https://github.com/haplo/genplis/blob/main/docs/usage.md#what-a-run-does).
 
 To regenerate just one playlist without processing the other filters in the
 collection, select the filter with `--filter`:

@@ -41,6 +41,7 @@ from .m3ug import (
     LimitPerTag,
     M3UGFile,
     NameNode,
+    PredicateCache,
     get_rating,
     parse_m3ug,
 )
@@ -1410,9 +1411,10 @@ def _record_matches(
     *,
     extended: bool,
     default_sort: SortSpec,
+    predicate_cache: PredicateCache | None = None,
 ) -> None:
     """Add a file to every filter it matches, with its effective sort keys."""
-    evaluation_tags = EvaluationTags(tags)
+    evaluation_tags = EvaluationTags(tags, predicate_cache)
     entry: Path | PlaylistEntry | None = None
     spec_cache: dict[SortSpec, SortValues] = {}
     dedupe_cache: dict[tuple[str, ...], SortValues] = {}
@@ -1524,6 +1526,9 @@ def process_directory(
                 )
     else:
         all_filters = dict(filters)
+    predicate_cache = PredicateCache(
+        parsed.expression for parsed in all_filters.values() if not parsed.no_playlist
+    )
     matches: dict[Path, list[Match]] = {filter_file: [] for filter_file in all_filters}
     retained: dict[int, tuple[Path, Tags]] | None = {} if retain_tags else None
     processed = 0
@@ -1547,6 +1552,7 @@ def process_directory(
             tags,
             extended=args.extended_m3u,
             default_sort=args.config.output.sort,
+            predicate_cache=predicate_cache,
         )
 
     try:

@@ -101,6 +101,25 @@ discarded after each song, so they do not retain the collection's tags.
 Standalone rule evaluation and diagnostic traces still accept ordinary tag
 mappings and preserve the uncached evaluation path.
 
+`m3ug.PredicateCache` is created once per directory scan and shared by its
+`EvaluationTags` views. Equivalent built-in leaf rules share comparison
+results, keyed by the type and normalized value of the tag. Predicate identity
+includes the rule class, tag name, expected value and its type, and case
+sensitivity, so booleans, numbers, quoted strings, and `@CASE` rules cannot
+collide. Lists use immutable tuple keys. Custom rule checks, name lookup, and
+value normalization are not memoized as built-in comparisons. Normal rule
+short-circuiting and each source's boolean-warning state still run normally;
+trace rendering continues to evaluate the raw tags independently.
+
+The cache divides a 16,384-result budget among distinct predicates, with at
+most 1,024 results each. Full caches keep their existing results and evaluate
+new values without storing them. Strings over 256 characters, lists with more
+than 256 items or 256 characters in total, integers over 256 bits, non-finite
+numbers, and non-string lists bypass memoization. These admission limits also
+bound retained key sizes when `[tags] max_size = 0`. No song mappings are held
+by the comparison cache; selected scalar values and tuple keys may live until
+the scan ends. Nothing persists between scans or changes the SQLite schema.
+
 Every rule carries a `SourceLocation` and every value keeps its original
 literal token. `M3UGFile` stores both the merged `expression` and the file's
 `own_expression`, plus an ordered tuple of `IncludeInfo` records with the raw
