@@ -30,6 +30,14 @@ NUMERIC_OPERATORS = frozenset({"<", "<=", ">", ">="})
 OPERATORS = EQUALITY_OPERATORS | TEXT_OPERATORS | NUMERIC_OPERATORS
 
 
+@dataclass(frozen=True, slots=True)
+class SourceLocation:
+    """The file and line that produced a parsed filter rule."""
+
+    filename: str
+    line: int
+
+
 def is_number(value: object) -> TypeGuard[int | float]:
     return isinstance(value, int | float) and not isinstance(value, bool)
 
@@ -295,6 +303,7 @@ def _build_rule_set(
 ) -> FilterNode:
     """Build existentially or universally quantified rules for a set."""
     warning_state = [False]
+    source = SourceLocation(filename, line)
     leaves = tuple(
         RuleNode.build(
             operator,
@@ -304,6 +313,7 @@ def _build_rule_set(
             line,
             case_sensitive,
             warning_state=warning_state,
+            source=source,
         )
         for name in names
         for value in values
@@ -417,8 +427,9 @@ class NameNode:
 
 
 class ValueNode:
-    def __init__(self, value: RuleValue) -> None:
+    def __init__(self, value: RuleValue, literal: str | None = None) -> None:
         self.value = value
+        self.literal = literal
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, ValueNode):
@@ -451,27 +462,28 @@ class ValueNode:
             raise GenplisM3UGException(f"Invalid value: {value}", filename, line)
 
         value = value.strip()
+        literal = value
         # quoted values are always literal strings, even if they look numeric
         if _is_quoted(value):
-            return cls(_unescape_quoted(value[1:-1]))
+            return cls(_unescape_quoted(value[1:-1]), literal)
 
         if mode == "text":
-            return cls(value)
+            return cls(value, literal)
 
         if allow_duration:
             duration = parse_duration_literal(value)
             if duration is not None:
-                return cls(duration)
+                return cls(duration, literal)
 
         if value == "true":
-            return cls(True)
+            return cls(True, literal)
         if value == "false":
-            return cls(False)
+            return cls(False, literal)
         if FLOAT_RE.match(value):
-            return cls(float(value))
+            return cls(float(value), literal)
         if INT_RE.match(value):
-            return cls(int(value))
-        return cls(value)
+            return cls(int(value), literal)
+        return cls(value, literal)
 
     def normalize(self, raw: TagValue) -> TagValue:
         return normalize(raw)
@@ -503,11 +515,13 @@ class RuleNode:
         case_sensitive: bool = False,
         *,
         warning_state: list[bool] | None = None,
+        source: SourceLocation | None = None,
     ) -> None:
         self.name_node = name
         self.value_node = value
         self.case_sensitive = case_sensitive
         self._warning_state = warning_state if warning_state is not None else [False]
+        self.source = source
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, RuleNode):
@@ -537,6 +551,7 @@ class RuleNode:
         case_sensitive: bool = False,
         *,
         warning_state: list[bool] | None = None,
+        source: SourceLocation | None = None,
     ) -> RuleNode:
         rule_cls: type[RuleNode]
         if operator == "=":
@@ -565,7 +580,13 @@ class RuleNode:
             )
         rule_cls.check_params(name, value, filename, line)
         try:
-            return rule_cls(name, value, case_sensitive, warning_state=warning_state)
+            return rule_cls(
+                name,
+                value,
+                case_sensitive,
+                warning_state=warning_state,
+                source=source,
+            )
         except re.error as exc:
             raise GenplisM3UGException(
                 f"Invalid regular expression: {exc}", filename, line
@@ -734,8 +755,15 @@ class RegexRuleNode(RuleNode):
         case_sensitive: bool = False,
         *,
         warning_state: list[bool] | None = None,
+        source: SourceLocation | None = None,
     ) -> None:
-        super().__init__(name, value, case_sensitive, warning_state=warning_state)
+        super().__init__(
+            name,
+            value,
+            case_sensitive,
+            warning_state=warning_state,
+            source=source,
+        )
         pattern = value.text()
         if pattern is None:
             raise re.error("regular expression needs a string value")
@@ -927,10 +955,23 @@ def _merge_directives(base: Directives, override: Directives) -> Directives:
 
 
 @dataclass(frozen=True, slots=True)
+class IncludeInfo:
+    """One ``@INCLUDE`` directive and the file it resolved to."""
+
+    raw_path: str
+    path: Path
+    line: int
+    file: M3UGFile
+
+
+@dataclass(frozen=True, slots=True)
 class M3UGFile:
     """A parsed M3UG file: a filter expression and playlist settings."""
 
+    filename: str | None
     expression: FilterNode | None
+    own_expression: FilterNode | None
+    includes: tuple[IncludeInfo, ...]
     sort: SortSpec | None = None
     limit: int | None = None
     limit_per: LimitPerTag | None = None
@@ -1049,7 +1090,7 @@ def _parse_m3ug_file(
     own_no_playlist = False
     no_playlist_seen = False
     included_directives: list[Directives] = []
-    included_expressions: list[FilterNode | None] = []
+    includes: list[IncludeInfo] = []
 
     if verbosity.is_verbose:
         print(f"Parsing M3UG file {filename}:")
@@ -1283,7 +1324,14 @@ def _parse_m3ug_file(
                     depth + 1,
                 )
                 included_directives.append(included_directive_values)
-                included_expressions.append(included_file.expression)
+                includes.append(
+                    IncludeInfo(
+                        raw_path=raw_path,
+                        path=resolved,
+                        line=n,
+                        file=included_file,
+                    )
+                )
                 if verbosity.is_verbose:
                     print(f"Included {included_target}")
                 is_directive = True
@@ -1372,8 +1420,10 @@ def _parse_m3ug_file(
         merged = _merge_directives(merged, included)
     merged = _merge_directives(merged, own_directives)
 
-    if included_expressions:
-        expression = _and_expressions([*included_expressions, own_expression])
+    if includes:
+        expression = _and_expressions(
+            [*(include.file.expression for include in includes), own_expression]
+        )
     else:
         expression = own_expression
     if verbosity.is_verbose:
@@ -1382,7 +1432,10 @@ def _parse_m3ug_file(
         print()
 
     parsed = M3UGFile(
+        filename=filename,
         expression=expression,
+        own_expression=own_expression,
+        includes=tuple(includes),
         sort=None if isinstance(merged.sort, _Unset) else merged.sort,
         limit=None if isinstance(merged.limit, _Unset) else merged.limit,
         limit_per=(None if isinstance(merged.limit_per, _Unset) else merged.limit_per),

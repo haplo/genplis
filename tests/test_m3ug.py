@@ -19,6 +19,7 @@ from genplis.m3ug import (
     OrNode,
     RegexRuleNode,
     RuleNode,
+    SourceLocation,
     StartsWithRuleNode,
     ValueNode,
     format_expression,
@@ -74,6 +75,112 @@ def test_quoted_numeric_value_is_string() -> None:
         EqualRuleNode(NameNode("rating"), ValueNode("4")),
     ]
     assert not rules[0].apply({"rating": 4})
+
+
+def test_value_literals_preserve_the_source_token() -> None:
+    assert parse_rules('rating = "4"')[0].value_node == ValueNode("4")
+    assert parse_rules('rating = "4"')[0].value_node.literal == '"4"'
+    assert parse_rules("rating = 4")[0].value_node == ValueNode(4)
+    assert parse_rules("rating = 4")[0].value_node.literal == "4"
+
+    string_boolean = parse_rules('is_lossless = "true"')[0].value_node
+    boolean = parse_rules("is_lossless = true")[0].value_node
+    assert string_boolean == ValueNode("true")
+    assert string_boolean.literal == '"true"'
+    assert boolean == ValueNode(True)
+    assert boolean.literal == "true"
+
+
+def test_duration_literals_keep_their_source_token() -> None:
+    value = parse_rules("duration >= 10m")[0].value_node
+    assert value == ValueNode(600)
+    assert value.literal == "10m"
+
+
+def test_rules_record_their_source_file_and_line() -> None:
+    parsed = parse_m3ug(
+        "# comment\n\n[genre | style] = [Metal | Rock]\n",
+        "Favorites.m3ug",
+    )
+
+    assert len(parsed.rules) == 4
+    for rule in parsed.rules:
+        assert rule.source is not None
+        assert rule.source.filename == "Favorites.m3ug"
+        assert rule.source.line == 3
+
+
+def test_includes_record_raw_and_resolved_paths(tmp_path: Path) -> None:
+    deepest = tmp_path / "Deepest.m3ug"
+    middle = tmp_path / "Middle.m3ug"
+    main = tmp_path / "Main.m3ug"
+    deepest.write_text("genre = Metal\n", encoding="utf-8")
+    middle.write_text('@INCLUDE "Deepest.m3ug"\nrating >= 4\n', encoding="utf-8")
+    main.write_text('@INCLUDE "Middle.m3ug"\nartist = X\n', encoding="utf-8")
+
+    parsed = parse_m3ug(main.read_text(), str(main))
+
+    assert parsed.filename == str(main)
+    assert len(parsed.includes) == 1
+    middle_include = parsed.includes[0]
+    assert middle_include.raw_path == '"Middle.m3ug"'
+    assert middle_include.path == middle.resolve()
+    assert middle_include.line == 1
+    assert middle_include.file.filename == str(middle)
+    assert middle_include.file.own_expression is not None
+    assert len(middle_include.file.includes) == 1
+    deepest_include = middle_include.file.includes[0]
+    assert deepest_include.raw_path == '"Deepest.m3ug"'
+    assert deepest_include.path == deepest.resolve()
+    assert deepest_include.line == 1
+    assert deepest_include.file.filename == str(deepest)
+    assert deepest_include.file.own_expression is not None
+    assert deepest_include.file.includes == ()
+    assert middle_include.file.rules[0].source == SourceLocation(str(deepest), 1)
+
+
+def test_include_metadata_uses_the_inferred_extension(tmp_path: Path) -> None:
+    base = tmp_path / "Base.m3ug"
+    main = tmp_path / "Main.m3ug"
+    base.write_text("genre = Metal\n", encoding="utf-8")
+    main.write_text("@INCLUDE Base\n", encoding="utf-8")
+
+    parsed = parse_m3ug(main.read_text(), str(main))
+
+    assert len(parsed.includes) == 1
+    include = parsed.includes[0]
+    assert include.raw_path == "Base"
+    assert include.path == base.resolve()
+    assert include.file.filename == str(base)
+
+
+def test_directive_only_include_has_no_expression(tmp_path: Path) -> None:
+    base = tmp_path / "Base.m3ug"
+    main = tmp_path / "Main.m3ug"
+    base.write_text("@SORT artist\n@LIMIT 2\n", encoding="utf-8")
+    main.write_text("@INCLUDE Base.m3ug\ngenre = Metal\n", encoding="utf-8")
+
+    parsed = parse_m3ug(main.read_text(), str(main))
+
+    assert len(parsed.includes) == 1
+    include = parsed.includes[0]
+    assert include.file.expression is None
+    assert include.file.own_expression is None
+    assert include.file.sort == (SortKey("artist"),)
+    assert include.file.limit == 2
+    assert parsed.own_expression is not None
+    assert parsed.rules == (EqualRuleNode(NameNode("genre"), ValueNode("Metal")),)
+
+
+def test_metadata_does_not_affect_equality() -> None:
+    assert ValueNode(4, "4") == ValueNode(4)
+    first = EqualRuleNode(
+        NameNode("artist"),
+        ValueNode("X", '"X"'),
+        source=SourceLocation("one.m3ug", 1),
+    )
+    second = EqualRuleNode(NameNode("artist"), ValueNode("X"), source=None)
+    assert first == second
 
 
 def test_equal_rule_float_value() -> None:

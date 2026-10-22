@@ -1739,7 +1739,14 @@ def test_empty_filter_includes_tagless_music_file(
     )
 
     assert all_tags == {song: {}}
-    assert all_filters == {filter_file: M3UGFile(None)}
+    assert all_filters == {
+        filter_file: M3UGFile(
+            filename=str(filter_file),
+            expression=None,
+            own_expression=None,
+            includes=(),
+        )
+    }
     playlist = filter_file.with_suffix(".m3u")
     assert song.name in playlist.read_text(encoding="utf-8").splitlines()
 
