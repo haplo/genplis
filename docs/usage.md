@@ -24,11 +24,16 @@ that `PATH` is required.
 | `-e REGEX`, `--exclude REGEX` | Skip files and folders whose path matches this regular expression. May be repeated. **Replaces** the config file's `exclude` list entirely. |
 | `--config FILE` | Read settings from this file instead of the XDG default. |
 | `--no-config` | Ignore all configuration files. |
-| `-v`, `--verbose`, `--no-verbose` | Print diagnostics: config and database paths, skipped files, parsed rules, matching songs. |
+| `-v`, `--verbose`, `--no-verbose` | Print diagnostics: config and database paths, skipped files, rule trees, matching songs. |
 | `-q`, `--quiet` | Reduce output. Once prints only filter match counts and playlist creation; twice (`-qq`) prints nothing except errors. Cannot be combined with `--verbose`. |
+| `--color`, `--no-color` | Force colored output on or off. By default color follows the terminal and the config file. |
+| `--theme THEME` | Color theme: `auto` (default), `dark`, or `light`. `auto` uses `COLORFGBG` when available and otherwise assumes a dark terminal. |
 | `--db PATH` | Use this SQLite database instead of the default cache location. |
 | `-j N`, `--jobs N` | Parse cache misses with `N` worker processes. `0` uses one worker per CPU, capped at eight; `1` disables the process pool. Default is `0`. |
 | `--clean` | Remove cache entries for files that no longer exist. See [Cleaning the cache](#cleaning-the-cache). |
+| `--show-rules` | Parse `PATH` (a `.m3ug` file or directory) and print the rule trees. No cache, audio scan, or playlists. |
+| `--trace SONG` | Evaluate the filters selected by `PATH` for one audio file and print an annotated trace. No playlists. |
+| `--trace-full SONG` | Like `--trace`, plus an exact dry-run simulation of playlist selection. No playlists. |
 | `--tag-stats` | Show every tag found in the collection with file counts. No playlists are written. |
 | `-t TAG`, `--tag TAG` | Show every distinct value of `TAG` with file counts. Implies `--tag-stats` and may be repeated. |
 | `--overwrite`, `--no-overwrite` | Whether to replace an existing generated playlist. |
@@ -38,6 +43,17 @@ that `PATH` is required.
 
 Every option with an on/off form overrides the corresponding config setting.
 `--config` and `--no-config` are mutually exclusive.
+
+`--show-rules`, `--trace`, `--trace-full`, `--clean`, and `--tag-stats` are
+mutually exclusive modes. `--trace SONG` and `--trace-full SONG` use `PATH` as
+the filter file or directory and take the audio file as their option value.
+`--tag` cannot be combined with `--show-rules`, `--trace`, `--trace-full`, or
+`--clean`.
+
+None of the debugging modes writes a playlist. `--show-rules` opens no cache
+database and scans no audio. `--trace` loads only `SONG` through the tag cache,
+so it may add or refresh that one cache row. `--trace-full` may scan the filter
+directory and update cache rows normally while it simulates selection.
 
 ## PATH and the config file
 
@@ -125,11 +141,13 @@ Filter names do **not** include the `*`.
 uv run genplis /path/to/Favorites.m3ug
 ```
 
-This prints the parsed rules and, when present, the `@sort` keys. It then
-scans the file's directory for audio files using only this filter, so
-`Favorites.m3ug` produces its `Favorites.m3u` without processing any other
-`.m3ug` files in that tree. A file marked `@NO-PLAYLIST` is still parsed and
-may satisfy includes, but no playlist is written for it.
+This prints the rule tree, including inline `@INCLUDE` nodes and the effective
+directives. It then scans the file's directory for audio files using only this
+filter, so `Favorites.m3ug` produces its `Favorites.m3u` without processing any
+other `.m3ug` files in that tree. A file marked `@NO-PLAYLIST` is still parsed
+and may satisfy includes, but no playlist is written for it. To inspect the
+tree without scanning audio or writing a playlist, use
+`genplis --show-rules Favorites.m3ug`.
 
 Both forms also warn when the file matches the current exclude configuration.
 
@@ -212,6 +230,33 @@ requested tag that does not exist prints a message and is not an error. Tag
 names are case-insensitive. Use `-t '*rating'` to select only the calculated
 rating; `-t rating` shows both the embedded `rating` and the calculated
 `*rating` when both are present.
+
+### Debugging filters
+
+```bash
+uv run genplis --show-rules Favorites.m3ug
+uv run genplis --show-rules ~/Music
+uv run genplis --trace song.mp3 Favorites.m3ug
+uv run genplis --trace-full song.mp3 Favorites.m3ug
+```
+
+- `--show-rules` parses one `.m3ug` path, or every non-excluded `.m3ug` file
+  under a directory, and prints the rule trees. It does not open the cache,
+  read audio, or write playlists. An audio path is an error.
+- `--trace` prints the evaluation tree for one audio file: `PASS`, `FAIL`, and
+  `SKIP` nodes, the tags consulted, playlist inputs, and the final match
+  result. It loads the target through the normal cache path, so that one file
+  may be parsed or refreshed. It never writes a playlist.
+- `--trace-full` adds the deterministic selection result for every filter:
+  sorted position, dedupe winner, cap failures, and the final playlist
+  position. It may scan the filter directory and update the cache like a
+  normal run, but it writes no playlists. Use it when count or duration caps
+  make the ordinary trace report `selection: not simulated`.
+- `-q` keeps the requested tree or trace and suppresses progress chatter.
+  `-qq` suppresses all normal output. Errors still go to standard error.
+
+See [Testing and debugging filters](https://github.com/haplo/genplis/blob/main/docs/m3ug.md#testing-and-debugging-filters)
+for annotated examples.
 
 ## Generated playlists
 
@@ -306,8 +351,8 @@ genplis prints that there is nothing to clean and exits.
 
 Normal runs print per-file cache updates, a line for each filter file with its
 match count, and a final summary. `--verbose` adds config/database paths,
-exclusion decisions, parsed rules, the effective sort order, and the list of
-matching songs. M3UG rule diagnostics are printed while filters are discovered,
+exclusion decisions, rule trees, the effective sort order, and the list of
+matching songs. M3UG rule trees are printed while filters are discovered,
 before audio processing.
 With `--jobs 1`, audio diagnostics follow the walk order. With `--jobs` greater
 than 1, diagnostics for cache misses and cache updates are printed after the
@@ -319,6 +364,16 @@ output, so scheduled runs stay silent; errors are still printed to standard
 error. `-q` and `-v` cannot be used together on the command line; the same
 applies to `verbose = true` and `quiet = true` in the config file. A
 command-line verbosity flag overrides the configured one.
+
+Colored output is enabled automatically for interactive terminals. Set
+`NO_COLOR` to disable it, or use `--color`/`--no-color` to override automatic
+detection. `FORCE_COLOR=1` also forces color when output is redirected.
+`--theme dark` and `--theme light` choose colors for the terminal
+background; the default `auto` reads the last field of `COLORFGBG` when the
+terminal provides it and otherwise assumes dark. The `[general] color` and
+`theme` settings provide the same controls in the config file. Piped output is
+plain unless color is forced, so logs and generated documentation stay free of
+escape codes.
 
 - An invalid `PATH` (neither a file nor a directory) prints a message to
   standard error and exits with status 1.

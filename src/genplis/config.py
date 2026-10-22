@@ -10,13 +10,14 @@ from typing import Final
 from xdg_base_dirs import xdg_config_home
 
 from .exceptions import GenplisConfigError
+from .output import Theme
 from .sorting import DEFAULT_SORT_SPEC, SortSpec, SortSpecError, parse_sort_spec
 from .tags import DEFAULT_MAX_TAG_SIZE
 
 CONFIG_FILENAME = "config.ini"
 
 _KNOWN_SECTIONS: Final[dict[str, frozenset[str]]] = {
-    "general": frozenset({"verbose", "quiet", "jobs"}),
+    "general": frozenset({"verbose", "quiet", "jobs", "color", "theme"}),
     "collection": frozenset({"path", "exclude"}),
     "tags": frozenset({"max_size", "ignore"}),
     "database": frozenset({"path"}),
@@ -29,6 +30,8 @@ class GeneralConfig:
     verbose: bool = False
     quiet: bool = False
     jobs: int = 0
+    color: bool = True
+    theme: Theme = Theme.AUTO
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,6 +105,8 @@ def load_config(path: Path | None = None) -> Config:
     general_raw = _get_option(parser, sections, "general", "verbose")
     general_quiet_raw = _get_option(parser, sections, "general", "quiet")
     general_jobs_raw = _get_option(parser, sections, "general", "jobs")
+    general_color_raw = _get_option(parser, sections, "general", "color")
+    general_theme_raw = _get_option(parser, sections, "general", "theme")
     collection_path_raw = _get_option(parser, sections, "collection", "path")
     collection_exclude_raw = _get_option(parser, sections, "collection", "exclude")
     tags_max_size_raw = _get_option(parser, sections, "tags", "max_size")
@@ -130,6 +135,16 @@ def load_config(path: Path | None = None) -> Config:
         minimum=0,
         where=_where(config_path, "general", "jobs"),
     )
+    general_color = _parse_bool(
+        general_color_raw,
+        default=True,
+        where=_where(config_path, "general", "color"),
+    )
+    general_theme = _parse_theme(
+        general_theme_raw,
+        default=Theme.AUTO,
+        where=_where(config_path, "general", "theme"),
+    )
     if general_verbose and general_quiet:
         raise GenplisConfigError(
             f"{config_path}: [general] verbose and quiet cannot both be true"
@@ -140,6 +155,8 @@ def load_config(path: Path | None = None) -> Config:
             verbose=general_verbose,
             quiet=general_quiet,
             jobs=general_jobs,
+            color=general_color,
+            theme=general_theme,
         ),
         collection=CollectionConfig(
             path=_parse_path(
@@ -296,6 +313,19 @@ def _parse_sort(raw: str | None, *, default: SortSpec, where: str) -> SortSpec:
         return parse_sort_spec(raw)
     except SortSpecError as exc:
         raise GenplisConfigError(f"{where}: {exc}") from exc
+
+
+def _parse_theme(raw: str | None, *, default: Theme, where: str) -> Theme:
+    if raw is None:
+        return default
+    value = raw.strip().lower()
+    try:
+        return Theme(value)
+    except ValueError as exc:
+        choices = ", ".join(theme.value for theme in Theme)
+        raise GenplisConfigError(
+            f"{where}: expected one of {choices}, got {raw!r}"
+        ) from exc
 
 
 def _parse_patterns(raw: str | None, *, where: str) -> tuple[re.Pattern[str], ...]:

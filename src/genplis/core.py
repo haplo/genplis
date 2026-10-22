@@ -5,7 +5,8 @@ import re
 import sqlite3
 import sys
 from collections.abc import Iterator, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from enum import Enum, auto
 from functools import cmp_to_key
 from pathlib import Path
 from timeit import default_timer as timer
@@ -14,6 +15,18 @@ import psutil
 
 from . import db
 from .config import Config, load_config
+from .diagnostics import (
+    FileTrace,
+    FilterSelectionTrace,
+    PlaylistInput,
+    SelectionTrace,
+    format_file_trace,
+    format_filter_tree,
+    format_playlist_input,
+    format_selection_trace,
+    format_tags_consulted,
+    trace_file,
+)
 from .exceptions import GenplisConfigError, GenplisError
 from .executors import (
     ParseItem,
@@ -27,10 +40,10 @@ from .m3ug import (
     LimitPerTag,
     M3UGFile,
     NameNode,
-    format_expression,
     get_rating,
     parse_m3ug,
 )
+from .output import ColorRole, Output, Theme
 from .sorting import (
     SortSpec,
     SortValue,
@@ -61,6 +74,16 @@ CACHE_STATUS_MESSAGES = {
 COMMIT_EVERY = 128
 
 
+class Mode(Enum):
+    """The primary operation selected on the command line."""
+
+    PROCESS = auto()
+    TAG_STATS = auto()
+    SHOW_RULES = auto()
+    TRACE = auto()
+    TRACE_FULL = auto()
+
+
 @dataclass(frozen=True, slots=True)
 class Args:
     path: Path | None
@@ -74,8 +97,11 @@ class Args:
     clean: bool = False
     config_disabled: bool = False
     jobs: int = 1
-    display_tags: bool = False
+    mode: Mode = Mode.PROCESS
     tags: tuple[str, ...] = ()
+    trace_path: Path | None = None
+    color: bool | None = None
+    theme: Theme = Theme.AUTO
 
 
 @dataclass(frozen=True, slots=True)
@@ -192,6 +218,22 @@ def setup_argparse() -> argparse.ArgumentParser:
         default=0,
     )
     parser.add_argument(
+        "--color",
+        help=(
+            "Force colored output. Use --no-color to disable it; by default "
+            "color follows the terminal and the config file."
+        ),
+        action=argparse.BooleanOptionalAction,
+        default=None,
+    )
+    parser.add_argument(
+        "--theme",
+        help="Color theme for the terminal background",
+        choices=[theme.value for theme in Theme],
+        default=None,
+        metavar="THEME",
+    )
+    parser.add_argument(
         "--db",
         help="Use this database file instead of the XDG cache default",
         type=Path,
@@ -219,8 +261,35 @@ def setup_argparse() -> argparse.ArgumentParser:
         action="store_true",
     )
     mode_group.add_argument(
+        "--show-rules",
+        help=(
+            "Parse .m3ug files and print their rule trees without scanning "
+            "audio or writing playlists."
+        ),
+        action="store_true",
+    )
+    mode_group.add_argument(
+        "--trace",
+        dest="trace_path",
+        type=Path,
+        metavar="SONG",
+        help=(
+            "Trace how every selected filter evaluates SONG. No playlists are written."
+        ),
+    )
+    mode_group.add_argument(
+        "--trace-full",
+        dest="trace_full_path",
+        type=Path,
+        metavar="SONG",
+        help=(
+            "Trace SONG and simulate its exact playlist selection. No "
+            "playlists are written."
+        ),
+    )
+    mode_group.add_argument(
         "--tag-stats",
-        dest="display_tags",
+        dest="tag_stats",
         help=(
             "Show every tag found in the collection with file counts. "
             "No playlists are written."
@@ -295,6 +364,12 @@ def resolve_args(args: argparse.Namespace, config: Config) -> Args:
     """
     if args.clean and args.tags:
         raise GenplisConfigError("--tag cannot be combined with --clean")
+    if args.show_rules and args.tags:
+        raise GenplisConfigError("--tag cannot be combined with --show-rules")
+    if (args.trace_path is not None or args.trace_full_path is not None) and args.tags:
+        raise GenplisConfigError(
+            "--tag cannot be combined with --trace or --trace-full"
+        )
 
     requested_tags: list[str] = []
     for raw_tag in args.tags or ():
@@ -303,7 +378,20 @@ def resolve_args(args: argparse.Namespace, config: Config) -> Args:
             raise GenplisConfigError("tag name must not be empty")
         requested_tags.append(name)
     tags = tuple(dict.fromkeys(requested_tags))
-    display_tags = args.display_tags or bool(tags)
+    raw_trace_path = (
+        args.trace_path if args.trace_path is not None else args.trace_full_path
+    )
+    if args.show_rules:
+        mode = Mode.SHOW_RULES
+    elif args.trace_full_path is not None:
+        mode = Mode.TRACE_FULL
+    elif args.trace_path is not None:
+        mode = Mode.TRACE
+    elif args.tag_stats or tags:
+        mode = Mode.TAG_STATS
+    else:
+        mode = Mode.PROCESS
+    trace_path = raw_trace_path.expanduser() if raw_trace_path is not None else None
 
     if args.path is not None:
         path = args.path
@@ -322,6 +410,12 @@ def resolve_args(args: argparse.Namespace, config: Config) -> Args:
         tuple(args.exclude) if args.exclude is not None else config.collection.exclude
     )
     verbosity = _resolve_verbosity(args, config)
+    color = (
+        args.color
+        if args.color is not None
+        else (None if config.general.color else False)
+    )
+    theme = Theme(args.theme) if args.theme is not None else config.general.theme
     overwrite = (
         args.overwrite if args.overwrite is not None else config.output.overwrite
     )
@@ -352,8 +446,11 @@ def resolve_args(args: argparse.Namespace, config: Config) -> Args:
         clean=args.clean,
         config_disabled=args.no_config,
         jobs=_resolve_jobs(args, config),
-        display_tags=display_tags,
+        mode=mode,
         tags=tags,
+        trace_path=trace_path,
+        color=color,
+        theme=theme,
     )
 
 
@@ -386,8 +483,8 @@ def get_calculated_tags(tags: Mapping[str, TagValue]) -> Tags:
     return calculated
 
 
-def _select_display_tags(
-    display_tags: Mapping[str, TagValue],
+def _select_requested_tags(
+    tag_values: Mapping[str, TagValue],
     requested: Sequence[str],
 ) -> tuple[Tags, tuple[str, ...]]:
     """Limit displayed tags to the requested names and report misses."""
@@ -401,7 +498,7 @@ def _select_display_tags(
             wanted.add(f"*{name}")
 
     selected: Tags = {
-        key: value for key, value in display_tags.items() if key.lower() in wanted
+        key: value for key, value in tag_values.items() if key.lower() in wanted
     }
     found: set[str] = set()
     for key in selected:
@@ -418,53 +515,67 @@ def display_file_tags(
     tags: Mapping[str, TagValue],
     cache_status: db.CacheStatus,
     requested: Sequence[str] = (),
+    output: Output | None = None,
 ) -> None:
     """Print the tags of a single music file, optionally filtered by name."""
-    print(f"{path} detected as music file")
-    print(f"Cache status: {CACHE_STATUS_MESSAGES[cache_status]}")
-    print("Parsed tags:")
-    display_tags: Tags = {
+    out = Output.plain() if output is None else output
+    palette = out.palette
+    out.line(f"{palette.title(str(path))} detected as music file")
+    out.line(f"Cache status: {CACHE_STATUS_MESSAGES[cache_status]}")
+    out.line(palette.title("Parsed tags:"))
+    shown_tags: Tags = {
         key: value for key, value in tags.items() if key not in AUDIO_PROPERTY_TAGS
     }
-    display_tags.update(get_calculated_tags(tags))
+    shown_tags.update(get_calculated_tags(tags))
     missing: tuple[str, ...] = ()
     if requested:
-        display_tags, missing = _select_display_tags(display_tags, requested)
-    for key, value in sorted(display_tags.items(), key=lambda tag: tag[0]):
-        print(f"    {key} = {value}")
+        shown_tags, missing = _select_requested_tags(shown_tags, requested)
+    for key, value in sorted(shown_tags.items(), key=lambda tag: tag[0]):
+        out.line(f"    {palette.tag(key)} = {palette.value(str(value))}")
     for name in missing:
-        print(f"Tag '{name}' was not found. It may be hidden by [tags] ignore.")
+        out.line(
+            f"Tag '{palette.tag(name)}' was not found. "
+            "It may be hidden by [tags] ignore."
+        )
 
 
-def process_path(conn: sqlite3.Connection, cursor: sqlite3.Cursor, args: Args) -> None:
+def process_path(
+    conn: sqlite3.Connection,
+    cursor: sqlite3.Cursor,
+    args: Args,
+    output: Output | None = None,
+) -> None:
     """Process an arbitrary path through genplis.
 
     It will use process_file or process_directory depending on the type of the path.
 
     """
+    out = Output.plain() if output is None else output
     path = args.path
     if path is None:
         raise GenplisError("Attempted to process a path but none was given")
 
     if path.is_dir():
-        process_directory(conn, cursor, path, args)
+        process_directory(conn, cursor, path, args, output=out)
     elif path.is_file():
         tags, parsed, cache_status = process_file(conn, cursor, path, args)
         if tags is not None and args.verbosity.shows_normal_output:
-            display_file_tags(path, tags, cache_status)
-        if (
-            parsed is not None or path.suffix.lower() == ".m3ug"
-        ) and args.verbosity.shows_normal_output:
-            print(f"{path} detected as M3UG file")
-            print("Parsed filters:")
-            if parsed is not None:
-                print(f"    {format_expression(parsed.expression)}")
-                if parsed.sort is not None:
-                    print(f"    sort: {format_sort_spec(parsed.sort)}")
-                if parsed.no_playlist:
-                    print("    no playlist will be generated (@NO-PLAYLIST)")
+            display_file_tags(path, tags, cache_status, output=out)
+        if parsed is not None and args.verbosity.shows_normal_output:
+            out.line(
+                format_filter_tree(
+                    parsed,
+                    title=f"{path} detected as M3UG file",
+                    default_sort=args.config.output.sort,
+                    palette=out.palette,
+                )
+            )
         if is_excluded(path, args) and args.verbosity.shows_normal_output:
-            print("WARNING: This file is excluded by current configuration.")
+            out.line(
+                out.palette.warning(
+                    "WARNING: This file is excluded by current configuration."
+                )
+            )
         if parsed is not None:
             # An explicit M3UG path processes only that filter. Its directory
             # is scanned for songs, and @INCLUDE still pulls in shared rules.
@@ -474,6 +585,7 @@ def process_path(conn: sqlite3.Connection, cursor: sqlite3.Cursor, args: Args) -
                 path.parent,
                 args,
                 filters={path: parsed},
+                output=out,
             )
     else:
         print(
@@ -481,6 +593,344 @@ def process_path(conn: sqlite3.Connection, cursor: sqlite3.Cursor, args: Args) -
             file=sys.stderr,
         )
         sys.exit(1)
+
+
+def show_rules(args: Args, output: Output | None = None) -> None:
+    """Print parsed rule trees without touching the cache or audio files."""
+    out = Output.plain() if output is None else output
+    if args.path is None:
+        raise GenplisError("Attempted to show rules but no path was given")
+    path = args.path.expanduser()
+
+    if path.is_file():
+        if path.suffix.lower() != ".m3ug":
+            raise GenplisError(f"{path} is not a .m3ug filter")
+        parsed = parse_m3ug(
+            path.read_text(encoding="utf-8-sig"),
+            str(path),
+            args.verbosity,
+        )
+        if args.verbosity is not Verbosity.REALLY_QUIET:
+            out.line(
+                format_filter_tree(
+                    parsed,
+                    title=str(path),
+                    default_sort=args.config.output.sort,
+                    palette=out.palette,
+                )
+            )
+        return
+
+    if not path.is_dir():
+        raise GenplisError(f"{path} must be a .m3ug file or a directory")
+
+    found = 0
+    for filter_file in _walk_files(path, args, report_skips=False, only_m3ug=True):
+        parsed = parse_m3ug(
+            filter_file.read_text(encoding="utf-8-sig"),
+            str(filter_file),
+            args.verbosity,
+        )
+        if args.verbosity is not Verbosity.REALLY_QUIET:
+            out.line(
+                format_filter_tree(
+                    parsed,
+                    title=str(filter_file),
+                    default_sort=args.config.output.sort,
+                    palette=out.palette,
+                )
+            )
+        found += 1
+    if found == 0 and args.verbosity is not Verbosity.REALLY_QUIET:
+        out.line(f"No filters found in {path}")
+
+
+def _trace_filters(
+    conn: sqlite3.Connection,
+    cursor: sqlite3.Cursor,
+    args: Args,
+) -> dict[Path, M3UGFile]:
+    """Resolve the filters a trace should evaluate."""
+    path = args.path
+    if path is None:
+        raise GenplisError("Attempted to trace a file but no filter path was given")
+    if path.is_file():
+        if path.suffix.lower() != ".m3ug":
+            raise GenplisError(f"{path} must be a .m3ug file or a directory")
+        _, parsed, _ = process_file(conn, cursor, path, args)
+        if parsed is None:
+            raise GenplisError(f"{path} could not be parsed as a .m3ug file")
+        return {path: parsed}
+    if path.is_dir():
+        return _discover_filters(conn, cursor, path, args)
+    raise GenplisError(f"{path} must be a .m3ug file or a directory")
+
+
+def build_playlist_input(
+    filter_file: Path,
+    parsed: M3UGFile,
+    target: Path,
+    tags: Tags,
+    args: Args,
+) -> PlaylistInput:
+    """Resolve the deterministic playlist inputs for a traced file."""
+    spec = parsed.sort if parsed.sort is not None else args.config.output.sort
+    dedupe_values: SortValues = ()
+    if parsed.dedupe:
+        dedupe_values = _tag_values(target, tags, parsed.dedupe)
+    limit_key: SortValue | None = None
+    exclusion: str | None = None
+    if parsed.limit_per is not None and parsed.limit_per.count > 0:
+        tag = parsed.limit_per.tag
+        limit_key = _tag_values(target, tags, (tag,))[0]
+        if limit_key is None:
+            exclusion = f"per-tag limit key {tag!r} is missing; file would be skipped"
+    return PlaylistInput(
+        filter_file=filter_file,
+        sort=spec,
+        sort_values=_sort_values(target, tags, spec),
+        sort_is_default=parsed.sort is None,
+        dedupe=parsed.dedupe,
+        dedupe_values=dedupe_values,
+        limit=parsed.limit,
+        limit_per=parsed.limit_per,
+        limit_key=limit_key,
+        max_duration=parsed.max_duration,
+        duration=duration_seconds(tags.get("duration")),
+        no_playlist=parsed.no_playlist,
+        exclusion=exclusion,
+    )
+
+
+type FilterTraceItem = tuple[Path, FileTrace, PlaylistInput]
+
+
+def _scan_root(args: Args) -> Path:
+    path = args.path
+    if path is None:
+        raise GenplisError("Attempted to trace a file but no filter path was given")
+    return path if path.is_dir() else path.parent
+
+
+def _load_trace_target(
+    conn: sqlite3.Connection,
+    cursor: sqlite3.Cursor,
+    args: Args,
+) -> tuple[Tags, db.CacheStatus]:
+    target = args.trace_path
+    if target is None:
+        raise GenplisError("Attempted to trace a file but none was given")
+    if target.is_dir():
+        raise GenplisError(f"Trace target {target} is a directory")
+    if target.suffix.lower() == ".m3ug":
+        raise GenplisError(f"Trace target {target} is a .m3ug filter, not audio")
+    if not target.is_file():
+        raise GenplisError(f"Trace target {target} does not exist")
+
+    tags, _, cache_status = process_file(conn, cursor, target, args)
+    if tags is None:
+        raise GenplisError(f"Trace target {target} is not a supported music file")
+    return tags, cache_status
+
+
+def _prepare_traces(
+    conn: sqlite3.Connection,
+    cursor: sqlite3.Cursor,
+    args: Args,
+    target: Path,
+    tags: Tags,
+    output: Output,
+) -> tuple[dict[Path, M3UGFile], list[FilterTraceItem]] | None:
+    all_filters = _trace_filters(conn, cursor, args)
+    if not all_filters:
+        if args.verbosity is not Verbosity.REALLY_QUIET:
+            output.line(f"No filters found in {args.path}")
+        return None
+    traces = [
+        (
+            filter_file,
+            trace_file(parsed, tags),
+            build_playlist_input(filter_file, parsed, target, tags, args),
+        )
+        for filter_file, parsed in all_filters.items()
+    ]
+    return all_filters, traces
+
+
+def _print_filter_traces(
+    args: Args,
+    target: Path,
+    cache_status: db.CacheStatus,
+    traces: list[FilterTraceItem],
+    output: Output,
+    *,
+    selection_simulated: bool = False,
+) -> None:
+    if args.verbosity is Verbosity.REALLY_QUIET:
+        return
+    palette = output.palette
+    output.line(f"Trace target: {palette.title(str(target))}")
+    output.line(f"Cache status: {CACHE_STATUS_MESSAGES[cache_status]}")
+    output.line(f"Filters: {palette.value(str(len(traces)))}")
+    if is_excluded(target, args):
+        output.line(
+            palette.warning("WARNING: This file is excluded by current configuration.")
+        )
+    scan_root = _scan_root(args)
+    try:
+        target.relative_to(scan_root)
+    except ValueError:
+        output.line(
+            palette.warning(f"WARNING: {target} is outside the scan root {scan_root}.")
+        )
+
+    for filter_file, traced, playlist_input in traces:
+        output.line()
+        output.line(f"Filter: {palette.title(str(filter_file))}")
+        output.line(format_tags_consulted(traced.consulted, palette=palette))
+        output.line(
+            format_file_trace(
+                traced,
+                title=str(filter_file),
+                palette=palette,
+            )
+        )
+        output.line(
+            format_playlist_input(
+                playlist_input,
+                selection_simulated=selection_simulated,
+                palette=palette,
+            )
+        )
+        output.line(
+            palette.paint(
+                ColorRole.PASS if traced.passed else ColorRole.FAIL,
+                "MATCH" if traced.passed else "NO MATCH",
+            )
+        )
+
+    if len(traces) > 1:
+        output.line()
+        output.line(palette.title("Summary:"))
+        for filter_file, traced, _playlist_input in traces:
+            result = palette.paint(
+                ColorRole.PASS if traced.passed else ColorRole.FAIL,
+                "MATCH" if traced.passed else "NO MATCH",
+            )
+            output.line(f"  {result} {palette.title(str(filter_file))}")
+
+
+def trace_path(
+    conn: sqlite3.Connection,
+    cursor: sqlite3.Cursor,
+    args: Args,
+    output: Output | None = None,
+) -> None:
+    """Print an annotated evaluation of one audio file against filters."""
+    out = Output.plain() if output is None else output
+    target = args.trace_path
+    if target is None:
+        raise GenplisError("Attempted to trace a file but none was given")
+    tags, cache_status = _load_trace_target(conn, cursor, args)
+    prepared = _prepare_traces(conn, cursor, args, target, tags, out)
+    if prepared is None:
+        return
+    _all_filters, traces = prepared
+    _print_filter_traces(args, target, cache_status, traces, out)
+
+
+def _selection_without_scan(
+    target: Path,
+    traces: list[FilterTraceItem],
+    reason: str,
+) -> SelectionTrace:
+    selection = SelectionTrace(target=target)
+    for filter_file, traced, playlist_input in traces:
+        entry = FilterSelectionTrace(
+            filter_file=filter_file,
+            sort=playlist_input.sort,
+            sort_is_default=playlist_input.sort_is_default,
+            no_playlist=playlist_input.no_playlist,
+        )
+        if playlist_input.no_playlist:
+            entry.considered = False
+            entry.reason = "@NO-PLAYLIST"
+        elif not traced.passed:
+            entry.considered = False
+            entry.reason = "no match"
+        else:
+            entry.considered = False
+            entry.skipped = True
+            entry.reason = reason
+        selection.filters[filter_file] = entry
+    return selection
+
+
+def trace_full_path(
+    conn: sqlite3.Connection,
+    cursor: sqlite3.Cursor,
+    args: Args,
+    output: Output | None = None,
+) -> None:
+    """Trace a file and simulate its exact selection in every playlist."""
+    out = Output.plain() if output is None else output
+    target = args.trace_path
+    if target is None:
+        raise GenplisError("Attempted to trace a file but none was given")
+    tags, cache_status = _load_trace_target(conn, cursor, args)
+    prepared = _prepare_traces(conn, cursor, args, target, tags, out)
+    if prepared is None:
+        return
+    all_filters, traces = prepared
+    _print_filter_traces(
+        args,
+        target,
+        cache_status,
+        traces,
+        out,
+        selection_simulated=True,
+    )
+
+    scan_root = _scan_root(args)
+    matching = [item for item in traces if item[1].passed]
+    skip_reason: str | None = None
+    if is_excluded(target, args):
+        skip_reason = "target is excluded by current configuration"
+    else:
+        try:
+            target.relative_to(scan_root)
+        except ValueError:
+            skip_reason = f"target is outside the scan root {scan_root}"
+    if skip_reason is None and not matching:
+        skip_reason = "no filter expression matches the target"
+    if skip_reason is None and all(item[2].no_playlist for item in matching):
+        skip_reason = "every matching filter has @NO-PLAYLIST"
+
+    if skip_reason is not None:
+        selection = _selection_without_scan(target, traces, skip_reason)
+        if args.verbosity is not Verbosity.REALLY_QUIET:
+            out.line()
+            out.line(
+                f"{out.palette.directive('Selection scan skipped:')} "
+                f"{out.palette.source(skip_reason)}"
+            )
+    else:
+        selection = SelectionTrace(target=target)
+        simulation_args = replace(args, verbosity=Verbosity.REALLY_QUIET)
+        process_directory(
+            conn,
+            cursor,
+            scan_root,
+            simulation_args,
+            filters=all_filters,
+            dry_run=True,
+            selection_trace=selection,
+            output=out,
+        )
+
+    if args.verbosity is not Verbosity.REALLY_QUIET:
+        out.line()
+        out.line(format_selection_trace(selection, palette=out.palette))
 
 
 def display_tag_stats(
@@ -612,19 +1062,42 @@ def _sort_matches(matched: list[Match], spec: SortSpec) -> None:
         start = end
 
 
-def _dedupe_matches(matched: list[Match]) -> list[Match]:
+def _match_path(match: Match) -> Path:
+    """Return the filesystem path behind a playlist match."""
+    return match.entry.path if isinstance(match.entry, PlaylistEntry) else match.entry
+
+
+def _dedupe_matches(
+    matched: list[Match],
+    *,
+    trace: FilterSelectionTrace | None = None,
+    target: Path | None = None,
+) -> list[Match]:
     """Keep the first entry for each normalized key after ordering."""
     seen: set[tuple[SortValue, ...]] = set()
+    winners: dict[tuple[SortValue, ...], Match] | None = (
+        {} if trace is not None else None
+    )
     kept: list[Match] = []
     for match in matched:
         values = match.dedupe_values
         if not values or any(value is None for value in values):
+            if trace is not None and target == _match_path(match):
+                trace.dedupe_result = "kept: missing dedupe key"
             kept.append(match)
             continue
         key = tuple(value for value in values if value is not None)
         if key in seen:
+            if trace is not None and target == _match_path(match):
+                trace.dedupe_result = "excluded: duplicate key"
+                if winners is not None and key in winners:
+                    trace.dedupe_winner = _match_path(winners[key])
             continue
         seen.add(key)
+        if winners is not None:
+            winners[key] = match
+        if trace is not None and target == _match_path(match):
+            trace.dedupe_result = "kept: unique key"
         kept.append(match)
     return kept
 
@@ -634,6 +1107,9 @@ def _select_matches(
     limit: int | None,
     limit_per: LimitPerTag | None,
     max_duration: float | None,
+    *,
+    trace: FilterSelectionTrace | None = None,
+    target: Path | None = None,
 ) -> list[Match]:
     """Apply the count, per-tag, and duration caps in order."""
     count_cap = limit if limit is not None and limit > 0 else None
@@ -641,21 +1117,51 @@ def _select_matches(
     duration_cap = (
         max_duration if max_duration is not None and max_duration > 0 else None
     )
-    if count_cap is None and per_tag_cap is None and duration_cap is None:
+    if (
+        count_cap is None
+        and per_tag_cap is None
+        and duration_cap is None
+        and trace is None
+    ):
         return matched
+
+    if trace is not None:
+        trace.limit_result = (
+            "no count cap" if count_cap is None else f"count cap {count_cap}"
+        )
+        trace.per_tag_result = (
+            "no per-tag cap"
+            if per_tag_cap is None
+            else f"per-tag cap {per_tag_cap.count} per {per_tag_cap.tag}"
+        )
+        trace.duration_result = (
+            "no duration cap"
+            if duration_cap is None
+            else f"duration cap {duration_cap:g}s"
+        )
 
     selected: list[Match] = []
     per_tag_counts: dict[SortValue, int] = {}
     total_duration = 0.0
     for match in matched:
+        is_target = trace is not None and target == _match_path(match)
         if count_cap is not None and len(selected) >= count_cap:
+            if trace is not None and not trace.selected:
+                trace.limit_result = f"excluded: count cap {count_cap} reached"
             break
         limit_key: SortValue | None = None
         if per_tag_cap is not None:
             limit_key = match.limit_key
             if limit_key is None:
+                if is_target and trace is not None:
+                    trace.per_tag_result = f"excluded: missing {per_tag_cap.tag} key"
                 continue
             if per_tag_counts.get(limit_key, 0) >= per_tag_cap.count:
+                if is_target and trace is not None:
+                    trace.per_tag_result = (
+                        f"excluded: per-tag cap {per_tag_cap.count} per "
+                        f"{per_tag_cap.tag} reached"
+                    )
                 continue
         duration = match.duration if match.duration is not None else 0.0
         if (
@@ -663,11 +1169,29 @@ def _select_matches(
             and selected
             and total_duration + duration > duration_cap
         ):
+            if trace is not None and not trace.selected:
+                trace.duration_result = (
+                    f"excluded: {duration:g}s would exceed {duration_cap:g}s cap"
+                )
             break
         selected.append(match)
         total_duration += duration
         if per_tag_cap is not None and limit_key is not None:
             per_tag_counts[limit_key] = per_tag_counts.get(limit_key, 0) + 1
+        if is_target and trace is not None:
+            trace.selected = True
+            trace.position = len(selected)
+            if count_cap is not None:
+                trace.limit_result = f"selected within count cap {count_cap}"
+            if per_tag_cap is not None:
+                trace.per_tag_result = (
+                    f"selected within per-tag cap {per_tag_cap.count} per "
+                    f"{per_tag_cap.tag}"
+                )
+            if duration_cap is not None:
+                trace.duration_result = (
+                    f"selected within duration cap {duration_cap:g}s"
+                )
     return selected
 
 
@@ -789,6 +1313,9 @@ def process_directory(
     retain_tags: bool = False,
     filters: Mapping[Path, M3UGFile] | None = None,
     stats: TagStatsCollector | None = None,
+    dry_run: bool = False,
+    selection_trace: SelectionTrace | None = None,
+    output: Output | None = None,
 ) -> tuple[dict[Path, Tags], dict[Path, M3UGFile]]:
     """Traverse the directory and process all files.
 
@@ -816,19 +1343,35 @@ def process_directory(
     the collector. The collector keeps only aggregate counters, so tags are
     still released after every file.
 
+    With ``selection_trace``, the pipeline records where that trace's target
+    file ends up while sorting, deduplicating and applying the caps. Only the
+    target is recorded; the normal match lists are still released. With
+    ``dry_run``, playlists are not written, but tags, cache rows and the
+    selection pipeline behave exactly as in a normal run.
+
     """
     if not directory.is_dir():
         raise GenplisError(
             f"Attempted to process {directory} as a directory but it's not a directory"
         )
 
+    out = Output.plain() if output is None else output
     start_time = timer()
 
-    all_filters = (
-        dict(filters)
-        if filters is not None
-        else _discover_filters(conn, cursor, directory, args)
-    )
+    if filters is None:
+        all_filters = _discover_filters(conn, cursor, directory, args)
+        if args.verbosity.is_verbose:
+            for filter_file, parsed in all_filters.items():
+                out.line(
+                    format_filter_tree(
+                        parsed,
+                        title=str(filter_file),
+                        default_sort=args.config.output.sort,
+                        palette=out.palette,
+                    )
+                )
+    else:
+        all_filters = dict(filters)
     matches: dict[Path, list[Match]] = {filter_file: [] for filter_file in all_filters}
     retained: dict[int, tuple[Path, Tags]] | None = {} if retain_tags else None
     processed = 0
@@ -925,33 +1468,112 @@ def process_directory(
     # list with its effective spec (worker results can arrive out of order)
     # and write each playlist.
     for filter_file, parsed in all_filters.items():
+        spec = parsed.sort if parsed.sort is not None else args.config.output.sort
+        trace_entry: FilterSelectionTrace | None = None
+        target: Path | None = None
+        if selection_trace is not None:
+            target = selection_trace.target
+            trace_entry = selection_trace.filters.setdefault(
+                filter_file,
+                FilterSelectionTrace(filter_file=filter_file),
+            )
+            trace_entry.sort = spec
+            trace_entry.sort_is_default = parsed.sort is None
+            trace_entry.dedupe = parsed.dedupe
+            trace_entry.limit = parsed.limit
+            trace_entry.limit_per = parsed.limit_per
+            trace_entry.max_duration = parsed.max_duration
+            trace_entry.no_playlist = parsed.no_playlist
+
         if parsed.no_playlist:
+            if trace_entry is not None:
+                trace_entry.considered = False
+                trace_entry.reason = "@NO-PLAYLIST"
             continue
         matched = matches[filter_file]
-        spec = parsed.sort if parsed.sort is not None else args.config.output.sort
+        if trace_entry is not None:
+            trace_entry.total_matches = len(matched)
         _sort_matches(matched, spec)
+
+        target_match: Match | None = None
+        if trace_entry is not None and target is not None:
+            for index, match in enumerate(matched):
+                if _match_path(match) == target:
+                    target_match = match
+                    trace_entry.sorted_position = index + 1
+                    trace_entry.sort_values = match.sort_values
+                    trace_entry.dedupe_values = match.dedupe_values
+                    trace_entry.limit_key = match.limit_key
+                    break
+            if target_match is None:
+                trace_entry.considered = False
+                trace_entry.reason = "no match"
+
         if parsed.dedupe:
-            matched = _dedupe_matches(matched)
-        matched = _select_matches(
-            matched, parsed.limit, parsed.limit_per, parsed.max_duration
+            matched = _dedupe_matches(
+                matched,
+                trace=trace_entry if target_match is not None else None,
+                target=target,
+            )
+        target_available = (
+            trace_entry is not None
+            and target is not None
+            and any(_match_path(match) == target for match in matched)
         )
+        if (
+            trace_entry is not None
+            and target_match is not None
+            and not target_available
+        ):
+            trace_entry.considered = False
+            trace_entry.reason = trace_entry.dedupe_result or "removed before selection"
+        matched = _select_matches(
+            matched,
+            parsed.limit,
+            parsed.limit_per,
+            parsed.max_duration,
+            trace=trace_entry if target_available else None,
+            target=target,
+        )
+        if trace_entry is not None and target_available:
+            trace_entry.considered = True
+            if trace_entry.selected:
+                trace_entry.reason = "selected"
+            elif trace_entry.reason is None:
+                reasons = [
+                    result
+                    for result in (
+                        trace_entry.limit_result,
+                        trace_entry.per_tag_result,
+                        trace_entry.duration_result,
+                    )
+                    if result.startswith("excluded:")
+                ]
+                trace_entry.reason = "; ".join(reasons) or "not selected"
+
         if args.verbosity.is_verbose:
-            print(f"\nFiltering songs and generating playlist for {filter_file}")
-            print(f"Sort order: {format_sort_spec(spec)}")
-            print(f"Files that match the filter {filter_file}:")
+            out.line(
+                f"\nFiltering songs and generating playlist for "
+                f"{out.palette.title(str(filter_file))}"
+            )
+            out.line(
+                f"{out.palette.directive('Sort order:')} "
+                f"{out.palette.value(format_sort_spec(spec))}"
+            )
+            out.line(
+                f"Files that match the filter {out.palette.title(str(filter_file))}:"
+            )
             for match in matched:
-                path = (
-                    match.entry.path
-                    if isinstance(match.entry, PlaylistEntry)
-                    else match.entry
-                )
-                print(f"  {path}")
+                out.line(f"  {out.palette.value(str(_match_path(match)))}")
         if args.verbosity.shows_progress:
-            print(f"Filter file {filter_file} matched {len(matched)} songs")
-        if matched:
+            out.line(
+                f"Filter file {out.palette.title(str(filter_file))} matched "
+                f"{out.palette.value(str(len(matched)))} songs"
+            )
+        if matched and not dry_run:
             playlist_file = filter_file.with_suffix(".m3u")
             if args.verbosity.shows_progress:
-                print(f"Creating playlist {playlist_file}")
+                out.line(f"Creating playlist {out.palette.title(str(playlist_file))}")
             comments: list[str] = []
             if args.include_source:
                 source = filter_file.read_text(encoding="utf-8-sig")
@@ -1123,18 +1745,24 @@ def clean_database(
 
 def _run(args: Args) -> None:
     """Run genplis with resolved arguments."""
+    out = Output.create(sys.stdout, color=args.color, theme=args.theme)
     if args.verbosity.is_verbose:
         if args.config_disabled:
-            print("Configuration disabled with --no-config")
+            out.line("Configuration disabled with --no-config")
         elif args.config.source is not None:
-            print(f"Using config file {args.config.source}")
+            out.line(f"Using config file {args.config.source}")
         else:
-            print("No config file found; using defaults")
-        print(f"Using {args.db_path} for genplis DB")
+            out.line("No config file found; using defaults")
+        if args.mode is not Mode.SHOW_RULES:
+            out.line(f"Using {args.db_path} for genplis DB")
+
+    if args.mode is Mode.SHOW_RULES:
+        show_rules(args, out)
+        return
 
     if args.path is None and not args.db_path.exists():
         if args.verbosity.shows_normal_output:
-            print("Database does not exist; nothing to clean.")
+            out.line("Database does not exist; nothing to clean.")
         return
 
     try:
@@ -1151,11 +1779,15 @@ def _run(args: Args) -> None:
             db.create_files_table(cursor, db.get_cache_version(args.config.tags))
             conn.commit()
 
-            if args.path is not None:
-                if args.display_tags:
+            if args.mode is Mode.TRACE:
+                trace_path(conn, cursor, args, out)
+            elif args.mode is Mode.TRACE_FULL:
+                trace_full_path(conn, cursor, args, out)
+            elif args.mode is Mode.TAG_STATS:
+                if args.path is not None:
                     display_tag_stats(conn, cursor, args)
-                else:
-                    process_path(conn, cursor, args)
+            elif args.path is not None:
+                process_path(conn, cursor, args, out)
             if args.clean:
                 clean_database(
                     conn,

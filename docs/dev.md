@@ -32,6 +32,8 @@ src/genplis/
     db.py           SQLite cache
     tags.py         tag extraction and calculated properties
     m3ug.py         filter, directive and @sort parser, rule nodes
+    diagnostics.py  rule trees, evaluation traces, selection rendering
+    output.py       color themes, terminal detection, output streams
     sorting.py      sort specs, value normalization, comparison
     m3u.py          playlist writer
     stats.py        tag statistics collector and report renderer
@@ -88,6 +90,22 @@ tags, and calls its own `check()`. `M3UGFile.rules` flattens the leaf rules for
 diagnostics; matching always uses `M3UGFile.expression`. Directives are parsed
 separately and never participate in filtering.
 
+Every rule carries a `SourceLocation` and every value keeps its original
+literal token. `M3UGFile` stores both the merged `expression` and the file's
+`own_expression`, plus an ordered tuple of `IncludeInfo` records with the raw
+path, resolved path, directive line and fully parsed included file. These
+fields are parser metadata only; they do not affect matching. `diagnostics.py`
+is a pure renderer over that metadata and over the trace evaluators, so it can
+rebuild include boundaries without reparsing source text.
+
+`output.py` owns ANSI escape codes, the dark and light palettes, `NO_COLOR`
+and TTY detection, `COLORFGBG` parsing, and the `Output` stream wrapper.
+Renderers accept a `Palette` and paint semantic roles such as `PASS`, `FAIL`,
+`SKIP`, directives, tag names, and values. A disabled palette returns plain
+text, so tests and redirected output never need ANSI stripping. Theme
+resolution is separate from color enablement: `auto` reads `COLORFGBG` and
+falls back to dark when the background cannot be determined.
+
 `@INCLUDE` is resolved recursively in the main process. Each file produces a
 `Directives` value with `UNSET` markers, merges its includes in include order,
 then applies its own directives last. Included expressions become separate
@@ -99,7 +117,10 @@ When an include path does not already end in `.m3ug` and does not exist, the
 loader tries the same path with `.m3ug` appended before reporting it missing. `@NO-PLAYLIST`
 lives on `M3UGFile` rather than `Directives`, so it is never
 inherited; core skips matching and writing for those files while still parsing
-them for includes.
+them for includes. Each include is retained as an `IncludeInfo` in source
+order, and the included file keeps its own nested includes and
+`own_expression`; diagnostics use those records to render evaluation order
+instead of flattening everything into one expression string.
 
 Tags are not retained across files in a normal run. `process_directory` only
 keeps matching `Match` records (the playlist entry, walk order, normalized
@@ -112,6 +133,21 @@ no `.m3ug` file is parsed and no playlist is written. Each supported file's
 tags are passed to `stats.TagStatsCollector`, which keeps only aggregate
 counters; the tags are still released after every file. `-t/--tag` selects
 tags whose distinct values are kept without the usual cardinality cap.
+
+The primary CLI operation is a single `core.Mode` value (`PROCESS`,
+`TAG_STATS`, `SHOW_RULES`, `TRACE`, or `TRACE_FULL`) resolved in
+`resolve_args`. `--clean` is deliberately not a mode: it remains a
+post-processing flag, so `--clean PATH` processes the path before cleaning.
+`--show-rules` branches before database setup. The trace modes branch after
+database setup because they load the target through the normal cache path.
+
+`diagnostics.trace_file` mirrors normal matching including short-circuiting,
+inline includes and skipped subtrees. `RuleNode.apply` stays allocation-free;
+`RuleNode.explain` performs the optional `TagLookup` recording used only by
+traces. The directory pipeline accepts `dry_run` and a `SelectionTrace` so
+`--trace-full` can simulate sort, dedupe, count, per-tag and duration decisions
+without retaining non-target matches or writing playlists. Cache writes still
+happen during that scan.
 
 ## Parallel parsing
 
@@ -437,7 +473,8 @@ pending; see the roadmap.
 - [x] Optimize memory usage
 - [ ] Optimize DB space
 - [x] Display all available tags, with stats
-- [ ] Debug M3UG
+- [x] Debug M3UG
+- [ ] Color output
 - [ ] Improve Windows support (**HELP NEEDED!**)
 - [ ] Improve MacOS support (**HELP NEEDED!**)
 - [ ] Publish to PyPI! 🚀

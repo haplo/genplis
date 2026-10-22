@@ -10,6 +10,7 @@ import genplis.executors as executors
 from genplis.config import CollectionConfig, Config
 from genplis.core import (
     Args,
+    Mode,
     display_tag_stats,
     main,
     process_directory,
@@ -187,7 +188,7 @@ def test_resolve_args_tag_stats() -> None:
         Config(),
     )
 
-    assert args.display_tags is True
+    assert args.mode is Mode.TAG_STATS
     assert args.tags == ()
 
 
@@ -197,7 +198,7 @@ def test_resolve_args_tag_implies_tag_stats_and_deduplicates() -> None:
         Config(),
     )
 
-    assert args.display_tags is True
+    assert args.mode is Mode.TAG_STATS
     assert args.tags == ("genre",)
 
 

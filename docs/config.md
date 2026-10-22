@@ -28,7 +28,8 @@ used, if any.
 3. Built-in defaults.
 
 For booleans, the command-line switches are `--verbose`/`--no-verbose`,
-`--overwrite`/`--no-overwrite`, `--include-source`/`--no-include-source`, and
+`--color`/`--no-color`, `--overwrite`/`--no-overwrite`,
+`--include-source`/`--no-include-source`, and
 `--extended-m3u`/`--no-extended-m3u`. If neither form is given, the config
 value is used.
 
@@ -74,9 +75,11 @@ genplis: error: /home/me/.config/genplis/config.ini: [tags] max_size: expected a
 
 | Option | Type | Default | CLI equivalent | Description |
 | --- | --- | --- | --- | --- |
-| `verbose` | boolean | `false` | `--verbose` / `--no-verbose` | Print config and database paths, skip decisions, parsed rules, and matching songs. |
+| `verbose` | boolean | `false` | `--verbose` / `--no-verbose` | Print config and database paths, skip decisions, rule trees, and matching songs. |
 | `quiet` | boolean | `false` | `-q` / `--quiet` | Print only filter match counts and playlist creation. |
 | `jobs` | integer ≥ 0 | `0` | `--jobs` | Worker processes for cache misses and stale files. `0` = one per CPU (capped at 8), `1` = no pool. |
+| `color` | boolean | `true` | `--color` / `--no-color` | Allow colors when stdout is an interactive terminal. `false` disables color everywhere. |
+| `theme` | `auto`, `dark`, or `light` | `auto` | `--theme` | Color palette for the terminal background. `auto` reads `COLORFGBG` and assumes dark when unknown. |
 
 `verbose = true` and `quiet = true` cannot be enabled at the same time. A
 command-line verbosity flag overrides the configured value, so
@@ -87,6 +90,14 @@ verbosely.
 filtering, and playlist generation stay in the main process, which also keeps
 the only database connection. Small runs do not start a pool. The worker count
 can be overridden with `--jobs` on the command line.
+
+`color = true` allows colors when stdout is an interactive terminal; redirected
+output stays plain. Set it to `false` to always disable color. The `NO_COLOR`
+environment variable also disables automatic color, while `--color` and
+`--no-color` override both. `theme` selects colors for a dark or light terminal
+background. The default `auto` reads the background field from `COLORFGBG`
+when available, falling back to `dark` when the variable is missing, malformed,
+or does not describe a supported background color.
 
 ## `[collection]`
 

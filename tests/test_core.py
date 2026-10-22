@@ -51,6 +51,7 @@ from genplis.m3ug import (
     NameNode,
     ValueNode,
 )
+from genplis.output import Theme
 from genplis.sorting import parse_sort_spec
 from genplis.types import Tags, TagValue, Verbosity
 
@@ -150,8 +151,11 @@ def test_process_path_prints_m3ug_filters(
 
     output = capsys.readouterr().out
     assert f"{filter_file} detected as M3UG file" in output
-    assert "Parsed filters:" in output
-    assert "    rating >= 3 AND genre ~ Metal" in output
+    assert "  AND" in output
+    assert "    rating >= 3 (line 1)" in output
+    assert '    genre ~ "Metal" (line 2)' in output
+    assert "    sort: filename (default)" in output
+    assert "Parsed" + " filters:" not in output
     assert "detected as music file" not in output
     assert "Parsed tags:" not in output
 
@@ -1385,7 +1389,7 @@ def test_process_path_reports_no_playlist(
     process_path(genplis_db, genplis_db.cursor(), make_args(str(filter_file)))
 
     output = capsys.readouterr().out
-    assert "no playlist will be generated (@NO-PLAYLIST)" in output
+    assert "    no playlist: yes (@NO-PLAYLIST)" in output
 
 
 def test_process_dir_does_not_create_playlist_when_no_song_matches(
@@ -1485,6 +1489,33 @@ def test_process_dir_verbose_lists_matching_songs(
     assert f"Files that match the filter {filter_file}:" in output
     assert f"  {ogg}" in output
     assert f"  {mp3}" not in output
+
+
+def test_process_dir_verbose_prints_each_filter_tree_once(
+    genplis_db: sqlite3.Connection,
+    make_args: Callable[..., Args],
+    file_m3ug: Path,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    filter_file = tmp_path / file_m3ug.name
+    shutil.copy2(file_m3ug, filter_file)
+    args = make_args(str(tmp_path), verbosity=Verbosity.VERBOSE)
+
+    _, all_filters = process_directory(genplis_db, genplis_db.cursor(), tmp_path, args)
+    output = capsys.readouterr().out
+    assert output.count(f"{filter_file}\n  AND") == 1
+    assert "Parsed" + " rules:" not in output
+
+    process_directory(
+        genplis_db,
+        genplis_db.cursor(),
+        tmp_path,
+        args,
+        filters=all_filters,
+    )
+    rerun_output = capsys.readouterr().out
+    assert f"{filter_file}\n  AND" not in rerun_output
 
 
 def test_process_dir_generates_playlist_relative_to_nested_filter_file(
@@ -1739,7 +1770,14 @@ def test_empty_filter_includes_tagless_music_file(
     )
 
     assert all_tags == {song: {}}
-    assert all_filters == {filter_file: M3UGFile(None)}
+    assert all_filters == {
+        filter_file: M3UGFile(
+            filename=str(filter_file),
+            expression=None,
+            own_expression=None,
+            includes=(),
+        )
+    }
     playlist = filter_file.with_suffix(".m3u")
     assert song.name in playlist.read_text(encoding="utf-8").splitlines()
 
@@ -2056,6 +2094,34 @@ def test_resolve_args_verbosity() -> None:
     assert resolve(["-qqq"]) is Verbosity.REALLY_QUIET
 
 
+def test_resolve_args_color_and_theme() -> None:
+    parser = setup_argparse()
+
+    defaults = resolve_args(parser.parse_args(["/music"]), Config())
+    assert defaults.color is None
+    assert defaults.theme is Theme.AUTO
+
+    configured = resolve_args(
+        parser.parse_args(["/music"]),
+        Config(general=GeneralConfig(color=False, theme=Theme.LIGHT)),
+    )
+    assert configured.color is False
+    assert configured.theme is Theme.LIGHT
+
+    overridden = resolve_args(
+        parser.parse_args(["--color", "--theme", "dark", "/music"]),
+        Config(general=GeneralConfig(color=False, theme=Theme.LIGHT)),
+    )
+    assert overridden.color is True
+    assert overridden.theme is Theme.DARK
+
+    disabled = resolve_args(
+        parser.parse_args(["--no-color", "/music"]),
+        Config(),
+    )
+    assert disabled.color is False
+
+
 def test_resolve_args_jobs_precedence(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("genplis.core.auto_workers", lambda: 8)
     parser = setup_argparse()
@@ -2073,6 +2139,13 @@ def test_resolve_args_jobs_precedence(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_setup_argparse_rejects_negative_jobs() -> None:
     with pytest.raises(SystemExit) as exc_info:
         setup_argparse().parse_args(["--jobs", "-1", "/music"])
+
+    assert exc_info.value.code == 2
+
+
+def test_setup_argparse_rejects_invalid_theme() -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        setup_argparse().parse_args(["--theme", "neon", "/music"])
 
     assert exc_info.value.code == 2
 

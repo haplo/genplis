@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import re
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import ClassVar, Literal, Protocol, Self, TypeGuard
 
@@ -28,6 +28,38 @@ EQUALITY_OPERATORS = frozenset({"=", "!="})
 TEXT_OPERATORS = frozenset({"~", "^", "$", "%"})
 NUMERIC_OPERATORS = frozenset({"<", "<=", ">", ">="})
 OPERATORS = EQUALITY_OPERATORS | TEXT_OPERATORS | NUMERIC_OPERATORS
+
+
+@dataclass(frozen=True, slots=True)
+class SourceLocation:
+    """The file and line that produced a parsed filter rule."""
+
+    filename: str
+    line: int
+
+
+type LookupSource = Literal["tag", "calculated", "missing"]
+
+
+@dataclass(frozen=True, slots=True)
+class TagLookup:
+    """The result of looking up one tag for a traced rule."""
+
+    requested: str
+    key: str | None
+    raw: TagValue
+    normalized: TagValue
+    source: LookupSource
+    note: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class RuleExplanation:
+    """A rule evaluation with the tag lookup that produced it."""
+
+    rule: RuleNode
+    passed: bool
+    lookup: TagLookup
 
 
 def is_number(value: object) -> TypeGuard[int | float]:
@@ -71,14 +103,18 @@ def normalize(raw: TagValue) -> TagValue:
 
 def _find_tag(
     tags: Mapping[str, TagValue], normalized_name: str
-) -> tuple[bool, TagValue]:
-    """Look up a tag by its lower-case name, ignoring key casing."""
+) -> tuple[str | None, TagValue]:
+    """Look up a tag by its lower-case name, ignoring key casing.
+
+    Returns the key as it is actually spelled in the tag mapping, or ``None``
+    when the tag is absent.
+    """
     if normalized_name in tags:
-        return True, tags[normalized_name]
+        return normalized_name, tags[normalized_name]
     for key, value in tags.items():
         if key.lower() == normalized_name:
-            return True, value
-    return False, None
+            return key, value
+    return None, None
 
 
 def get_rating(tags: Mapping[str, TagValue]) -> float | None:
@@ -92,12 +128,12 @@ def get_rating(tags: Mapping[str, TagValue]) -> float | None:
     tag that is missing, feel free to open an issue with a PR to add support
     for it.
     """
-    has_rating, _ = _find_tag(tags, "rating")
-    if has_rating:
+    rating_key, _ = _find_tag(tags, "rating")
+    if rating_key is not None:
         return None
 
-    found, raw_fmps_rating = _find_tag(tags, "fmps_rating")
-    fmps_rating = normalize(raw_fmps_rating) if found else None
+    fmps_key, raw_fmps_rating = _find_tag(tags, "fmps_rating")
+    fmps_rating = normalize(raw_fmps_rating) if fmps_key is not None else None
     if isinstance(fmps_rating, list):
         # normalize() only leaves lists with more than one item
         logger.warning("Unexpected fmps_rating as list: %s", fmps_rating)
@@ -295,6 +331,7 @@ def _build_rule_set(
 ) -> FilterNode:
     """Build existentially or universally quantified rules for a set."""
     warning_state = [False]
+    source = SourceLocation(filename, line)
     leaves = tuple(
         RuleNode.build(
             operator,
@@ -304,6 +341,7 @@ def _build_rule_set(
             line,
             case_sensitive,
             warning_state=warning_state,
+            source=source,
         )
         for name in names
         for value in values
@@ -393,9 +431,6 @@ class NameNode:
     def __repr__(self) -> str:
         return f"<Name={self.name}>"
 
-    def __str__(self) -> str:
-        return self.name
-
     @classmethod
     def build(cls, name: object, filename: str, line: int) -> Self:
         if not isinstance(name, str):
@@ -404,21 +439,71 @@ class NameNode:
 
     def find(self, tags: Mapping[str, TagValue]) -> tuple[str, TagValue]:
         normalized_name = self.name.lower()
-        found, value = _find_tag(tags, normalized_name)
+        key, value = _find_tag(tags, normalized_name)
         # handle special cases
         if normalized_name == "rating":
-            if found:
+            if key is not None:
                 return normalized_name, value
             return normalized_name, get_rating(tags)
-        if found:
+        if key is not None:
             return normalized_name, value
         # default case is no match, no value found
         return normalized_name, None
 
+    def lookup(self, tags: Mapping[str, TagValue]) -> TagLookup:
+        """Look up this tag and record how the value was obtained."""
+        normalized_name = self.name.lower()
+        key, raw = _find_tag(tags, normalized_name)
+        if normalized_name == "rating":
+            if key is not None:
+                return TagLookup(
+                    requested=normalized_name,
+                    key=key,
+                    raw=raw,
+                    normalized=normalize(raw),
+                    source="tag",
+                )
+            rating = get_rating(tags)
+            alias_key, _ = _find_tag(tags, "fmps_rating")
+            if rating is not None:
+                return TagLookup(
+                    requested=normalized_name,
+                    key=alias_key,
+                    raw=rating,
+                    normalized=normalize(rating),
+                    source="calculated",
+                    note="calculated from fmps_rating",
+                )
+            note = "no usable fmps_rating" if alias_key is not None else "no rating tag"
+            return TagLookup(
+                requested=normalized_name,
+                key=None,
+                raw=None,
+                normalized=None,
+                source="missing",
+                note=note,
+            )
+        if key is not None:
+            return TagLookup(
+                requested=normalized_name,
+                key=key,
+                raw=raw,
+                normalized=normalize(raw),
+                source="tag",
+            )
+        return TagLookup(
+            requested=normalized_name,
+            key=None,
+            raw=None,
+            normalized=None,
+            source="missing",
+        )
+
 
 class ValueNode:
-    def __init__(self, value: RuleValue) -> None:
+    def __init__(self, value: RuleValue, literal: str | None = None) -> None:
         self.value = value
+        self.literal = literal
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, ValueNode):
@@ -427,11 +512,6 @@ class ValueNode:
 
     def __repr__(self) -> str:
         return f"<Value={self.value}>"
-
-    def __str__(self) -> str:
-        if isinstance(self.value, bool):
-            return "true" if self.value else "false"
-        return str(self.value)
 
     @classmethod
     def build(cls, value: object, filename: str, line: int) -> Self:
@@ -451,27 +531,28 @@ class ValueNode:
             raise GenplisM3UGException(f"Invalid value: {value}", filename, line)
 
         value = value.strip()
+        literal = value
         # quoted values are always literal strings, even if they look numeric
         if _is_quoted(value):
-            return cls(_unescape_quoted(value[1:-1]))
+            return cls(_unescape_quoted(value[1:-1]), literal)
 
         if mode == "text":
-            return cls(value)
+            return cls(value, literal)
 
         if allow_duration:
             duration = parse_duration_literal(value)
             if duration is not None:
-                return cls(duration)
+                return cls(duration, literal)
 
         if value == "true":
-            return cls(True)
+            return cls(True, literal)
         if value == "false":
-            return cls(False)
+            return cls(False, literal)
         if FLOAT_RE.match(value):
-            return cls(float(value))
+            return cls(float(value), literal)
         if INT_RE.match(value):
-            return cls(int(value))
-        return cls(value)
+            return cls(int(value), literal)
+        return cls(value, literal)
 
     def normalize(self, raw: TagValue) -> TagValue:
         return normalize(raw)
@@ -503,11 +584,13 @@ class RuleNode:
         case_sensitive: bool = False,
         *,
         warning_state: list[bool] | None = None,
+        source: SourceLocation | None = None,
     ) -> None:
         self.name_node = name
         self.value_node = value
         self.case_sensitive = case_sensitive
         self._warning_state = warning_state if warning_state is not None else [False]
+        self.source = source
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, RuleNode):
@@ -523,9 +606,6 @@ class RuleNode:
     def __repr__(self) -> str:
         return f"Rule=<{self.name_node}, {self.OPERATOR}, {self.value_node}>"
 
-    def __str__(self) -> str:
-        return f"{self.name_node} {self.OPERATOR} {self.value_node}"
-
     @classmethod
     def build(
         cls,
@@ -537,6 +617,7 @@ class RuleNode:
         case_sensitive: bool = False,
         *,
         warning_state: list[bool] | None = None,
+        source: SourceLocation | None = None,
     ) -> RuleNode:
         rule_cls: type[RuleNode]
         if operator == "=":
@@ -565,7 +646,13 @@ class RuleNode:
             )
         rule_cls.check_params(name, value, filename, line)
         try:
-            return rule_cls(name, value, case_sensitive, warning_state=warning_state)
+            return rule_cls(
+                name,
+                value,
+                case_sensitive,
+                warning_state=warning_state,
+                source=source,
+            )
         except re.error as exc:
             raise GenplisM3UGException(
                 f"Invalid regular expression: {exc}", filename, line
@@ -577,6 +664,24 @@ class RuleNode:
         if self.IS_TEXT and _has_boolean(tag_value):
             self._warn_boolean(tag_name)
         return self.check(tag_value)
+
+    def explain(self, tags: Mapping[str, TagValue]) -> RuleExplanation:
+        """Evaluate this rule and describe the tag lookup it performed."""
+        lookup = self.name_node.lookup(tags)
+        tag_value = self.value_node.normalize(lookup.raw)
+        note = lookup.note
+        if self.IS_TEXT and _has_boolean(tag_value):
+            warning = (
+                f"text operator {self.OPERATOR!r} applied to boolean tag "
+                f"{lookup.requested!r}; use = true or = false"
+            )
+            note = f"{note}; {warning}" if note else warning
+        lookup = replace(lookup, normalized=tag_value, note=note)
+        return RuleExplanation(
+            rule=self,
+            passed=self.check(tag_value),
+            lookup=lookup,
+        )
 
     def _warn_boolean(self, tag_name: str) -> None:
         if self._warning_state[0]:
@@ -734,8 +839,15 @@ class RegexRuleNode(RuleNode):
         case_sensitive: bool = False,
         *,
         warning_state: list[bool] | None = None,
+        source: SourceLocation | None = None,
     ) -> None:
-        super().__init__(name, value, case_sensitive, warning_state=warning_state)
+        super().__init__(
+            name,
+            value,
+            case_sensitive,
+            warning_state=warning_state,
+            source=source,
+        )
         pattern = value.text()
         if pattern is None:
             raise re.error("regular expression needs a string value")
@@ -860,21 +972,6 @@ def _leaf_rules(node: FilterNode | None) -> tuple[RuleNode, ...]:
     return ()
 
 
-def format_expression(node: FilterNode | None) -> str:
-    """Format a filter expression for verbose diagnostics."""
-    if node is None:
-        return "(always)"
-    if isinstance(node, RuleNode):
-        return str(node)
-    if isinstance(node, NotNode):
-        return f"NOT ({format_expression(node.node)})"
-    if isinstance(node, OrNode):
-        return "(" + " OR ".join(format_expression(child) for child in node.nodes) + ")"
-    if isinstance(node, AndNode):
-        return " AND ".join(format_expression(child) for child in node.nodes)
-    return str(node)
-
-
 @dataclass(frozen=True, slots=True)
 class _Unset:
     """Marker for a directive that a file did not set."""
@@ -927,10 +1024,23 @@ def _merge_directives(base: Directives, override: Directives) -> Directives:
 
 
 @dataclass(frozen=True, slots=True)
+class IncludeInfo:
+    """One ``@INCLUDE`` directive and the file it resolved to."""
+
+    raw_path: str
+    path: Path
+    line: int
+    file: M3UGFile
+
+
+@dataclass(frozen=True, slots=True)
 class M3UGFile:
     """A parsed M3UG file: a filter expression and playlist settings."""
 
+    filename: str | None
     expression: FilterNode | None
+    own_expression: FilterNode | None
+    includes: tuple[IncludeInfo, ...]
     sort: SortSpec | None = None
     limit: int | None = None
     limit_per: LimitPerTag | None = None
@@ -1049,7 +1159,7 @@ def _parse_m3ug_file(
     own_no_playlist = False
     no_playlist_seen = False
     included_directives: list[Directives] = []
-    included_expressions: list[FilterNode | None] = []
+    includes: list[IncludeInfo] = []
 
     if verbosity.is_verbose:
         print(f"Parsing M3UG file {filename}:")
@@ -1283,7 +1393,14 @@ def _parse_m3ug_file(
                     depth + 1,
                 )
                 included_directives.append(included_directive_values)
-                included_expressions.append(included_file.expression)
+                includes.append(
+                    IncludeInfo(
+                        raw_path=raw_path,
+                        path=resolved,
+                        line=n,
+                        file=included_file,
+                    )
+                )
                 if verbosity.is_verbose:
                     print(f"Included {included_target}")
                 is_directive = True
@@ -1372,17 +1489,17 @@ def _parse_m3ug_file(
         merged = _merge_directives(merged, included)
     merged = _merge_directives(merged, own_directives)
 
-    if included_expressions:
-        expression = _and_expressions([*included_expressions, own_expression])
+    if includes:
+        expression = _and_expressions(
+            [*(include.file.expression for include in includes), own_expression]
+        )
     else:
         expression = own_expression
-    if verbosity.is_verbose:
-        print("Parsed rules:")
-        print(format_expression(expression))
-        print()
-
     parsed = M3UGFile(
+        filename=filename,
         expression=expression,
+        own_expression=own_expression,
+        includes=tuple(includes),
         sort=None if isinstance(merged.sort, _Unset) else merged.sort,
         limit=None if isinstance(merged.limit, _Unset) else merged.limit,
         limit_per=(None if isinstance(merged.limit_per, _Unset) else merged.limit_per),

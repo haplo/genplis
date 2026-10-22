@@ -13,6 +13,7 @@ from genplis.config import (
     load_config,
 )
 from genplis.exceptions import GenplisConfigError
+from genplis.output import Theme
 from genplis.sorting import SortKey
 
 
@@ -114,6 +115,26 @@ def test_load_jobs_general_config(tmp_path: Path) -> None:
     config = load_config(config_file)
 
     assert config.general == GeneralConfig(jobs=4)
+
+
+def test_load_color_and_theme_general_config(tmp_path: Path) -> None:
+    config_file = tmp_path / "config.ini"
+    config_file.write_text("[general]\ncolor = false\ntheme = light\n")
+
+    config = load_config(config_file)
+
+    assert config.general.color is False
+    assert config.general.theme is Theme.LIGHT
+
+
+def test_theme_defaults_to_auto(tmp_path: Path) -> None:
+    config_file = tmp_path / "config.ini"
+    config_file.write_text("[general]\n")
+
+    config = load_config(config_file)
+
+    assert config.general.color is True
+    assert config.general.theme is Theme.AUTO
 
 
 def test_reject_verbose_and_quiet_together(tmp_path: Path) -> None:
@@ -238,6 +259,8 @@ def test_percent_sign_is_literal(tmp_path: Path) -> None:
         ("[tags]\nmax_size = -1\n", "at least 0"),
         ("[general]\njobs = many\n", "expected an integer"),
         ("[general]\njobs = -1\n", "at least 0"),
+        ("[general]\ncolor = maybe\n", "expected a boolean"),
+        ("[general]\ntheme = neon\n", "expected one of"),
         ("[output]\noverwrite = maybe\n", "expected a boolean"),
         ("[output]\ninclude_source = maybe\n", "expected a boolean"),
         ("[output]\nextended_m3u = maybe\n", "expected a boolean"),

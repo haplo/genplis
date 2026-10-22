@@ -658,17 +658,133 @@ Calculated values are printed with a `*` prefix (`*duration`, `*filename`,
 `*rating`) to show that they were not embedded in the file.
 Use the names **without** the `*` in filters.
 
+### Show parsed rules
+
+`--show-rules` parses a filter file, or every non-excluded `.m3ug` file under a
+directory, without opening the cache, scanning audio, or writing playlists:
+
+```bash
+uv run genplis --show-rules Favorites.m3ug
+uv run genplis --show-rules ~/Music
+```
+
+```text
+Favorites.m3ug
+  AND
+    @INCLUDE Base.m3ug (Favorites.m3ug:1) -> /home/me/Music/Base.m3ug
+      genre ~ Synthwave (line 2)
+    rating >= 4 (line 2)
+  directives:
+    sort: artist
+```
+
+Includes are shown inline. They are always ANDed before the including file's
+own rules, so the tree follows evaluation order, not source order. Nested
+includes recurse in the same way. The header keeps the path exactly as written,
+including quotes, and shows the resolved target so extension inference and `~`
+expansion are visible.
+
+A directive-only include does not participate in matching and has no pass/fail
+status. Its directives still apply:
+
+```text
+  @INCLUDE Defaults.m3ug (Favorites.m3ug:1) -> /home/me/Music/Defaults.m3ug
+    (no rules; directives only)
+    directives:
+      sort: artist
+```
+
+Rules keep their original literal text. Quoted numbers stay strings, so
+`rating = "4"` is different from `rating = 4`; `"true"` is a string while
+`true` is a boolean. Duration literals show their converted value, for example
+`duration >= 10m (600s)`. `@CASE` adds `[case-sensitive]`.
+
+### Trace one file
+
+`--trace SONG` evaluates every selected filter for one audio file and prints
+`PASS`, `FAIL`, and `SKIP` nodes. The tags consulted are listed first, and the
+target is loaded through the normal tag cache path (so that one file may be
+parsed or refreshed).
+
+```bash
+uv run genplis --trace song.mp3 Favorites.m3ug
+uv run genplis --trace song.mp3 ~/Music
+```
+
+```text
+Favorites.m3ug: FAIL
+  FAIL AND
+    PASS artist = "Test Artist" (line 3)
+      tag artist = ['Test Artist'] -> 'Test Artist'
+    FAIL rating >= 4 (line 4)
+      missing tag rating (no rating tag)
+    SKIP genre ~ Metal (line 5) (short-circuited: an earlier AND child failed)
+playlist inputs:
+  sort: title
+    title = 'test'
+  dedupe: album
+    album = <missing> (kept)
+  selection: not simulated; use --trace-full
+NO MATCH
+```
+
+`SKIP` means evaluation short-circuited: the rule was never applied. A missing
+tag is shown explicitly. Calculated ratings report their source, multi-value
+tags show the list, and `@CASE` rules are marked. Playlist inputs list the
+effective sort and dedupe keys, limits, duration and `@NO-PLAYLIST`. A
+deterministic exclusion, such as a missing per-tag limit key, is reported
+directly. Count and duration caps need the whole collection, so `--trace`
+leaves them unsimulated.
+
+### Simulate exact selection
+
+`--trace-full SONG` includes the same tree and playlist inputs, then performs
+a dry-run scan and selection. It may read and update the tag cache like a
+normal run, but it writes no playlists:
+
+```bash
+uv run genplis --trace-full song.mp3 Favorites.m3ug
+uv run genplis --trace-full song.mp3 ~/Music
+```
+
+```text
+selection:
+  /home/me/Music/Favorites.m3ug
+    matches: 1
+    sorted position: 1 of 1
+    sort: title
+      title = 'test'
+    dedupe: kept: missing dedupe key
+    count: no count cap
+    per-tag: no per-tag cap
+    duration: no duration cap
+    result: IN PLAYLIST at position 1
+```
+
+The simulation reports the target's sorted position, dedupe winner, count,
+per-tag and duration cap results, and the final playlist position. Failures
+read `result: NOT IN PLAYLIST` with a reason. A filter that does not match is
+reported as `NO MATCH`; `@NO-PLAYLIST` files are reported without simulating
+them. If the target is excluded, outside the scan root, matches no filter, or
+only matches `@NO-PLAYLIST` filters, the scan is skipped and the reason is
+printed.
+
+With `-q`, the requested tree or trace is still printed while progress chatter
+is suppressed. `-qq` suppresses all normal output; errors still go to standard
+error. None of the debugging modes writes a playlist.
+
+### Normal runs
+
 To process only one `.m3ug` file and regenerate its playlist:
 
 ```bash
 uv run genplis /path/to/Favorites.m3ug
 ```
 
-This prints the parsed rules, scans the file's directory for music, and writes
+This prints the rule tree, scans the file's directory for music, and writes
 `Favorites.m3u` next to it. Other `.m3ug` files under that directory are
-ignored. The single-file form also prints the `@sort` keys when the file has
-them. To see the parsed rules, the effective sort order, each matching song,
-and match counts during a full run, add `--verbose`:
+ignored. Add `--verbose` to print each discovered filter tree, the effective
+sort order, each matching song, and match counts during a full run:
 
 ```bash
 uv run genplis --verbose ~/Music
