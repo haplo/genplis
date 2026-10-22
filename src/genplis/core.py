@@ -16,7 +16,9 @@ import psutil
 from . import db
 from .config import Config, load_config
 from .diagnostics import (
+    FilterSelectionTrace,
     PlaylistInput,
+    SelectionTrace,
     format_file_trace,
     format_filter_tree,
     format_playlist_input,
@@ -823,19 +825,42 @@ def _sort_matches(matched: list[Match], spec: SortSpec) -> None:
         start = end
 
 
-def _dedupe_matches(matched: list[Match]) -> list[Match]:
+def _match_path(match: Match) -> Path:
+    """Return the filesystem path behind a playlist match."""
+    return match.entry.path if isinstance(match.entry, PlaylistEntry) else match.entry
+
+
+def _dedupe_matches(
+    matched: list[Match],
+    *,
+    trace: FilterSelectionTrace | None = None,
+    target: Path | None = None,
+) -> list[Match]:
     """Keep the first entry for each normalized key after ordering."""
     seen: set[tuple[SortValue, ...]] = set()
+    winners: dict[tuple[SortValue, ...], Match] | None = (
+        {} if trace is not None else None
+    )
     kept: list[Match] = []
     for match in matched:
         values = match.dedupe_values
         if not values or any(value is None for value in values):
+            if trace is not None and target == _match_path(match):
+                trace.dedupe_result = "kept: missing dedupe key"
             kept.append(match)
             continue
         key = tuple(value for value in values if value is not None)
         if key in seen:
+            if trace is not None and target == _match_path(match):
+                trace.dedupe_result = "excluded: duplicate key"
+                if winners is not None and key in winners:
+                    trace.dedupe_winner = _match_path(winners[key])
             continue
         seen.add(key)
+        if winners is not None:
+            winners[key] = match
+        if trace is not None and target == _match_path(match):
+            trace.dedupe_result = "kept: unique key"
         kept.append(match)
     return kept
 
@@ -845,6 +870,9 @@ def _select_matches(
     limit: int | None,
     limit_per: LimitPerTag | None,
     max_duration: float | None,
+    *,
+    trace: FilterSelectionTrace | None = None,
+    target: Path | None = None,
 ) -> list[Match]:
     """Apply the count, per-tag, and duration caps in order."""
     count_cap = limit if limit is not None and limit > 0 else None
@@ -852,21 +880,51 @@ def _select_matches(
     duration_cap = (
         max_duration if max_duration is not None and max_duration > 0 else None
     )
-    if count_cap is None and per_tag_cap is None and duration_cap is None:
+    if (
+        count_cap is None
+        and per_tag_cap is None
+        and duration_cap is None
+        and trace is None
+    ):
         return matched
+
+    if trace is not None:
+        trace.limit_result = (
+            "no count cap" if count_cap is None else f"count cap {count_cap}"
+        )
+        trace.per_tag_result = (
+            "no per-tag cap"
+            if per_tag_cap is None
+            else f"per-tag cap {per_tag_cap.count} per {per_tag_cap.tag}"
+        )
+        trace.duration_result = (
+            "no duration cap"
+            if duration_cap is None
+            else f"duration cap {duration_cap:g}s"
+        )
 
     selected: list[Match] = []
     per_tag_counts: dict[SortValue, int] = {}
     total_duration = 0.0
     for match in matched:
+        is_target = trace is not None and target == _match_path(match)
         if count_cap is not None and len(selected) >= count_cap:
+            if trace is not None and not trace.selected:
+                trace.limit_result = f"excluded: count cap {count_cap} reached"
             break
         limit_key: SortValue | None = None
         if per_tag_cap is not None:
             limit_key = match.limit_key
             if limit_key is None:
+                if is_target and trace is not None:
+                    trace.per_tag_result = f"excluded: missing {per_tag_cap.tag} key"
                 continue
             if per_tag_counts.get(limit_key, 0) >= per_tag_cap.count:
+                if is_target and trace is not None:
+                    trace.per_tag_result = (
+                        f"excluded: per-tag cap {per_tag_cap.count} per "
+                        f"{per_tag_cap.tag} reached"
+                    )
                 continue
         duration = match.duration if match.duration is not None else 0.0
         if (
@@ -874,11 +932,29 @@ def _select_matches(
             and selected
             and total_duration + duration > duration_cap
         ):
+            if trace is not None and not trace.selected:
+                trace.duration_result = (
+                    f"excluded: {duration:g}s would exceed {duration_cap:g}s cap"
+                )
             break
         selected.append(match)
         total_duration += duration
         if per_tag_cap is not None and limit_key is not None:
             per_tag_counts[limit_key] = per_tag_counts.get(limit_key, 0) + 1
+        if is_target and trace is not None:
+            trace.selected = True
+            trace.position = len(selected)
+            if count_cap is not None:
+                trace.limit_result = f"selected within count cap {count_cap}"
+            if per_tag_cap is not None:
+                trace.per_tag_result = (
+                    f"selected within per-tag cap {per_tag_cap.count} per "
+                    f"{per_tag_cap.tag}"
+                )
+            if duration_cap is not None:
+                trace.duration_result = (
+                    f"selected within duration cap {duration_cap:g}s"
+                )
     return selected
 
 
@@ -1000,6 +1076,8 @@ def process_directory(
     retain_tags: bool = False,
     filters: Mapping[Path, M3UGFile] | None = None,
     stats: TagStatsCollector | None = None,
+    dry_run: bool = False,
+    selection_trace: SelectionTrace | None = None,
 ) -> tuple[dict[Path, Tags], dict[Path, M3UGFile]]:
     """Traverse the directory and process all files.
 
@@ -1026,6 +1104,12 @@ def process_directory(
     When ``stats`` is given, each supported file's tags are also recorded in
     the collector. The collector keeps only aggregate counters, so tags are
     still released after every file.
+
+    With ``selection_trace``, the pipeline records where that trace's target
+    file ends up while sorting, deduplicating and applying the caps. Only the
+    target is recorded; the normal match lists are still released. With
+    ``dry_run``, playlists are not written, but tags, cache rows and the
+    selection pipeline behave exactly as in a normal run.
 
     """
     if not directory.is_dir():
@@ -1144,30 +1228,98 @@ def process_directory(
     # list with its effective spec (worker results can arrive out of order)
     # and write each playlist.
     for filter_file, parsed in all_filters.items():
+        spec = parsed.sort if parsed.sort is not None else args.config.output.sort
+        trace_entry: FilterSelectionTrace | None = None
+        target: Path | None = None
+        if selection_trace is not None:
+            target = selection_trace.target
+            trace_entry = selection_trace.filters.setdefault(
+                filter_file,
+                FilterSelectionTrace(filter_file=filter_file),
+            )
+            trace_entry.sort = spec
+            trace_entry.sort_is_default = parsed.sort is None
+            trace_entry.dedupe = parsed.dedupe
+            trace_entry.limit = parsed.limit
+            trace_entry.limit_per = parsed.limit_per
+            trace_entry.max_duration = parsed.max_duration
+            trace_entry.no_playlist = parsed.no_playlist
+
         if parsed.no_playlist:
+            if trace_entry is not None:
+                trace_entry.considered = False
+                trace_entry.reason = "@NO-PLAYLIST"
             continue
         matched = matches[filter_file]
-        spec = parsed.sort if parsed.sort is not None else args.config.output.sort
+        if trace_entry is not None:
+            trace_entry.total_matches = len(matched)
         _sort_matches(matched, spec)
+
+        target_match: Match | None = None
+        if trace_entry is not None and target is not None:
+            for index, match in enumerate(matched):
+                if _match_path(match) == target:
+                    target_match = match
+                    trace_entry.sorted_position = index + 1
+                    trace_entry.sort_values = match.sort_values
+                    trace_entry.dedupe_values = match.dedupe_values
+                    trace_entry.limit_key = match.limit_key
+                    break
+            if target_match is None:
+                trace_entry.considered = False
+                trace_entry.reason = "no match"
+
         if parsed.dedupe:
-            matched = _dedupe_matches(matched)
-        matched = _select_matches(
-            matched, parsed.limit, parsed.limit_per, parsed.max_duration
+            matched = _dedupe_matches(
+                matched,
+                trace=trace_entry if target_match is not None else None,
+                target=target,
+            )
+        target_available = (
+            trace_entry is not None
+            and target is not None
+            and any(_match_path(match) == target for match in matched)
         )
+        if (
+            trace_entry is not None
+            and target_match is not None
+            and not target_available
+        ):
+            trace_entry.considered = False
+            trace_entry.reason = trace_entry.dedupe_result or "removed before selection"
+        matched = _select_matches(
+            matched,
+            parsed.limit,
+            parsed.limit_per,
+            parsed.max_duration,
+            trace=trace_entry if target_available else None,
+            target=target,
+        )
+        if trace_entry is not None and target_available:
+            trace_entry.considered = True
+            if trace_entry.selected:
+                trace_entry.reason = "selected"
+            elif trace_entry.reason is None:
+                reasons = [
+                    result
+                    for result in (
+                        trace_entry.limit_result,
+                        trace_entry.per_tag_result,
+                        trace_entry.duration_result,
+                    )
+                    if result.startswith("excluded:")
+                ]
+                trace_entry.reason = "; ".join(reasons) or "not selected"
+
         if args.verbosity.is_verbose:
             print(f"\nFiltering songs and generating playlist for {filter_file}")
             print(f"Sort order: {format_sort_spec(spec)}")
             print(f"Files that match the filter {filter_file}:")
             for match in matched:
-                path = (
-                    match.entry.path
-                    if isinstance(match.entry, PlaylistEntry)
-                    else match.entry
-                )
-                print(f"  {path}")
+                print(f"  {_match_path(match)}")
         if args.verbosity.shows_progress:
             print(f"Filter file {filter_file} matched {len(matched)} songs")
-        if matched:
+        if matched and not dry_run:
             playlist_file = filter_file.with_suffix(".m3u")
             if args.verbosity.shows_progress:
                 print(f"Creating playlist {playlist_file}")

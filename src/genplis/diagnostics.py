@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from .m3ug import (
@@ -94,6 +94,42 @@ class PlaylistInputsTrace:
     """Playlist inputs for every filter considered by a trace."""
 
     inputs: tuple[PlaylistInput, ...]
+
+
+@dataclass(slots=True)
+class FilterSelectionTrace:
+    """Where the traced file ended up while selecting one playlist."""
+
+    filter_file: Path
+    sort: SortSpec = ()
+    sort_is_default: bool = False
+    total_matches: int = 0
+    sorted_position: int | None = None
+    sort_values: SortValues = ()
+    dedupe: tuple[str, ...] | None = None
+    dedupe_values: SortValues = ()
+    dedupe_result: str = ""
+    dedupe_winner: Path | None = None
+    limit: int | None = None
+    limit_result: str = ""
+    limit_per: LimitPerTag | None = None
+    limit_key: SortValue | None = None
+    per_tag_result: str = ""
+    max_duration: float | None = None
+    duration_result: str = ""
+    selected: bool = False
+    position: int | None = None
+    no_playlist: bool = False
+    considered: bool = True
+    reason: str | None = None
+
+
+@dataclass(slots=True)
+class SelectionTrace:
+    """Selection results for the target file across several filters."""
+
+    target: Path
+    filters: dict[Path, FilterSelectionTrace] = field(default_factory=dict)
 
 
 def _filename_label(filename: str | None) -> str:
