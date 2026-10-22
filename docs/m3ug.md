@@ -1,39 +1,33 @@
 # The M3UG filter language
 
-M3UG is the small language *genplis* uses to describe playlists. A `.m3ug`
-file contains one rule or directive per line, and the file's filter expression
-must match a song for it to appear in the generated playlist.
-
-This page is the language reference. For the tags you can use in rules, see
-[Tags](tags.md). For running
-genplis and the generated playlist format, see
-[Usage](usage.md).
+M3UG describes which songs belong in a playlist and how to order them. This
+is the language reference; start with the [Quickstart](index.md#quickstart)
+to make your first playlist. For tag names and units, see [Tags](tags.md);
+for running genplis, see [Usage](usage.md).
 
 ## How M3UG files work
 
-- Put a `.m3ug` file anywhere inside your music collection. The file name
-  becomes the playlist name: `Favorites.m3ug` generates `Favorites.m3u` in the
-  same directory.
-- One file can define one playlist. To create several playlists, use several
-  `.m3ug` files. A file with `@NO-PLAYLIST` is a shared fragment and does not
-  produce a playlist of its own.
-- Filters are applied to every music file found under the `PATH` given on the
-  command line (or configured in the config file), not just to the folder that
-  contains the `.m3ug` file. Use `--filter FILE` to process one specific
-  filter; a `.m3ug` file cannot be passed as `PATH`.
-- All rules in a file are combined with **AND**. Add `@OR` to a rule to join it
-  to the previous rule as an alternative, and `@NOT` to negate one rule.
-- A file may contain directives such as `@SORT` to choose the playlist order.
-  Without one, the `[output] sort` setting applies (default `filename`).
-- If no song matches, no playlist file is written.
-- An empty `.m3ug` file has no rules and therefore matches every song.
+A `.m3ug` file defines one playlist. `Favorites.m3ug` produces `Favorites.m3u`
+in the same directory when songs match. Each filter applies to the whole
+collection you scan, not just the folder containing the filter.
+
+The file contains two kinds of lines:
+
+- **Rules** select songs by their tags. Ordinary rules must all match;
+  `@OR` and `@NOT` express alternatives and exclusions.
+- **Directives** control the result: `@SORT`, `@DEDUPE`, `@LIMIT`, and
+  `@MAX-DURATION` order and narrow the selection. `@INCLUDE` reuses another
+  file, and `@NO-PLAYLIST` marks a shared fragment.
+
+An empty file has no rules and matches every song. See
+[Generated playlists](usage.md#generated-playlists) for output behavior.
 
 ## File syntax
 
-A rule is one line with three parts:
+A rule has three parts, separated by spaces or tabs:
 
 ```text
-tag-set operator value-set
+tag operator value
 ```
 
 For example:
@@ -43,215 +37,168 @@ genre ~ "Heavy Metal"
 *rating >= 4
 ```
 
-A file may also contain directives such as `@SORT`; they control the playlist
-and are not filter rules. See [Ordering](#ordering).
+- Use **one rule or directive per line** in a UTF-8 text file. A byte-order
+  mark and either LF or CRLF line endings are accepted.
+- Blank lines and leading/trailing whitespace are ignored. Values can
+  contain spaces, as in `artist = DANCE WITH THE DEAD`.
+- Put **comments on their own lines**, starting with `#` after any indentation.
+  There are no inline comments: `genre = Rock # favorite` searches for the
+  literal value `Rock # favorite`.
+- Names beginning with `@` are case-insensitive. Unknown names, malformed
+  rules, and invalid directive arguments stop the run with a file and line
+  number. Rule modifiers cannot be applied to directives.
 
-Rules about the file itself:
+## Special tag names
 
-- **Encoding:** UTF-8. A byte-order mark is accepted and ignored.
-- **Comments:** lines whose first non-whitespace character is `#`. There are
-  no inline comments: `genre = Rock # my favorite` compares `genre` with the
-  literal string `Rock # my favorite`.
-- **Blank lines:** ignored.
-- **Line endings:** LF or CRLF both work.
-- **Whitespace:** leading and trailing whitespace is ignored. Tag, operator,
-  and value may be separated by one or more spaces or tabs. The value itself
-  may contain spaces (`artist = DANCE WITH THE DEAD`).
-- **One rule per line.** A rule that cannot be split into
-  `tag-set operator value-set` is rejected with
-  `<filename:line>: Invalid filter syntax`, and the run stops.
-- **Directives and modifiers:** names that start with `@` are
-  case-insensitive. Unknown names are errors.
+Use tag names as shown by [file inspection](tags.md#inspect-your-tags).
+Names always ignore case: `Artist` and `artist` are the same.
+
+A leading `*` explicitly selects a **calculated value**:
+
+| Name | Meaning |
+| --- | --- |
+| `artist`, `genre`, `year`, etc. | Embedded metadata |
+| `*duration`, `*filename`, `*is_lossless`, etc. | Calculated audio properties |
+| `*rating` | Normalized 0–5 rating, currently calculated from `fmps_rating` |
+
+Unprefixed audio-property names such as `duration` remain supported, but an
+embedded tag with the same name takes precedence. Unprefixed `rating` uses
+the raw tag when present and otherwise falls back to the calculated rating.
+Use `*rating` when you want the normalized scale, even if a raw rating also
+exists. Files with only a raw rating have no calculated rating; see
+[Rating](tags.md#rating).
+
+The prefix works in rules, tag sets, sort keys, dedupe keys, and per-tag
+limits. It is **not a wildcard**: `*artist` is missing because artist is not
+a calculated property. See [Calculated audio properties](tags.md#calculated-audio-properties)
+for the available names and units.
 
 ## Values and types
 
-The value at the end of the line is interpreted as follows:
+| Written as | Interpreted as |
+| --- | --- |
+| `Metal` or `Heavy Metal` | Text; bare values may contain spaces |
+| `"Heavy Metal"` or `'Heavy Metal'` | Text with the surrounding quotes removed |
+| `1980` | Integer |
+| `4.5` | Decimal number |
+| `true` or `false` | Boolean for `=` and `!=` |
 
-| Written as | Type | Notes |
-| --- | --- | --- |
-| `Metal` | string | Bare words may contain spaces. |
-| `"Heavy Metal"` | string | Quotes are stripped. Either `'` or `"` works. |
-| `'DANCE WITH THE DEAD'` | string | Use quotes to be explicit, or when the value has leading/trailing spaces. |
-| `1980` | integer | Only digits. |
-| `4.5` | float | Digits, a dot, and digits. |
-| `true` / `false` | boolean | Only for `=` and `!=`. |
+**Quote text, not numbers**, when the distinction matters. `track = 7`
+matches a numeric value or the string `"7"`; `track = "7"` requires text.
+Quotes always make a string, even for `"true"` or a duration such as `"10m"`.
+They also preserve spaces inside the quotes.
 
-Details that matter when writing filters:
+Numbers must use digits, optionally followed by a dot and more digits.
+Forms such as `-1`, `+7`, `.5`, `5.`, `1e3`, and `0x10` are text, not
+numbers. Numeric comparisons reject them.
 
-- Numbers are only recognized in the forms `123` and `123.45`. Negative
-  numbers, `+7`, `.5`, `5.`, `1e3`, and `0x10` are treated as strings.
-- Quoting always produces a string, even for digits or booleans:
-  `rating = "4"` compares against the string `"4"`, and `genre = "true"`
-  against the string `"true"`.
-- Quotes support `\"`, `\'`, and `\\`. Other backslashes are preserved, which
-  keeps regular expressions such as `\d+` readable.
-- Numeric tag values stored as strings by the tag library are compared
-  numerically when the rule value is a number. This is why `track = 7` matches
-  a track tag of `"7"`.
-- Text matching is case-insensitive by default. Tag *names* are always
-  case-insensitive. Add `@CASE` to one rule to make it case-sensitive.
-- For text operators (`~`, `^`, `$`, `%`), `true` and `false` are the strings
-  `"true"` and `"false"`. For numeric comparisons they are errors.
+Quoted strings support `\"`, `\'`, and `\\`. Other backslashes are preserved,
+so regexes such as `\d+` stay readable. Text operators (`~`, `^`, `$`, `%`)
+treat their value as text, including bare `true`, `false`, or digits.
 
 ## Operators
 
-| Operator | Meaning | Rule value | Tag value |
-| --- | --- | --- | --- |
-| `=` | equal | string, number, or boolean | same type; numeric strings are coerced for numeric rules |
-| `!=` | not equal | string, number, or boolean | inverse of `=` |
-| `~` | contains | string | string, or a list of strings |
-| `^` | starts with | string | string, or a list of strings |
-| `$` | ends with | string | string, or a list of strings |
-| `%` | regex search | string | string, or a list of strings |
-| `<` | less than | number only | number or numeric string |
-| `<=` | less than or equal | number only | number or numeric string |
-| `>` | greater than | number only | number or numeric string |
-| `>=` | greater than or equal | number only | number or numeric string |
+| Operator | Meaning | Example |
+| --- | --- | --- |
+| `=` | Equals | `genre = Metal` |
+| `!=` | Does not equal | `genre != Pop` |
+| `~` | Contains | `genre ~ Metal` |
+| `^` | Starts with | `title ^ Live` |
+| `$` | Ends with | `title $ Remix` |
+| `%` | Regular-expression search | `*filename % \.mp3$` |
+| `<`, `<=` | Less than / at most | `duration < 5m` |
+| `>`, `>=` | Greater than / at least | `year >= 1980` |
 
-There are no aliases or alternative spellings. Any other operator is rejected
-with `Unrecognized operator`.
+These are the only operator spellings. Equality accepts text, numbers, or
+booleans; text operators need string tag values; numeric comparisons accept
+numbers and numeric strings, but not booleans.
 
-### Equality: `=`
+### Text and case
 
-- `genre = Metal` matches exactly `Metal`, not `Heavy Metal` or `Metalcore`.
-  Matching is case-insensitive, so `genre = metal` also matches `Metal`.
-- `rating = 5` matches a numeric rating of 5, including a tag stored as the
-  string `"5"`.
-- `is_lossless = true` and `is_lossless = false` compare boolean tags.
-- If a tag holds several values, the rule matches when **any** value equals
-  the expected value.
-- A song without the tag does not match.
-- Add `@CASE` when case matters:
-  `@CASE artist = "DANCE WITH THE DEAD"` does not match
-  `Dance With The Dead`.
+Text matching ignores case unless the rule starts with `@CASE`:
 
-### Inequality: `!=`
+```text
+@CASE artist = "DANCE WITH THE DEAD"
+```
 
-- `genre != Pop` matches songs where genre is `Rock`, `Metal`, and so on.
-- If a tag holds several values, the rule matches only when **all** values
-  differ from the expected value.
-- A song **without** the tag matches, because the missing value is not equal
-  to the expected value. This is often surprising; use `=` when you want to
-  require a tag to exist.
+`genre = Metal` matches exactly `Metal`, ignoring case. `genre ~ Metal`
+also matches `Heavy Metal` and `Metalcore`. Use `is_lossless = true` for a
+boolean property; text operators don't match numbers or booleans.
 
-### Text operators: `~`, `^`, `$`, `%`
+`%` searches anywhere in a value rather than requiring the whole value to
+match. Use regex anchors when needed: `genre % ^Metal` matches a prefix.
+Regexes are case-insensitive unless `@CASE` is used; inline regex flags can
+override that. Invalid patterns are reported with a file and line number.
 
-- `~` is a substring test, `^` a prefix test, and `$` a suffix test. They are
-  case-insensitive unless the rule starts with `@CASE`.
-- `genre ~ Metal` matches `Metal`, `Heavy Metal`, `Metalcore`, and
-  `Nu Metal`. `@CASE genre ~ metal` matches only the exact lower-case
-  substring.
-- `%` is a regular-expression **search**, not a full match. `genre % ^Metal`
-  matches values that start with `Metal`, and `filename % \.mp3$` matches
-  MP3 paths.
-- `%` is compiled with `re.IGNORECASE` unless the rule has `@CASE`. Inline
-  flags such as `(?-i)` still work and can override that for part of the
-  pattern. Invalid patterns are parse errors with a file and line.
-- A list of values matches when any element satisfies the operator.
-- Non-string tag values never match. Applying a text operator to a boolean
-  tag logs one warning per rule per run; use `= true` or `= false` instead.
+### Numeric comparisons
 
-### Numeric comparisons: `<`, `<=`, `>`, `>=`
-
-- The expected value must be an unquoted number. `year > "1980"` is a parse
-  error because the quoted value is a string; write `year > 1980`.
-- `true` and `false` are not accepted. `rating > true` is a parse error.
-- Numbers, numeric strings, and lists containing them are compared
-  numerically. `track > 7` matches `"8"` as well as `8`.
-- A list matches when any element passes the comparison.
-- A missing tag, a non-numeric string, or a boolean never matches.
-- `@CASE` has no meaning for comparisons and is rejected.
-- Units depend on the tag: `duration` is in seconds, `bitrate` in kilobits
-  per second, `samplerate` in hertz. See
-  [Tags](tags.md).
+Write an unquoted number, as in `year > 1980`, not `year > "1980"`.
+Numeric strings in tags are converted, so `track > 7` matches `"8"` as
+well as `8`. Missing or non-numeric values never pass a numeric comparison.
+`@CASE` is not allowed on numeric comparisons.
 
 ### Multi-value rules
 
-Square brackets make a set on either side of a rule:
+Use brackets and `|` to list alternative tags or values:
 
 ```text
 [genre | style] = [Metal | Rock]
 [artist | albumartist] = ["DANCE WITH THE DEAD" | Perturbator]
-[filename | comment] ~ [Live | Bootleg]
-[artist | albumartist] % ["^A" | "^B"]
+[*filename | comment] ~ [Live | Bootleg]
 ```
 
-A bracketed token is a set only when it is unquoted, starts with `[`, ends
-with `]`, and contains at least one top-level `|`. The scanner respects
-quotes and escapes:
+A positive test passes if **any tag/value pair** matches. `!=` passes only
+when **no pair** is equal: `[genre | style] != [Pop | Rap]` rejects a song
+if either tag has either exact value. The same any/all behavior applies when
+a song's tag itself has several values; see [Multi-valued tags](tags.md#multi-valued-tags).
 
-```text
-title = [Untitled]         # literal string "[Untitled]"
-title = [Intro | Outro]    # two-value set
-title = "[Intro | Outro]"  # literal string
-artist = ["AC|DC" | "A|B"] # pipes inside quotes are data
-```
+Numeric comparisons allow several tags but only one value:
+`[year | original_year] >= 1980` is valid; `rating > [3 | 4]` is not.
+`@CASE` applies to the whole rule.
 
-Tag-set elements are bare tag names: no quotes and no spaces. Value-set
-elements are normal values, so numbers, quoted strings, and booleans work as
-they do in a single-value rule. Empty elements and nested unquoted brackets
-are errors.
+Set syntax has a few boundaries:
 
-Let `L` be the tag set and `R` the value set. Positive operators match when
-**any** pair from a tag in `L` and a value in `R` matches. `!=` is set
-non-membership: it matches only when **no** pair is equal. Missing tags
-contribute no pairs, so positive operators are false and `!=` is true.
-
-```text
-[genre | style] != [Pop | Rap]
-```
-
-is false when either tag has `Pop` or `Rap`. Comparison operators accept
-exactly one value on the right, but they can still use multiple tags:
-
-```text
-rating > [3 | 4]               # parse error
-rating > 4                     # valid
-[year | original_year] >= 1980 # valid
-```
-
-`@CASE` applies to every pair of a set rule.
+- A set must be unquoted and contain at least one `|`. `[Untitled]` alone
+  is literal text, not a one-item set.
+- Quote literal brackets or pipes when needed: `title = "[Intro | Outro]"`
+  is one string, and `artist = ["AC|DC" | "A|B"]` is a two-value set.
+- Tag names within a set are unquoted and contain no spaces. Values use
+  the normal types above. Empty elements and nested unquoted sets are errors.
 
 ### Missing values
 
-A tag that is absent is treated as missing. Zero and false are real values,
-not missing ones, so `track = 0`, `comment = ""`, and `is_lossless = false`
-work as expected.
+An absent or unknown tag does not match positive tests such as `=`, `~`, or
+`>=`. **It does match `!=`**: `genre != Pop` includes songs without a genre.
+With tag sets, missing tags contribute no values to compare.
+
+Zero, `false`, and an empty string are real values: `track = 0`,
+`is_lossless = false`, and `comment = ""` can match. Ignored or oversized
+tags behave as missing; see [Missing or discarded tags](tags.md#missing-or-discarded-tags).
 
 ## Duration literals
 
-Rules whose left-hand side is only `duration` or `*duration` accept duration
-literals instead of plain seconds:
-
-```text
-duration >= 10m
-duration < 1h30m
-duration >= 2m15s
-duration <= 1:30
-*duration >= 10m
-```
+Rules using only `duration` or `*duration` accept readable durations as well
+as plain seconds. `@MAX-DURATION` accepts the same forms.
 
 | Form | Meaning |
 | --- | --- |
-| `600` | seconds |
-| `10m` | minutes |
-| `1h30m` | hours and minutes |
-| `2m15s` | minutes and seconds |
-| `30s` | seconds |
-| `2d` | days |
+| `600` | 600 seconds |
+| `30s`, `10m`, `2h`, `2d` | Seconds, minutes, hours, days |
+| `2m15s`, `1h30m` | Combined units |
 | `1:30` | 90 seconds (`mm:ss`) |
 | `1:30:00` | 90 minutes (`h:mm:ss`) |
 
-Units are lowercase `s`, `m`, `h`, and `d`. In `mm:ss`, seconds must be 0–59
-and minutes may exceed 59. In `h:mm:ss`, minutes and seconds must be 0–59.
-Quoted values stay strings, so `duration = "10m"` does not become a number.
-For any other tag, `10m` is an ordinary string; numeric operators reject it.
-Duration literals are also accepted by `@MAX-DURATION`.
+For example, `*duration >= 10m` selects songs at least ten minutes long.
+Units must be lowercase. In colon forms, seconds must be 0–59; minutes must
+also be 0–59 in `h:mm:ss`, but may exceed 59 in `mm:ss`.
+
+Quotes prevent conversion: `duration = "10m"` compares text. For other tags,
+`10m` is ordinary text, so a numeric test such as `bitrate > 10m` is invalid.
 
 ## Combining rules
 
-Plain rules are ANDed. `@OR` joins a rule to the preceding OR group, and `@NOT`
-negates the rule on its line:
+Ordinary rules are joined with **AND**. `@OR` joins its rule to the previous
+rule as an alternative; consecutive `@OR` lines extend that group:
 
 ```text
 genre = Metal
@@ -259,558 +206,256 @@ genre = Metal
 *rating >= 4
 ```
 
-This means `(genre = Metal OR genre = Rock) AND *rating >= 4`. A plain rule
-starts a new AND group; consecutive `@OR` rules join the current group. `@OR`
-cannot be the first rule, and `@NOT` always applies to one rule, never to a
-group. There are no parentheses or nested groups.
+This means `(genre = Metal OR genre = Rock) AND *rating >= 4`. A new ordinary
+rule starts a new AND group. `@OR` cannot be the first rule, and there are no
+parentheses or nested OR groups.
 
-`@OR` and `@NOT` can be combined in any order. `@CASE` can appear with either
-or both:
+`@NOT` negates only the rule on its line, not a group:
 
 ```text
-@CASE artist = "DANCE WITH THE DEAD"
-@OR @NOT @CASE genre = Pop
+genre ~ Metal
+@NOT title ~ Live
 ```
 
-Directives do not end an OR group. This is still one OR group:
+You can combine `@OR`, `@NOT`, and `@CASE` in any order before a rule.
+Directives don't end an OR group: placing `@SORT title` between
+`genre = Metal` and `@OR genre = Rock` would not change their grouping.
 
-```text
-genre = Metal
-@SORT title
-@OR genre = Rock
-```
-
-`@NOT *rating >= 4` matches songs without a calculated rating because a missing
-tag makes the comparison false. `*rating < 4` does not match them.
+Be careful with missing values: `@NOT *rating >= 4` includes songs with no
+calculated rating, because their comparison fails and is then negated.
+`*rating < 4` excludes those songs.
 
 ## Ordering
 
-By default, entries are ordered by `[output] sort`, which is `filename` (the
-absolute path) unless configured otherwise. Add one `@SORT` line to a `.m3ug`
-file to choose a different order for that playlist:
+Use one `@SORT` line with comma-separated keys, highest priority first:
 
 ```text
-@SORT tag [asc|desc] [, tag [asc|desc]]...
-```
-
-Keys are compared from left to right. The direction applies to the key before
-it and defaults to `asc`. A second `@SORT` line is an error; put all keys on
-one line.
-
-```text
-# Title, ascending
-@SORT title
-
-# Newest first
-@SORT year desc
-
-# Album order
-@SORT artist, album, disc, track, title
-
-# Highest rated first, then album order
 @SORT *rating desc, artist, album, disc, track, title
 ```
 
-`duration` and `filename` are ordinary sort keys too:
+Each key optionally takes `asc` (the default) or `desc`. Later keys break
+ties on earlier ones. Some useful choices:
 
-```text
-# Shortest songs first
-@SORT duration
+| Directive | Order |
+| --- | --- |
+| `@SORT title` | Title, A–Z |
+| `@SORT year desc` | Newest first |
+| `@SORT artist, album, disc, track, title` | Album order |
+| `@SORT duration` | Shortest first |
+| `@SORT filename` | Absolute file path |
+| `@SORT` | Directory-walk order, overriding included and configured defaults |
 
-# Longest songs first
-@SORT duration desc
+Without `@SORT`, the [configured sort](config.md#sort) applies; its default
+is `filename`. `filename` and `*filename` sort by absolute path, not the
+relative path written into the playlist. Calculated names such as `*rating`
+work as keys just as they do in rules.
 
-# Path order, matching the default
-@SORT filename
-```
+Numeric-looking values sort numerically (`2` before `10`); other text sorts
+case-insensitively. Multi-valued tags use their first non-empty value. Text
+sorting is not locale-aware, and digits within text are not sorted as numbers.
 
-`filename` is the absolute path of the file, not the relative path written
-into the playlist. `year` and `original_year` are the release-date tags
-available from tinytag; there is no separate `date` tag.
+### Missing sort values
+
+Missing or empty values sort last **for that key**, in either direction.
+Equal or jointly missing values move the comparison to the next key; a
+missing lower-priority key never overrides a higher-priority difference.
+For example, with `@SORT artist, album, track`, a song without a track number
+still stays with its album. Complete ties keep directory-walk order.
 
 ### Random order
 
-`random` is a sort key that shuffles entries. It must be the last key and
-cannot take `asc` or `desc`:
+| Directive | Effect |
+| --- | --- |
+| `@SORT random` | Shuffle all matching songs |
+| `@SORT random 42` | Shuffle reproducibly with a fixed seed |
+| `@SORT artist, random 7` | Sort artists, then shuffle within each artist |
 
-```text
-# Shuffle every matching song
-@SORT random
-
-# Reproducible shuffle with a fixed seed
-@SORT random 42
-
-# Shuffle within each artist, keeping artists in order
-@SORT artist, random 7
-```
-
-With preceding keys, genplis sorts by those keys and then shuffles equal-key
-runs. With only `random`, it shuffles everything. Without a seed the order
-changes every run; a seed makes it reproducible. Each playlist gets its own
-random generator.
-
-`@SORT` with no keys means directory-walk order and overrides both included
-and configured defaults:
-
-```text
-@SORT
-```
-
-### Missing values
-
-A missing value sorts after every present value **for that key only**. It does
-not demote the entry past an entry that differs on a higher-priority key. When
-both entries are missing the same key, or have the same value, comparison
-continues to the lower-priority keys. So an entry with a missing `disc` is not
-automatically sent to the bottom of the playlist:
-
-```text
-@SORT artist, album, disc, track, title
-```
-
-| Song | artist | album | disc | track | title |
-| --- | --- | --- | --- | --- | --- |
-| 1 | Rammstein | Herzeleid | 1 | 4 | Asche zu Asche |
-| 2 | Rammstein | Rosenrot | | | Benzin |
-| 3 | Rammstein | Mutter | | | Zwitter |
-| 4 | VAST | Turquoise & Crimson | 1 | 3 | Lost |
-
-The order is 1, 3, 2, 4. The `Rammstein` group comes before `VAST`, and within
-`Rammstein` the albums are ordered `Herzeleid`, `Mutter`, `Rosenrot`. Songs 2 and 3 have
-no disc or track tags, but those keys are never reached because their albums already
-differ.  Missing values are last in both ascending and descending order, and equal keys
-keep directory-walk order.
-
-Numeric-looking values sort numerically, so `track` values `2` and `10` come
-out in the expected order. Other text sorts case-insensitively. Multi-valued
-tags use their first non-empty value. A `*` prefix selects the calculated
-value, just as in rules; `*filename` also sorts by the absolute path.
-Use `*rating` for normalized 0–5 ratings. Unprefixed `rating` retains its
-raw-or-derived behavior; see [Rating](tags.md#rating).
-
-## Playlist limits
-
-Directives constrain how many entries are selected after ordering:
-
-```text
-@LIMIT 50
-@LIMIT 3 PER artist
-@MAX-DURATION 2h
-```
-
-`@LIMIT` takes a non-negative integer. `0` disables the count cap. The
-playlist stops after that many entries.
-
-`@LIMIT N PER tag` limits how many entries can share the same tag value. `PER`
-is case-insensitive, and `N` is a non-negative integer; `0` disables the
-per-tag cap. Tag values are normalized like sort values: multi-valued tags use
-their first non-empty value, text is compared case-insensitively, and
-numeric-looking strings are compared as numbers. Entries whose tag is missing
-or empty are excluded while a per-tag cap is active.
-The tag may have a `*` prefix to select a calculated value, for example
-`@LIMIT 3 PER *rating`.
-
-A global cap and a per-tag cap can be used together:
-
-```text
-@LIMIT 100
-@LIMIT 3 PER artist
-```
-
-This keeps at most 100 entries overall and at most 3 per artist. Entries
-skipped by the per-tag cap do not count toward `@LIMIT` or `@MAX-DURATION`;
-selection continues with the next entry.
-
-`@MAX-DURATION` takes a duration literal or `0`. `0` disables the cap.
-Entries are added in playlist order until the next one would push the total
-over the limit. Unknown durations count as zero. If the first entry alone is
-longer than the cap, it is still included.
-
-```text
-@LIMIT 100
-@MAX-DURATION 1h30m
-*rating >= 4
-```
-
-All limits are selection constraints, not filters: they apply after ordering
-and after `@DEDUPE`, and they do not change which songs match the rules.
+`random` must be the last key and cannot take `asc` or `desc`. Its optional
+seed is a non-negative integer. Without a seed, the shuffle changes each run;
+with preceding keys, only equal-key groups are shuffled.
 
 ## Removing duplicates
 
-`@DEDUPE` removes entries that share the same values for the listed tags:
+`@DEDUPE` keeps the **first entry after sorting** for each combination of
+listed tag values:
 
 ```text
-@DEDUPE title
-@DEDUPE album, title
+@DEDUPE artist, title
 ```
 
-Keys work like sort values: multi-valued tags use their first non-empty value,
-text is compared case-insensitively, and numeric-looking strings are compared
-as numbers. After ordering, the **first** entry for each key is kept and later
-duplicates are dropped. Entries that are missing any key are always kept, so
-`@DEDUPE title` never removes a song without a title.
-Keys may have a `*` prefix to select calculated values, as in rules and sorting.
+This removes repeated artist/title pairs. Choose your sort order to decide
+which copy wins. Keys use the [same normalization as sorting](#ordering),
+including the first non-empty value for multi-valued tags; calculated keys
+such as `*duration` are allowed too.
 
-Dedupe runs before `@LIMIT` and `@MAX-DURATION`, so duplicate entries do not
-consume either cap. `@DEDUPE` with no tags disables dedupe; this is useful when
-an included file supplies a default set of keys (see `@INCLUDE`).
+Entries missing any key are always kept. Dedupe happens before playlist
+limits, so removed duplicates don't consume a cap. Use `@DEDUPE` with no
+keys to disable a default inherited through `@INCLUDE`.
+
+## Playlist limits
+
+After matching, genplis **sorts → removes duplicates → applies limits**.
+Limits narrow the final playlist; they don't change which rules a song
+matches.
+
+| Directive | Effect |
+| --- | --- |
+| `@LIMIT 100` | Keep at most 100 songs |
+| `@LIMIT 3 PER artist` | Keep at most three songs per artist |
+| `@MAX-DURATION 1h30m` | Stop when the next song would exceed 90 minutes |
+
+The three limits can be combined. Counts must be non-negative integers;
+`0` disables the corresponding cap. Use at most one of each form in a file,
+just as `@SORT` and `@DEDUPE` each take one line.
+
+For **per-tag limits**, `PER` ignores case and the key uses the same
+normalization as sorting. A calculated key is allowed, for example
+`@LIMIT 3 PER *rating`. Songs missing that key, or with an empty value, are
+excluded while the cap is active. Songs skipped by this cap don't consume
+the total count or duration budget; selection continues with the next song.
+
+For **duration limits**, unknown durations count as zero. If the first
+selected song alone exceeds the cap, it is still included. Otherwise,
+selection stops rather than looking for a shorter song that might fit.
 
 ## Including other files
 
-`@INCLUDE` loads rules and default directives from another file:
+`@INCLUDE` reuses another file's rules and default directives:
 
 ```text
-@INCLUDE Base.m3ug
-@INCLUDE "shared/Short songs.m3ug"
-```
-
-The rest of the line is the path. Matching quotes are stripped, `~` is
-expanded, and relative paths resolve from the directory of the file containing
-the `@INCLUDE`. Absolute paths work too. Any readable file may be included;
-the `.m3ug` extension is only a convention. If the path does not already end
-in `.m3ug` and does not exist, genplis also tries the same name with `.m3ug`
-appended, so `@INCLUDE Base` loads `Base.m3ug` and `@INCLUDE INC.good` loads
-`INC.good.m3ug`. An existing exact path always wins. Includes may nest up to 32
-levels deep.
-
-Included rules are ANDed with the current file's rules as separate groups.
-`@OR` and `@NOT` only apply within the file that writes them:
-
-```text
-# Base.m3ug
-genre = Metal
-
-# Main.m3ug
 @INCLUDE Base.m3ug
 *rating >= 4
-@OR *rating = 5
 ```
 
-This matches metal songs rated 4 or 5; the included `genre = Metal` is not
-part of the `*rating` OR group. `@INCLUDE` cannot be used under `@OR` or
-`@NOT`.
+The included rules and this file's rules must **all** match. Their OR groups
+remain separate: an `@OR` here cannot join a rule inside `Base.m3ug`.
+Rule modifiers cannot be applied to `@INCLUDE`.
+
+Paths follow these rules:
+
+- Relative paths start at the directory of the file containing `@INCLUDE`,
+  not the current working directory. Absolute paths and `~` work too.
+- Quote paths with spaces: `@INCLUDE "shared/Short songs.m3ug"`.
+- An existing exact path wins. Otherwise, if the path doesn't end in
+  `.m3ug`, genplis tries appending it: `@INCLUDE Base` can load `Base.m3ug`.
+  Any readable filter file can be included; the extension is a convention.
+- Includes may nest up to 32 levels. Missing or unreadable files,
+  directories, cycles, excessive depth, and syntax errors stop the run.
+  Errors identify the including file, line, and path.
 
 ### Directive merging
 
-Included files provide defaults, and the current file's directives override
-them regardless of where the `@INCLUDE` line or the directive appears:
+Included directives are **defaults**. The including file's own directive
+always wins, regardless of line position. For example, if `Base.m3ug` sets
+`@SORT artist` and `@LIMIT 10`, this file inherits the sort but limits the
+playlist to five entries:
 
 ```text
-# Base.m3ug
-@SORT artist
-@LIMIT 10
-@DEDUPE title
-
-# Main.m3ug
 @LIMIT 5
 @INCLUDE Base.m3ug
 ```
 
-The resulting playlist sorts by `artist`, dedupes by title, and keeps at most
-5 entries. When a file includes several files, later includes win per
-directive. Nested includes resolve depth-first, so each file's own directives
-override its includes before the result is passed to its parent.
-
-All include problems are fatal and name the including file, line, and path:
-missing files, unreadable files, directories, cycles, excessive depth, and
-invalid syntax in an included file. For example:
-
-```text
-Metal.m3ug:3: cannot include "Base.m3ug": file not found
-Metal.m3ug:3: include cycle: Metal.m3ug -> Base.m3ug -> Metal.m3ug
-```
+When including several files, later includes win **per directive**. Nested
+includes resolve their own defaults before passing them to the parent. A
+local `@SORT` with no keys, `@DEDUPE` with no keys, or a limit of `0` can
+explicitly disable the corresponding inherited setting.
 
 ## Files without a playlist
 
-Use `@NO-PLAYLIST` for include fragments and other filter-only files:
+Mark a reusable fragment with `@NO-PLAYLIST`:
 
 ```text
 @NO-PLAYLIST
-genre = Metal
-*rating >= 4
+genre ~ Metal
 ```
 
-The file is still parsed and may be included by other files, but genplis does
-not match songs against it directly and does not write a `.m3u` for it. Any
-existing playlist with the same name is left untouched. The flag applies only
-to the file that contains it and is never inherited through `@INCLUDE`.
-
-## Special tag names
-
-Tag names are matched case-insensitively, so `Artist`, `artist`, and `ARTIST`
-are the same. Three groups are worth knowing about:
-
-- **Embedded tags** such as `artist`, `album`, `title`, `genre`, `year`,
-  `track`, `disc`, `composer`, `comment`, and format-specific extras such as
-  `original_year`. These come from the audio file.
-- **Calculated audio properties** such as `filename`, `duration`, `bitrate`,
-  `samplerate`, `channels`, `bitdepth`, `filesize`, `mime_type`, and
-  `is_lossless`. Prefix them with `*` to force the calculated value:
-  `*duration >= 600`. Unprefixed names remain supported, but an embedded tag
-  with the same name takes precedence.
-- **`*rating`**, the recommended way to filter and sort by normalized 0–5
-  ratings, calculated from `fmps_rating` even when a raw `rating` exists.
-  Unprefixed `rating` uses the raw tag when present and otherwise falls back
-  to the calculated value. Raw rating scales vary; see [Tags](tags.md#rating).
-
-The `*` prefix is not a wildcard. It works in tag sets too, for example
-`[*filename | comment] ~ Live`. Only calculated names are available with
-this prefix: `*artist` is missing even if an embedded `artist` exists.
-
-An unknown or absent tag is not an error: the rule simply does not match
-(except for `!=`, which does match).
+The file is parsed for includes but doesn't match songs directly or generate
+its own playlist. An existing `.m3u` is left untouched. This flag takes no
+arguments, applies only to its own file, and is never inherited by files
+that include it.
 
 ## Examples
 
-The repository keeps working examples in
-[`examples/`](https://github.com/haplo/genplis/tree/main/examples). Each one
-is a complete playlist definition.
-
-### Songs from the 1980s
+The [example gallery](https://github.com/haplo/genplis/tree/main/examples)
+contains complete filters you can copy. For a more tailored playlist,
+combine rules and directives:
 
 ```text
-# songs made in the 1980s, the best decade
-original_year >= 1980
-original_year < 1990
-```
-
-Two rules are ANDed. `original_year` is an ID3 `TORY`-style field exposed by
-the tag library; not every file has it. Use `year` instead if your files only
-carry the release year. Inspect a file to see which one you have.
-
-### Four- and five-star songs
-
-```text
-# 4-star songs or better
+# An hour of highly rated metal, with some artist variety
+genre ~ Metal
 *rating >= 4
+@SORT random
+@DEDUPE artist, title
+@LIMIT 3 PER artist
+@MAX-DURATION 1h
 ```
 
-And the stricter version:
-
-```text
-# 5-star songs
-*rating >= 5
-```
-
-`*rating` uses the normalized 0–5 scale, currently derived from `fmps_rating`.
-Files with only a raw `rating` have no calculated rating; inspect your files
-first if nothing matches. See [Tags](tags.md#rating).
-
-### Great metal songs
-
-```text
-# great metal songs (4-star or better)
-genre ~ "Metal"
-*rating >= 4
-```
-
-Both rules must pass. Because `~` is a substring test, this also matches
-`Heavy Metal`, `Nu Metal`, and `Metalcore`; use `genre = Metal` for an exact
-match.
-
-### Musicals
-
-```text
-genre ~ "Musical"
-```
-
-### More patterns
-
-Exact artist:
-
-```text
-artist = "DANCE WITH THE DEAD"
-```
-
-Album and album artist:
-
-```text
-album = "Some Album"
-albumartist = "Some Artist"
-```
-
-Long songs, in seconds:
-
-```text
-duration >= 600
-```
-
-Lossless files (by MIME type, since booleans cannot be compared directly):
-
-```text
-mime_type ~ flac
-```
-
-Songs whose path contains a folder name:
-
-```text
-filename ~ /Live/
-```
-
-Combining several conditions:
-
-```text
-genre ~ Synthwave
-year >= 2010
-*rating >= 4
-duration < 480
-```
+Both rules must match. The results are shuffled, duplicate artist/title pairs
+are removed, and selection then respects the per-artist and duration caps.
+For other common patterns, use `year >= 1980` with `year < 1990` for 1980s
+releases, or `*is_lossless = true` for lossless files. See
+[Common tags](tags.md#common-tags) and [Rating](tags.md#rating) before choosing
+fields for your collection.
 
 ## Testing and debugging filters
 
-To see the tags of one file:
+First [inspect a song's tags](tags.md#inspect-your-tags) to check its names
+and values. Then choose the tool for your question:
 
-```bash
-uv run genplis /path/to/song.mp3
-```
+| Option | Answers | Work performed |
+| --- | --- | --- |
+| `--show-rules` | How was the filter parsed? | Rules only; no audio or cache access |
+| `--trace SONG` | Does this song match? | Evaluate one song; no full selection simulation |
+| `--trace-full SONG` | Will this song reach the playlist? | Simulate ordering, dedupe, and limits across the collection when needed |
 
-Calculated values are printed with a `*` prefix (`*duration`, `*filename`,
-`*rating`) to show that they were not embedded in the file.
-Use these names directly in filters to force calculated values. Names without
-`*` remain supported, but embedded tags take precedence.
+All three modes **leave playlists untouched**. `--filter` selects a specific
+filter; without it, genplis discovers filters under the collection path.
 
 ### Show parsed rules
 
-`--show-rules` parses the filters named with `--filter`, or every non-excluded
-`.m3ug` file under a directory, without opening the cache, scanning audio, or
-writing playlists:
-
 ```bash
-uv run genplis --show-rules --filter Favorites.m3ug
-uv run genplis --show-rules ~/Music
+genplis --show-rules --filter ~/Music/Favorites.m3ug
 ```
 
-```text
-Favorites.m3ug
-  AND
-    @INCLUDE Base.m3ug (Favorites.m3ug:1) -> /home/me/Music/Base.m3ug
-      genre ~ Synthwave (line 2)
-    rating >= 4 (line 2)
-  directives:
-    sort: artist
-```
-
-Includes are shown inline. They are always ANDed before the including file's
-own rules, so the tree follows evaluation order, not source order. Nested
-includes recurse in the same way. The header keeps the path exactly as written,
-including quotes, and shows the resolved target so extension inference and `~`
-expansion are visible.
-
-A directive-only include does not participate in matching and has no pass/fail
-status. Its directives still apply:
-
-```text
-  @INCLUDE Defaults.m3ug (Favorites.m3ug:1) -> /home/me/Music/Defaults.m3ug
-    (no rules; directives only)
-    directives:
-      sort: artist
-```
-
-Rules keep their original literal text. Quoted numbers stay strings, so
-`rating = "4"` is different from `rating = 4`; `"true"` is a string while
-`true` is a boolean. Duration literals show their converted value, for example
-`duration >= 10m (600s)`. `@CASE` adds `[case-sensitive]`.
+The tree shows included files inline, resolved include paths, original rule
+values, and effective directives. Includes appear before local rules because
+the tree follows evaluation order. A directive-only include has no match
+test, but its defaults still apply.
 
 ### Trace one file
 
-`--trace SONG` evaluates every selected filter for one audio file and prints
-`PASS`, `FAIL`, and `SKIP` nodes. The tags consulted are listed first, and the
-target is loaded through the normal tag cache path (so that one file may be
-parsed or refreshed).
-
 ```bash
-uv run genplis --trace song.mp3 --filter Favorites.m3ug
-uv run genplis --trace song.mp3 ~/Music
+genplis ~/Music --trace ~/Music/song.mp3 --filter ~/Music/Favorites.m3ug
 ```
 
+A trace might contain this excerpt:
+
 ```text
-Favorites.m3ug: FAIL
-  FAIL AND
     PASS artist = "Test Artist" (line 3)
       tag artist = ['Test Artist'] -> 'Test Artist'
     FAIL rating >= 4 (line 4)
       missing tag rating (no rating tag)
     SKIP genre ~ Metal (line 5) (short-circuited: an earlier AND child failed)
-playlist inputs:
-  sort: title
-    title = 'test'
-  dedupe: album
-    album = <missing> (kept)
-  selection: not simulated; use --trace-full
-NO MATCH
 ```
 
-`SKIP` means evaluation short-circuited: the rule was never applied. A missing
-tag is shown explicitly. Calculated ratings report their source, multi-value
-tags show the list, and `@CASE` rules are marked. Playlist inputs list the
-effective sort and dedupe keys, limits, duration and `@NO-PLAYLIST`. A
-deterministic exclusion, such as a missing per-tag limit key, is reported
-directly. Count and duration caps need the whole collection, so `--trace`
-leaves them unsimulated.
+`PASS` and `FAIL` show evaluated rules; `SKIP` means the result was already
+decided, so that rule wasn't tested. Traces identify missing values,
+calculated rating sources, and case-sensitive rules. They also show the
+effective playlist inputs, but don't simulate the full selection.
 
 ### Simulate exact selection
 
-`--trace-full SONG` includes the same tree and playlist inputs, then performs
-a dry-run scan and selection. It may read and update the tag cache like a
-normal run, but it writes no playlists:
-
 ```bash
-uv run genplis --trace-full song.mp3 --filter Favorites.m3ug
-uv run genplis --trace-full song.mp3 ~/Music
+genplis ~/Music --trace-full ~/Music/song.mp3 --filter ~/Music/Favorites.m3ug
 ```
 
-```text
-selection:
-  /home/me/Music/Favorites.m3ug
-    matches: 1
-    sorted position: 1 of 1
-    sort: title
-      title = 'test'
-    dedupe: kept: missing dedupe key
-    count: no count cap
-    per-tag: no per-tag cap
-    duration: no duration cap
-    result: IN PLAYLIST at position 1
-```
+This adds the song's sorted position, any dedupe winner or cap failure, and
+the final result: `IN PLAYLIST` with a position, or `NOT IN PLAYLIST` with a
+reason. A song that fails the rules is reported as `NO MATCH`. Excluded songs,
+songs outside the collection, and `@NO-PLAYLIST` filters aren't simulated.
 
-The simulation reports the target's sorted position, dedupe winner, count,
-per-tag and duration cap results, and the final playlist position. Failures
-read `result: NOT IN PLAYLIST` with a reason. A filter that does not match is
-reported as `NO MATCH`; `@NO-PLAYLIST` files are reported without simulating
-them. If the target is excluded, outside the scan root, matches no filter, or
-only matches `@NO-PLAYLIST` filters, the scan is skipped and the reason is
-printed.
+Both trace modes may update the tag cache: `--trace` loads only the target;
+`--trace-full` may scan the collection. Add `-q` to keep the requested tree
+or trace without progress chatter; `-qq` suppresses all normal output.
 
-With `-q`, the requested tree or trace is still printed while progress chatter
-is suppressed. `-qq` suppresses all normal output; errors still go to standard
-error. None of the debugging modes writes a playlist.
-
-### Normal runs
-
-To process only one `.m3ug` file and regenerate its playlist:
-
-```bash
-uv run genplis ~/Music --filter ~/Music/Favorites.m3ug
-```
-
-This prints the rule tree, scans the collection (the `PATH`, or the configured
-one when omitted), and writes `Favorites.m3u` next to the filter. Other `.m3ug`
-files are ignored. Add `--verbose` to print each discovered filter tree, the
-effective sort order, each matching song, and match counts during a full run:
-
-```bash
-uv run genplis --verbose ~/Music
-```
-
-## Current limitations
-
-- No nested OR groups or parentheses. `@NOT` applies to one rule only.
-- No negative or scientific-notation numbers.
-- No inline comments.
-- Numeric comparisons need a numeric rule value; quoted numbers are strings.
-- One `@SORT` line per file; combine all keys on that line.
-- Missing sort values always go last; there is no nulls-first option.
-- Text sorting is case-insensitive but not locale-aware or natural-number
-  aware; numeric-looking values are compared as numbers.
-
-Some of these are on the [roadmap](dev.md#roadmap).
+For normal playlist generation, see [Usage](usage.md).
