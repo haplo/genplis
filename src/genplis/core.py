@@ -202,71 +202,8 @@ def setup_argparse() -> argparse.ArgumentParser:
         ),
         metavar="PATH",
     )
-    parser.add_argument(
-        "-e",
-        "--exclude",
-        help=(
-            "Exclude files matching this regex. Replaces the config file's "
-            "exclude list when used."
-        ),
-        action="append",
-        default=None,
-        type=regex_type,
-    )
-
-    config_group = parser.add_mutually_exclusive_group()
-    config_group.add_argument(
-        "--config",
-        help="Read settings from this file instead of the XDG default",
-        type=Path,
-        metavar="FILE",
-    )
-    config_group.add_argument(
-        "--no-config",
-        help="Do not read any configuration file",
-        action="store_true",
-    )
-
-    parser.add_argument(
-        "-v",
-        "--verbose",
-        help="Print verbose diagnostics",
-        action=argparse.BooleanOptionalAction,
-        default=None,
-    )
-    parser.add_argument(
-        "-q",
-        "--quiet",
-        help=(
-            "Reduce output. Repeat (-qq) to print nothing except errors. "
-            "Cannot be combined with --verbose."
-        ),
-        action="count",
-        default=0,
-    )
-    parser.add_argument(
-        "--color",
-        help=(
-            "Force colored output. Use --no-color to disable it; by default "
-            "color follows the terminal and the config file."
-        ),
-        action=argparse.BooleanOptionalAction,
-        default=None,
-    )
-    parser.add_argument(
-        "--theme",
-        help="Color theme for the terminal background",
-        choices=[theme.value for theme in Theme],
-        default=None,
-        metavar="THEME",
-    )
-    parser.add_argument(
-        "--db",
-        help="Use this database file instead of the XDG cache default",
-        type=Path,
-        metavar="PATH",
-    )
-    parser.add_argument(
+    input_group = parser.add_argument_group("Input and filtering")
+    input_group.add_argument(
         "-f",
         "--filter",
         dest="filters",
@@ -279,7 +216,18 @@ def setup_argparse() -> argparse.ArgumentParser:
         type=Path,
         metavar="FILE",
     )
-    parser.add_argument(
+    input_group.add_argument(
+        "-e",
+        "--exclude",
+        help=(
+            "Exclude files matching this regex. Replaces the config file's "
+            "exclude list when used."
+        ),
+        action="append",
+        default=None,
+        type=regex_type,
+    )
+    input_group.add_argument(
         "-j",
         "--jobs",
         help=(
@@ -290,16 +238,29 @@ def setup_argparse() -> argparse.ArgumentParser:
         default=None,
         metavar="N",
     )
-    mode_group = parser.add_mutually_exclusive_group()
-    mode_group.add_argument(
-        "--clean",
-        help=(
-            "Remove cache entries for files that no longer exist. With a "
-            "directory PATH, process it normally first and clean only entries "
-            "under it; without PATH, clean the whole database."
-        ),
-        action="store_true",
+
+    output_group = parser.add_argument_group("Playlist output")
+    output_group.add_argument(
+        "--overwrite",
+        help="Overwrite existing generated playlists",
+        action=argparse.BooleanOptionalAction,
+        default=None,
     )
+    output_group.add_argument(
+        "--include-source",
+        help="Embed the M3UG filter source as comments in generated playlists",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+    )
+    output_group.add_argument(
+        "--extended-m3u",
+        help="Write #EXTM3U and #EXTINF metadata (artist, title, duration)",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+    )
+
+    inspection_group = parser.add_argument_group("Inspection and maintenance")
+    mode_group = inspection_group.add_mutually_exclusive_group()
     mode_group.add_argument(
         "--show-rules",
         help=(
@@ -336,7 +297,7 @@ def setup_argparse() -> argparse.ArgumentParser:
         ),
         action="store_true",
     )
-    parser.add_argument(
+    inspection_group.add_argument(
         "-t",
         "--tag",
         dest="tags",
@@ -348,23 +309,69 @@ def setup_argparse() -> argparse.ArgumentParser:
         default=None,
         metavar="TAG",
     )
-    parser.add_argument(
-        "--overwrite",
-        help="Overwrite existing generated playlists",
+    mode_group.add_argument(
+        "--clean",
+        help=(
+            "Remove cache entries for files that no longer exist. With a "
+            "directory PATH, process it normally first and clean only entries "
+            "under it; without PATH, clean the whole database."
+        ),
+        action="store_true",
+    )
+
+    terminal_group = parser.add_argument_group("Terminal output")
+    terminal_group.add_argument(
+        "-v",
+        "--verbose",
+        help="Print verbose diagnostics",
         action=argparse.BooleanOptionalAction,
         default=None,
     )
-    parser.add_argument(
-        "--include-source",
-        help="Embed the M3UG filter source as comments in generated playlists",
+    terminal_group.add_argument(
+        "-q",
+        "--quiet",
+        help=(
+            "Reduce output. Repeat (-qq) to print nothing except errors. "
+            "Cannot be combined with --verbose."
+        ),
+        action="count",
+        default=0,
+    )
+    terminal_group.add_argument(
+        "--color",
+        help=(
+            "Force colored output. Use --no-color to disable it; by default "
+            "color follows the terminal and the config file."
+        ),
         action=argparse.BooleanOptionalAction,
         default=None,
     )
-    parser.add_argument(
-        "--extended-m3u",
-        help="Write #EXTM3U and #EXTINF metadata (artist, title, duration)",
-        action=argparse.BooleanOptionalAction,
+    terminal_group.add_argument(
+        "--theme",
+        help="Color theme for the terminal background",
+        choices=[theme.value for theme in Theme],
         default=None,
+        metavar="THEME",
+    )
+
+    config_group = parser.add_argument_group("Configuration and cache")
+    config_source_group = config_group.add_mutually_exclusive_group()
+    config_source_group.add_argument(
+        "--config",
+        help="Read settings from this file instead of the XDG default",
+        type=Path,
+        metavar="FILE",
+    )
+    config_source_group.add_argument(
+        "--no-config",
+        help="Do not read any configuration file",
+        action="store_true",
+    )
+    config_group.add_argument(
+        "--db",
+        help="Use this database file instead of the XDG cache default",
+        type=Path,
+        metavar="PATH",
     )
     return parser
 
