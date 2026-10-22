@@ -115,7 +115,7 @@ Install from Git with [uv](https://docs.astral.sh/uv/), put a `.m3ug` filter
 in your music collection, and run Genplis. It writes an `.m3u` next to the
 filter when songs match. Your audio files stay untouched.
 
-[Walk through your first playlist →](index.md#your-first-playlist)
+[Walk through your first playlist →](index.md#quickstart)
 
 </div>
 

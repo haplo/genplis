@@ -79,7 +79,7 @@ uv run genplis -t genre ~/Music
 The report uses the same `*` marker for calculated properties and respects
 `[tags] ignore` and `[tags] max_size`. See
 [Tag statistics](usage.md#inspecting-tags-across-a-collection)
-for the full behavior.
+for collection-wide inspection commands.
 
 ## Tag names
 
@@ -92,7 +92,7 @@ for the full behavior.
 - Names that look like audio properties are listed in
   [Calculated audio properties](#calculated-audio-properties).
 
-### Common embedded tags
+### Common tags
 
 Most files expose some of these:
 

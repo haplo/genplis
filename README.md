@@ -52,10 +52,9 @@ uv run genplis ~/Music
 
 Genplis reads the tags of every supported audio file, caches them in SQLite,
 applies the filter, and writes `~/Music/Favorites.m3u` if anything matched.
-Later runs only re-read files that changed. Large cold scans parse files in
-parallel by default; see [Parallel parsing](https://github.com/haplo/genplis/blob/main/docs/usage.md#parallel-parsing)
-for `--jobs`. Filtering reuses tag lookups and bounded comparison results
-across playlists and songs; see [What a run does](https://github.com/haplo/genplis/blob/main/docs/usage.md#what-a-run-does).
+Later runs only re-read files that changed. See the
+[usage guide](https://github.com/haplo/genplis/blob/main/docs/usage.md)
+for common commands and troubleshooting.
 
 To regenerate just one playlist without processing the other filters in the
 collection, select the filter with `--filter`:
@@ -90,7 +89,7 @@ The guides below are the same Markdown sources used by the website.
 
 | Guide | Contents |
 | --- | --- |
-| [Usage](https://github.com/haplo/genplis/blob/main/docs/usage.md) | Options, single-file inspection, tag statistics, generated playlists, the tag cache, `--clean` |
+| [Usage](https://github.com/haplo/genplis/blob/main/docs/usage.md) | Common commands, tag inspection, playlist behavior, troubleshooting, cache cleaning |
 | [Configuration](https://github.com/haplo/genplis/blob/main/docs/config.md) | Config file location, every setting, precedence, annotated example |
 | [M3UG reference](https://github.com/haplo/genplis/blob/main/docs/m3ug.md) | Filter language: operators, sets, OR/NOT, ordering, limits, includes, examples |
 | [Tags](https://github.com/haplo/genplis/blob/main/docs/tags.md) | Available tag names, calculated audio properties, rating handling |
