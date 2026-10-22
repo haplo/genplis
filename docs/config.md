@@ -195,7 +195,7 @@ Changing `ignore` invalidates the cache.
 The default is usually `~/.cache/genplis/genplis.db`. `~` is expanded and
 relative paths are resolved against the config file. The database is
 disposable; deleting it only costs a re-parse on the next run. See
-[Usage](usage.md#cache) for
+[Usage](usage.md#cleaning-the-cache) for
 cache behavior and cleaning.
 
 ## `[output]`

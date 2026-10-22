@@ -140,15 +140,13 @@ and with `--verbose`, which prints a line for every cache update instead.
 Don't combine `-q` and `-v`. If a run fails, read the error message; filter
 syntax errors identify the file and line to fix.
 
-## Cache
+## Cleaning the cache
 
 Genplis automatically caches tags to make repeat runs faster. You normally
 don't need to manage this cache. It lives at `~/.cache/genplis/genplis.db`
 on a typical setup; see [Database settings](config.md#database) to change it
 and [Cache invalidation](config.md#settings-that-invalidate-the-cache) for
 when it is rebuilt automatically.
-
-### Cleaning the cache
 
 After deleting or moving music, you can remove entries for missing files:
 
