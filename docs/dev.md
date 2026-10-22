@@ -33,6 +33,7 @@ src/genplis/
     tags.py         tag extraction and calculated properties
     m3ug.py         filter, directive and @sort parser, rule nodes
     diagnostics.py  rule trees, evaluation traces, selection rendering
+    output.py       color themes, terminal detection, output streams
     sorting.py      sort specs, value normalization, comparison
     m3u.py          playlist writer
     stats.py        tag statistics collector and report renderer
@@ -96,6 +97,14 @@ path, resolved path, directive line and fully parsed included file. These
 fields are parser metadata only; they do not affect matching. `diagnostics.py`
 is a pure renderer over that metadata and over the trace evaluators, so it can
 rebuild include boundaries without reparsing source text.
+
+`output.py` owns ANSI escape codes, the dark and light palettes, `NO_COLOR`
+and TTY detection, `COLORFGBG` parsing, and the `Output` stream wrapper.
+Renderers accept a `Palette` and paint semantic roles such as `PASS`, `FAIL`,
+`SKIP`, directives, tag names, and values. A disabled palette returns plain
+text, so tests and redirected output never need ANSI stripping. Theme
+resolution is separate from color enablement: `auto` reads `COLORFGBG` and
+falls back to dark when the background cannot be determined.
 
 `@INCLUDE` is resolved recursively in the main process. Each file produces a
 `Directives` value with `UNSET` markers, merges its includes in include order,

@@ -2,8 +2,17 @@ from pathlib import Path
 
 import pytest
 
-from genplis.diagnostics import format_filter_tree
+from genplis.diagnostics import (
+    FilterSelectionTrace,
+    SelectionTrace,
+    format_file_trace,
+    format_filter_tree,
+    format_selection_trace,
+    format_tags_consulted,
+    trace_file,
+)
 from genplis.m3ug import parse_m3ug
+from genplis.output import Palette, Theme
 from genplis.sorting import parse_sort_spec
 
 
@@ -163,6 +172,87 @@ def test_renders_no_playlist_and_empty_filter() -> None:
     assert "    no playlist: yes (@NO-PLAYLIST)" in output
 
     assert format_filter_tree(parse_m3ug("")) == "(always)"
+
+
+def test_tree_colors_directives_tags_and_values() -> None:
+    parsed = parse_m3ug('@SORT artist\ngenre ~ "Metal"\n')
+    palette = Palette(theme=Theme.DARK, enabled=True)
+
+    output = format_filter_tree(
+        parsed,
+        title="Favorites.m3ug",
+        palette=palette,
+    )
+
+    assert "\x1b[1;38;5;255mFavorites.m3ug\x1b[0m" in output
+    assert "\x1b[38;5;208mdirectives:\x1b[0m" in output
+    assert "\x1b[38;5;208msort: artist\x1b[0m" in output
+    assert "\x1b[38;5;51mgenre\x1b[0m" in output
+    assert '\x1b[38;5;220m"Metal"\x1b[0m' in output
+
+
+def test_light_theme_uses_different_codes() -> None:
+    parsed = parse_m3ug("genre = Metal\n")
+    palette = Palette(theme=Theme.LIGHT, enabled=True)
+
+    output = format_filter_tree(parsed, palette=palette)
+
+    assert "\x1b[38;5;30mgenre\x1b[0m" in output
+    assert "\x1b[38;5;90mMetal\x1b[0m" in output
+
+
+def test_trace_statuses_use_semantic_colors() -> None:
+    parsed = parse_m3ug("artist = X\nrating >= 4\ngenre ~ Metal\n")
+    palette = Palette(theme=Theme.DARK, enabled=True)
+
+    result = trace_file(
+        parsed,
+        {"artist": "X", "rating": 3, "genre": "Metal"},
+    )
+    output = format_file_trace(result, title="Favorites.m3ug", palette=palette)
+
+    assert "\x1b[38;5;40mPASS\x1b[0m" in output
+    assert "\x1b[38;5;196mFAIL\x1b[0m" in output
+    assert "\x1b[38;5;117mSKIP\x1b[0m" in output
+
+
+def test_tags_consulted_color_tag_names() -> None:
+    parsed = parse_m3ug("artist = X\n")
+    result = trace_file(parsed, {"artist": "X"})
+    palette = Palette(theme=Theme.DARK, enabled=True)
+
+    output = format_tags_consulted(result.consulted, palette=palette)
+
+    assert "\x1b[38;5;51martist\x1b[0m" in output
+
+
+def test_selection_trace_uses_semantic_colors() -> None:
+    trace = SelectionTrace(target=Path("song.mp3"))
+    trace.filters[Path("selected.m3ug")] = FilterSelectionTrace(
+        filter_file=Path("selected.m3ug"),
+        total_matches=1,
+        sorted_position=1,
+        sort=parse_sort_spec("title"),
+        sort_values=("song",),
+        selected=True,
+        position=1,
+        limit_result="no count cap",
+        per_tag_result="no per-tag cap",
+        duration_result="no duration cap",
+    )
+    trace.filters[Path("missing.m3ug")] = FilterSelectionTrace(
+        filter_file=Path("missing.m3ug"),
+        considered=False,
+        reason="no match",
+    )
+    palette = Palette(theme=Theme.DARK, enabled=True)
+
+    output = format_selection_trace(trace, palette=palette)
+
+    assert "\x1b[38;5;40mIN PLAYLIST\x1b[0m" in output
+    assert "\x1b[38;5;196mNO MATCH\x1b[0m" in output
+    assert "\x1b[38;5;208msort:\x1b[0m" in output
+    assert "\x1b[38;5;51mtitle\x1b[0m" in output
 
 
 def test_renderer_does_not_open_files(

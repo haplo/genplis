@@ -51,6 +51,7 @@ from genplis.m3ug import (
     NameNode,
     ValueNode,
 )
+from genplis.output import Theme
 from genplis.sorting import parse_sort_spec
 from genplis.types import Tags, TagValue, Verbosity
 
@@ -2093,6 +2094,34 @@ def test_resolve_args_verbosity() -> None:
     assert resolve(["-qqq"]) is Verbosity.REALLY_QUIET
 
 
+def test_resolve_args_color_and_theme() -> None:
+    parser = setup_argparse()
+
+    defaults = resolve_args(parser.parse_args(["/music"]), Config())
+    assert defaults.color is None
+    assert defaults.theme is Theme.AUTO
+
+    configured = resolve_args(
+        parser.parse_args(["/music"]),
+        Config(general=GeneralConfig(color=False, theme=Theme.LIGHT)),
+    )
+    assert configured.color is False
+    assert configured.theme is Theme.LIGHT
+
+    overridden = resolve_args(
+        parser.parse_args(["--color", "--theme", "dark", "/music"]),
+        Config(general=GeneralConfig(color=False, theme=Theme.LIGHT)),
+    )
+    assert overridden.color is True
+    assert overridden.theme is Theme.DARK
+
+    disabled = resolve_args(
+        parser.parse_args(["--no-color", "/music"]),
+        Config(),
+    )
+    assert disabled.color is False
+
+
 def test_resolve_args_jobs_precedence(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("genplis.core.auto_workers", lambda: 8)
     parser = setup_argparse()
@@ -2110,6 +2139,13 @@ def test_resolve_args_jobs_precedence(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_setup_argparse_rejects_negative_jobs() -> None:
     with pytest.raises(SystemExit) as exc_info:
         setup_argparse().parse_args(["--jobs", "-1", "/music"])
+
+    assert exc_info.value.code == 2
+
+
+def test_setup_argparse_rejects_invalid_theme() -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        setup_argparse().parse_args(["--theme", "neon", "/music"])
 
     assert exc_info.value.code == 2
 

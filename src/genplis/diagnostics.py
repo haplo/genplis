@@ -21,6 +21,7 @@ from .m3ug import (
     ValueNode,
     is_number,
 )
+from .output import ColorRole, Palette
 from .sorting import SortSpec, SortValue, SortValues, format_sort_spec
 from .types import TagValue
 
@@ -174,14 +175,21 @@ def format_rule_value(rule: RuleNode) -> str:
     return text
 
 
-def format_rule(rule: RuleNode, current_filename: str | None) -> str:
+def format_rule(
+    rule: RuleNode,
+    current_filename: str | None,
+    palette: Palette | None = None,
+) -> str:
     """Format one rule with its source label and case handling."""
+    colors = Palette() if palette is None else palette
     text = (
-        f"{rule.name_node.name} {rule.OPERATOR} {format_rule_value(rule)}"
-        f"{_source_label(rule.source, current_filename)}"
+        f"{colors.tag(rule.name_node.name)} "
+        f"{colors.operator(rule.OPERATOR)} "
+        f"{colors.value(format_rule_value(rule))}"
+        f"{colors.source(_source_label(rule.source, current_filename))}"
     )
     if rule.case_sensitive:
-        text += " [case-sensitive]"
+        text += f" {colors.directive('[case-sensitive]')}"
     return text
 
 
@@ -189,56 +197,65 @@ def _directive_lines(
     parsed: M3UGFile,
     default_sort: SortSpec | None,
     indent: str,
+    palette: Palette,
 ) -> list[str]:
     rows: list[str] = []
     row = f"{indent}  "
     if parsed.sort is not None:
-        rows.append(f"{row}sort: {format_sort_spec(parsed.sort)}")
+        text = f"sort: {format_sort_spec(parsed.sort)}"
+        rows.append(f"{row}{palette.directive(text)}")
     elif default_sort is not None:
-        rows.append(f"{row}sort: {format_sort_spec(default_sort)} (default)")
+        text = f"sort: {format_sort_spec(default_sort)} (default)"
+        rows.append(f"{row}{palette.directive(text)}")
     if parsed.limit is not None:
         suffix = " (disabled)" if parsed.limit == 0 else ""
-        rows.append(f"{row}limit: {parsed.limit}{suffix}")
+        rows.append(f"{row}{palette.directive(f'limit: {parsed.limit}{suffix}')}")
     if parsed.limit_per is not None:
         suffix = " (disabled)" if parsed.limit_per.count == 0 else ""
-        rows.append(
-            f"{row}per-tag limit: {parsed.limit_per.count} per "
+        text = (
+            f"per-tag limit: {parsed.limit_per.count} per "
             f"{parsed.limit_per.tag}{suffix}"
         )
+        rows.append(f"{row}{palette.directive(text)}")
     if parsed.dedupe is not None:
         keys = ", ".join(parsed.dedupe)
-        rows.append(f"{row}dedupe: {keys if keys else '(disabled)'}")
+        text = f"dedupe: {keys if keys else '(disabled)'}"
+        rows.append(f"{row}{palette.directive(text)}")
     if parsed.max_duration is not None:
         suffix = " (disabled)" if parsed.max_duration == 0 else ""
-        rows.append(
-            f"{row}max duration: {_format_seconds(parsed.max_duration)}s{suffix}"
-        )
+        text = f"max duration: {_format_seconds(parsed.max_duration)}s{suffix}"
+        rows.append(f"{row}{palette.directive(text)}")
     if parsed.no_playlist:
-        rows.append(f"{row}no playlist: yes (@NO-PLAYLIST)")
+        text = "no playlist: yes (@NO-PLAYLIST)"
+        rows.append(f"{row}{palette.directive(text)}")
     if not rows:
         return []
-    return [f"{indent}directives:", *rows]
+    return [f"{indent}{palette.directive('directives:')}", *rows]
 
 
-def _include_header(include: IncludeInfo, parent_filename: str | None) -> str:
-    return (
-        f"@INCLUDE {include.raw_path} "
-        f"({_filename_label(parent_filename)}:{include.line}) -> {include.path}"
-    )
+def _include_header(
+    include: IncludeInfo,
+    parent_filename: str | None,
+    palette: Palette,
+) -> str:
+    directive = palette.directive(f"@INCLUDE {include.raw_path}")
+    source = palette.source(f"({_filename_label(parent_filename)}:{include.line})")
+    return f"{directive} {source} -> {include.path}"
 
 
 def _render_include(
     include: IncludeInfo,
     current_filename: str | None,
     indent: str,
+    palette: Palette,
 ) -> list[str]:
-    header = f"{indent}{_include_header(include, current_filename)}"
+    header = f"{indent}{_include_header(include, current_filename, palette)}"
     lines = [header]
     if include.file.expression is None:
         lines.append(f"{indent}  (no rules; directives only)")
-        lines.extend(_directive_lines(include.file, None, f"{indent}  "))
+        lines.extend(_directive_lines(include.file, None, f"{indent}  ", palette))
         return lines
-    lines.extend(_render_file_contents(include.file, f"{indent}  "))
+    lines.extend(_render_file_contents(include.file, f"{indent}  ", palette))
     return lines
 
 
@@ -255,24 +272,41 @@ def _render_expression(
     node: FilterNode,
     current_filename: str | None,
     indent: str,
+    palette: Palette,
 ) -> list[str]:
     if isinstance(node, RuleNode):
-        return [f"{indent}{format_rule(node, current_filename)}"]
+        return [f"{indent}{format_rule(node, current_filename, palette)}"]
     if isinstance(node, NotNode):
         return [
-            f"{indent}NOT",
-            *_render_expression(node.node, current_filename, f"{indent}  "),
+            f"{indent}{palette.operator('NOT')}",
+            *_render_expression(
+                node.node,
+                current_filename,
+                f"{indent}  ",
+                palette,
+            ),
         ]
     if isinstance(node, AndNode | OrNode):
-        operator = "AND" if isinstance(node, AndNode) else "OR"
+        operator = palette.operator("AND" if isinstance(node, AndNode) else "OR")
         lines = [f"{indent}{operator}"]
         for child in node.nodes:
-            lines.extend(_render_expression(child, current_filename, f"{indent}  "))
+            lines.extend(
+                _render_expression(
+                    child,
+                    current_filename,
+                    f"{indent}  ",
+                    palette,
+                )
+            )
         return lines
     return [f"{indent}{node!r}"]
 
 
-def _render_file_contents(parsed: M3UGFile, indent: str) -> list[str]:
+def _render_file_contents(
+    parsed: M3UGFile,
+    indent: str,
+    palette: Palette,
+) -> list[str]:
     children: list[tuple[str, IncludeInfo | FilterNode]] = [
         ("include", include)
         for include in parsed.includes
@@ -282,7 +316,7 @@ def _render_file_contents(parsed: M3UGFile, indent: str) -> list[str]:
 
     lines: list[str] = []
     if len(children) > 1:
-        lines.append(f"{indent}AND")
+        lines.append(f"{indent}{palette.operator('AND')}")
         child_indent = f"{indent}  "
     else:
         child_indent = indent
@@ -290,9 +324,19 @@ def _render_file_contents(parsed: M3UGFile, indent: str) -> list[str]:
     rendered: dict[int, list[str]] = {}
     for index, (_kind, value) in enumerate(children):
         if isinstance(value, IncludeInfo):
-            rendered[index] = _render_include(value, parsed.filename, child_indent)
+            rendered[index] = _render_include(
+                value,
+                parsed.filename,
+                child_indent,
+                palette,
+            )
         else:
-            rendered[index] = _render_expression(value, parsed.filename, child_indent)
+            rendered[index] = _render_expression(
+                value,
+                parsed.filename,
+                child_indent,
+                palette,
+            )
 
     # Keep directive-only includes in source order without making them
     # logical AND children.
@@ -301,7 +345,12 @@ def _render_file_contents(parsed: M3UGFile, indent: str) -> list[str]:
     for include in parsed.includes:
         if include.file.expression is None:
             include_positions.setdefault(rule_child_index, []).extend(
-                _render_include(include, parsed.filename, child_indent)
+                _render_include(
+                    include,
+                    parsed.filename,
+                    child_indent,
+                    palette,
+                )
             )
         else:
             rule_child_index += 1
@@ -318,11 +367,13 @@ def format_filter_tree(
     *,
     title: str | None = None,
     default_sort: SortSpec | None = None,
+    palette: Palette | None = None,
 ) -> str:
     """Render a parsed filter, including its nested ``@INCLUDE`` files."""
+    colors = Palette() if palette is None else palette
     lines: list[str] = []
     if title is not None:
-        lines.append(title)
+        lines.append(colors.title(title))
         indent = "  "
     else:
         indent = ""
@@ -330,9 +381,9 @@ def format_filter_tree(
     if parsed.expression is None:
         lines.append(f"{indent}(always)")
     else:
-        lines.extend(_render_file_contents(parsed, indent))
+        lines.extend(_render_file_contents(parsed, indent, colors))
 
-    lines.extend(_directive_lines(parsed, default_sort, indent))
+    lines.extend(_directive_lines(parsed, default_sort, indent, colors))
     return "\n".join(lines)
 
 
@@ -520,31 +571,42 @@ def _status(trace: ExpressionTrace | IncludeTrace | FileTrace) -> str:
     return "PASS" if trace.passed else "FAIL"
 
 
+def _paint_status(status: str, palette: Palette) -> str:
+    role = {
+        "PASS": ColorRole.PASS,
+        "FAIL": ColorRole.FAIL,
+        "SKIP": ColorRole.SKIP,
+    }.get(status)
+    return status if role is None else palette.paint(role, status)
+
+
 def _format_value_or_missing(value: object) -> str:
     if value is None:
         return "<missing>"
     return repr(value)
 
 
-def _format_lookup(lookup: TagLookup) -> str:
+def _format_lookup(lookup: TagLookup, palette: Palette) -> str:
     if lookup.source == "missing":
-        text = f"missing tag {lookup.requested}"
+        text = f"missing tag {palette.tag(lookup.requested)}"
         if lookup.note is not None:
-            text += f" ({lookup.note})"
+            text += f" {palette.source(f'({lookup.note})')}"
         return text
     if lookup.source == "calculated":
         source = lookup.key or "fmps_rating"
         return (
-            f"calculated rating = {_format_value_or_missing(lookup.normalized)} "
-            f"(from {source})"
+            f"calculated rating = "
+            f"{palette.value(_format_value_or_missing(lookup.normalized))} "
+            f"(from {palette.tag(source)})"
         )
     text = (
-        f"tag {lookup.key or lookup.requested} = {_format_value_or_missing(lookup.raw)}"
+        f"tag {palette.tag(lookup.key or lookup.requested)} = "
+        f"{palette.value(_format_value_or_missing(lookup.raw))}"
     )
     if lookup.normalized != lookup.raw:
-        text += f" -> {_format_value_or_missing(lookup.normalized)}"
+        text += f" -> {palette.value(_format_value_or_missing(lookup.normalized))}"
     if lookup.note is not None:
-        text += f" ({lookup.note})"
+        text += f" {palette.source(f'({lookup.note})')}"
     return text
 
 
@@ -564,30 +626,38 @@ def _render_expression_trace(
     trace: ExpressionTrace,
     current_filename: str | None,
     indent: str,
+    palette: Palette,
 ) -> list[str]:
-    status = _status(trace)
+    status = _paint_status(_status(trace), palette)
     if trace.rule is not None:
-        label = format_rule(trace.rule.rule, current_filename)
+        label = format_rule(trace.rule.rule, current_filename, palette)
         line = f"{indent}{status} {label}"
         if trace.skipped and trace.reason is not None:
-            line += f" ({trace.reason})"
+            line += f" {palette.source(f'({trace.reason})')}"
         lines = [line]
         if not trace.skipped:
-            lines.append(f"{indent}  {_format_lookup(trace.rule.lookup)}")
+            lines.append(f"{indent}  {_format_lookup(trace.rule.lookup, palette)}")
         return lines
 
     if isinstance(trace.node, RuleNode):
-        label = format_rule(trace.node, current_filename)
+        label = format_rule(trace.node, current_filename, palette)
     else:
-        label = _expression_label(trace.node)
+        label = palette.operator(_expression_label(trace.node))
     line = f"{indent}{status} {label}"
     if trace.skipped:
         if trace.reason is not None:
-            line += f" ({trace.reason})"
+            line += f" {palette.source(f'({trace.reason})')}"
         return [line]
     lines = [line]
     for child in trace.children:
-        lines.extend(_render_expression_trace(child, current_filename, f"{indent}  "))
+        lines.extend(
+            _render_expression_trace(
+                child,
+                current_filename,
+                f"{indent}  ",
+                palette,
+            )
+        )
     return lines
 
 
@@ -595,22 +665,33 @@ def _render_file_body(
     trace: FileTrace,
     current_filename: str | None,
     indent: str,
+    palette: Palette,
 ) -> list[str]:
     lines: list[str] = []
     for include in trace.includes:
-        header = _include_header(include.include, current_filename)
+        header = _include_header(include.include, current_filename, palette)
         if include.skipped:
-            line = f"{indent}SKIP {header}"
+            line = f"{indent}{_paint_status('SKIP', palette)} {header}"
             if include.reason is not None:
-                line += f" ({include.reason})"
+                line += f" {palette.source(f'({include.reason})')}"
             lines.append(line)
             continue
         if include.passed is None:
             lines.append(f"{indent}{header}")
             lines.append(f"{indent}  (no rules; directives only)")
-            lines.extend(_directive_lines(include.include.file, None, f"{indent}  "))
+            lines.extend(
+                _directive_lines(
+                    include.include.file,
+                    None,
+                    f"{indent}  ",
+                    palette,
+                )
+            )
             continue
-        status = "PASS" if include.passed else "FAIL"
+        status = _paint_status(
+            "PASS" if include.passed else "FAIL",
+            palette,
+        )
         lines.append(f"{indent}{status} {header}")
         if include.file is not None:
             lines.extend(
@@ -618,6 +699,7 @@ def _render_file_body(
                     include.file,
                     include.file.file.filename,
                     f"{indent}  ",
+                    palette,
                 )
             )
     if trace.own_expression is not None:
@@ -626,6 +708,7 @@ def _render_file_body(
                 trace.own_expression,
                 current_filename,
                 indent,
+                palette,
             )
         )
     elif not trace.includes:
@@ -633,19 +716,32 @@ def _render_file_body(
     return lines
 
 
-def format_file_trace(trace: FileTrace, *, title: str | None = None) -> str:
+def format_file_trace(
+    trace: FileTrace,
+    *,
+    title: str | None = None,
+    palette: Palette | None = None,
+) -> str:
     """Render a traced file as an annotated tree."""
+    colors = Palette() if palette is None else palette
     label = title if title is not None else _filename_label(trace.file.filename)
-    lines = [f"{label}: {_status(trace)}"]
-    lines.extend(_render_file_body(trace, trace.file.filename, "  "))
+    lines = [f"{colors.title(label)}: {_paint_status(_status(trace), colors)}"]
+    lines.extend(_render_file_body(trace, trace.file.filename, "  ", colors))
     return "\n".join(lines)
 
 
-def format_tags_consulted(consulted: tuple[TagLookup, ...], *, indent: str = "") -> str:
+def format_tags_consulted(
+    consulted: tuple[TagLookup, ...],
+    *,
+    indent: str = "",
+    palette: Palette | None = None,
+) -> str:
     """Render the tags a trace actually consulted, in first-use order."""
+    colors = Palette() if palette is None else palette
+    heading = colors.title("tags consulted:")
     if not consulted:
-        return f"{indent}tags consulted: (none)"
-    lines = [f"{indent}tags consulted:"]
+        return f"{indent}{heading} (none)"
+    lines = [f"{indent}{heading}"]
     for lookup in consulted:
         detail = ""
         if lookup.source == "missing":
@@ -654,127 +750,232 @@ def format_tags_consulted(consulted: tuple[TagLookup, ...], *, indent: str = "")
             detail = " (calculated)"
         elif lookup.key is not None and lookup.key != lookup.requested:
             detail = f" (key {lookup.key})"
-        lines.append(f"{indent}  {lookup.requested}{detail}")
+        lines.append(f"{indent}  {colors.tag(lookup.requested)}{colors.source(detail)}")
     return "\n".join(lines)
 
 
 def format_playlist_input(
-    entry: PlaylistInput, *, selection_simulated: bool = False
+    entry: PlaylistInput,
+    *,
+    selection_simulated: bool = False,
+    palette: Palette | None = None,
 ) -> str:
     """Render the deterministic playlist inputs for one filter."""
-    lines = ["playlist inputs:"]
+    colors = Palette() if palette is None else palette
+    lines = [colors.title("playlist inputs:")]
     sort_suffix = " (default)" if entry.sort_is_default else ""
-    lines.append(f"  sort: {format_sort_spec(entry.sort)}{sort_suffix}")
+    lines.append(
+        f"  {colors.directive('sort:')} "
+        f"{colors.value(format_sort_spec(entry.sort))}"
+        f"{colors.source(sort_suffix)}"
+    )
     names = [key.name for key in entry.sort if not key.is_random]
     for name, value in zip(names, entry.sort_values, strict=True):
         suffix = " (sorts last)" if value is None else ""
-        lines.append(f"    {name} = {_format_value_or_missing(value)}{suffix}")
+        lines.append(
+            f"    {colors.tag(name)} = "
+            f"{colors.value(_format_value_or_missing(value))}"
+            f"{colors.source(suffix)}"
+        )
     for key in entry.sort:
         if key.is_random:
             seed = "unseeded" if key.seed is None else f"seed {key.seed}"
-            lines.append(f"    random: {seed}")
+            lines.append(f"    {colors.directive('random:')} {colors.value(seed)}")
 
     if entry.dedupe is not None:
         if not entry.dedupe:
-            lines.append("  dedupe: (disabled)")
+            lines.append(f"  {colors.directive('dedupe:')} (disabled)")
         else:
-            lines.append(f"  dedupe: {', '.join(entry.dedupe)}")
+            lines.append(
+                f"  {colors.directive('dedupe:')} "
+                f"{colors.value(', '.join(entry.dedupe))}"
+            )
             for name, value in zip(entry.dedupe, entry.dedupe_values, strict=True):
                 suffix = " (kept)" if value is None else ""
-                lines.append(f"    {name} = {_format_value_or_missing(value)}{suffix}")
+                lines.append(
+                    f"    {colors.tag(name)} = "
+                    f"{colors.value(_format_value_or_missing(value))}"
+                    f"{colors.source(suffix)}"
+                )
 
     if entry.limit is not None:
         suffix = " (disabled)" if entry.limit == 0 else ""
-        lines.append(f"  limit: {entry.limit}{suffix}")
+        lines.append(
+            f"  {colors.directive('limit:')} "
+            f"{colors.value(str(entry.limit))}{colors.source(suffix)}"
+        )
 
     if entry.limit_per is not None:
         per_tag = entry.limit_per
         suffix = " (disabled)" if per_tag.count == 0 else ""
-        lines.append(f"  per-tag limit: {per_tag.count} per {per_tag.tag}{suffix}")
+        lines.append(
+            f"  {colors.directive('per-tag limit:')} "
+            f"{colors.value(str(per_tag.count))} per "
+            f"{colors.tag(per_tag.tag)}{colors.source(suffix)}"
+        )
         if per_tag.count > 0:
             if entry.limit_key is None:
-                lines.append(f"    {per_tag.tag} = <missing> (file would be skipped)")
+                lines.append(
+                    f"    {colors.tag(per_tag.tag)} = "
+                    f"{colors.source('<missing>')} "
+                    f"{colors.warning('(file would be skipped)')}"
+                )
             else:
                 lines.append(
-                    f"    {per_tag.tag} = {_format_value_or_missing(entry.limit_key)}"
+                    f"    {colors.tag(per_tag.tag)} = "
+                    f"{colors.value(_format_value_or_missing(entry.limit_key))}"
                 )
 
     if entry.max_duration is not None:
         suffix = " (disabled)" if entry.max_duration == 0 else ""
-        lines.append(f"  max duration: {_format_seconds(entry.max_duration)}s{suffix}")
+        lines.append(
+            f"  {colors.directive('max duration:')} "
+            f"{colors.value(f'{_format_seconds(entry.max_duration)}s')}"
+            f"{colors.source(suffix)}"
+        )
         if entry.duration is None:
-            lines.append("    target duration: 0s (missing)")
+            lines.append(
+                f"    {colors.directive('target duration:')} "
+                f"{colors.value('0s')} {colors.source('(missing)')}"
+            )
         else:
-            lines.append(f"    target duration: {_format_seconds(entry.duration)}s")
+            lines.append(
+                f"    {colors.directive('target duration:')} "
+                f"{colors.value(f'{_format_seconds(entry.duration)}s')}"
+            )
 
     if entry.no_playlist:
-        lines.append("  no playlist: yes (@NO-PLAYLIST)")
+        lines.append(
+            f"  {colors.directive('no playlist:')} "
+            f"{colors.value('yes')} {colors.directive('(@NO-PLAYLIST)')}"
+        )
 
     if entry.no_playlist:
-        lines.append("  selection: no playlist (@NO-PLAYLIST)")
+        lines.append(
+            f"  {colors.directive('selection:')} "
+            f"{colors.directive('no playlist (@NO-PLAYLIST)')}"
+        )
     elif entry.exclusion is not None:
-        lines.append(f"  selection: excluded: {entry.exclusion}")
+        lines.append(
+            f"  {colors.directive('selection:')} "
+            f"{colors.warning(f'excluded: {entry.exclusion}')}"
+        )
     elif selection_simulated:
-        lines.append("  selection: simulated below")
+        lines.append(
+            f"  {colors.directive('selection:')} {colors.source('simulated below')}"
+        )
     else:
-        lines.append("  selection: not simulated; use --trace-full")
+        lines.append(
+            f"  {colors.directive('selection:')} "
+            f"{colors.source('not simulated; use --trace-full')}"
+        )
     return "\n".join(lines)
 
 
-def format_playlist_inputs(trace: PlaylistInputsTrace) -> str:
+def format_playlist_inputs(
+    trace: PlaylistInputsTrace, *, palette: Palette | None = None
+) -> str:
     """Render playlist inputs for several filters."""
-    return "\n\n".join(format_playlist_input(entry) for entry in trace.inputs)
+    colors = Palette() if palette is None else palette
+    return "\n\n".join(
+        format_playlist_input(entry, palette=colors) for entry in trace.inputs
+    )
 
 
-def format_selection_trace(trace: SelectionTrace) -> str:
+def format_selection_trace(
+    trace: SelectionTrace, *, palette: Palette | None = None
+) -> str:
     """Render where the traced file ended up in each playlist."""
-    lines = ["selection:"]
+    colors = Palette() if palette is None else palette
+    lines = [colors.title("selection:")]
     if not trace.filters:
         lines.append("  (no filters)")
         return "\n".join(lines)
 
+    result_key = colors.directive("result:")
     for filter_file, entry in trace.filters.items():
-        lines.append(f"  {filter_file}")
+        lines.append(f"  {colors.title(str(filter_file))}")
         if entry.no_playlist:
-            lines.append("    result: @NO-PLAYLIST")
+            lines.append(f"    {result_key} {colors.directive('@NO-PLAYLIST')}")
             continue
         if entry.skipped:
             reason = entry.reason or "scan skipped"
-            lines.append(f"    result: SKIPPED ({reason})")
+            lines.append(
+                f"    {result_key} "
+                f"{colors.paint(ColorRole.SKIP, 'SKIPPED')} "
+                f"{colors.source(f'({reason})')}"
+            )
             continue
         if entry.reason == "no match" or (
             entry.sorted_position is None and entry.total_matches == 0
         ):
-            lines.append("    result: NO MATCH")
+            lines.append(f"    {result_key} {colors.paint(ColorRole.FAIL, 'NO MATCH')}")
             continue
 
-        lines.append(f"    matches: {entry.total_matches}")
+        lines.append(
+            f"    {colors.directive('matches:')} "
+            f"{colors.value(str(entry.total_matches))}"
+        )
         if entry.sorted_position is not None:
             lines.append(
-                f"    sorted position: {entry.sorted_position} of {entry.total_matches}"
+                f"    {colors.directive('sorted position:')} "
+                f"{colors.value(str(entry.sorted_position))} of "
+                f"{colors.value(str(entry.total_matches))}"
             )
         sort_suffix = " (default)" if entry.sort_is_default else ""
-        lines.append(f"    sort: {format_sort_spec(entry.sort)}{sort_suffix}")
+        lines.append(
+            f"    {colors.directive('sort:')} "
+            f"{colors.value(format_sort_spec(entry.sort))}"
+            f"{colors.source(sort_suffix)}"
+        )
         names = [key.name for key in entry.sort if not key.is_random]
         for name, value in zip(names, entry.sort_values, strict=True):
             suffix = " (sorts last)" if value is None else ""
-            lines.append(f"      {name} = {_format_value_or_missing(value)}{suffix}")
+            lines.append(
+                f"      {colors.tag(name)} = "
+                f"{colors.value(_format_value_or_missing(value))}"
+                f"{colors.source(suffix)}"
+            )
 
         if entry.dedupe is not None:
             if entry.dedupe:
                 result = entry.dedupe_result or "not reached"
-                lines.append(f"    dedupe: {result}")
+                result_color = (
+                    colors.warning(result)
+                    if result.startswith("excluded:")
+                    else colors.value(result)
+                )
+                lines.append(f"    {colors.directive('dedupe:')} {result_color}")
                 if entry.dedupe_winner is not None:
-                    lines.append(f"      winner: {entry.dedupe_winner}")
+                    lines.append(
+                        f"      {colors.directive('winner:')} "
+                        f"{colors.value(str(entry.dedupe_winner))}"
+                    )
             else:
-                lines.append("    dedupe: (disabled)")
-        lines.append(f"    count: {entry.limit_result or 'not reached'}")
-        lines.append(f"    per-tag: {entry.per_tag_result or 'not reached'}")
-        lines.append(f"    duration: {entry.duration_result or 'not reached'}")
+                lines.append(f"    {colors.directive('dedupe:')} (disabled)")
+        for label, result in (
+            ("count:", entry.limit_result or "not reached"),
+            ("per-tag:", entry.per_tag_result or "not reached"),
+            ("duration:", entry.duration_result or "not reached"),
+        ):
+            result_color = (
+                colors.warning(result)
+                if result.startswith("excluded:")
+                else colors.value(result)
+            )
+            lines.append(f"    {colors.directive(label)} {result_color}")
         if not entry.selected and entry.reason is not None:
-            lines.append(f"    reason: {entry.reason}")
+            lines.append(
+                f"    {colors.directive('reason:')} {colors.warning(entry.reason)}"
+            )
         if entry.selected:
-            lines.append(f"    result: IN PLAYLIST at position {entry.position}")
+            lines.append(
+                f"    {result_key} "
+                f"{colors.paint(ColorRole.PASS, 'IN PLAYLIST')} at position "
+                f"{colors.value(str(entry.position))}"
+            )
         else:
-            lines.append("    result: NOT IN PLAYLIST")
+            lines.append(
+                f"    {result_key} {colors.paint(ColorRole.FAIL, 'NOT IN PLAYLIST')}"
+            )
     return "\n".join(lines)

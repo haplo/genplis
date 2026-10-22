@@ -26,6 +26,8 @@ that `PATH` is required.
 | `--no-config` | Ignore all configuration files. |
 | `-v`, `--verbose`, `--no-verbose` | Print diagnostics: config and database paths, skipped files, rule trees, matching songs. |
 | `-q`, `--quiet` | Reduce output. Once prints only filter match counts and playlist creation; twice (`-qq`) prints nothing except errors. Cannot be combined with `--verbose`. |
+| `--color`, `--no-color` | Force colored output on or off. By default color follows the terminal and the config file. |
+| `--theme THEME` | Color theme: `auto` (default), `dark`, or `light`. `auto` uses `COLORFGBG` when available and otherwise assumes a dark terminal. |
 | `--db PATH` | Use this SQLite database instead of the default cache location. |
 | `-j N`, `--jobs N` | Parse cache misses with `N` worker processes. `0` uses one worker per CPU, capped at eight; `1` disables the process pool. Default is `0`. |
 | `--clean` | Remove cache entries for files that no longer exist. See [Cleaning the cache](#cleaning-the-cache). |
@@ -362,6 +364,16 @@ output, so scheduled runs stay silent; errors are still printed to standard
 error. `-q` and `-v` cannot be used together on the command line; the same
 applies to `verbose = true` and `quiet = true` in the config file. A
 command-line verbosity flag overrides the configured one.
+
+Colored output is enabled automatically for interactive terminals. Set
+`NO_COLOR` to disable it, or use `--color`/`--no-color` to override automatic
+detection. `FORCE_COLOR=1` also forces color when output is redirected.
+`--theme dark` and `--theme light` choose colors for the terminal
+background; the default `auto` reads the last field of `COLORFGBG` when the
+terminal provides it and otherwise assumes dark. The `[general] color` and
+`theme` settings provide the same controls in the config file. Piped output is
+plain unless color is forced, so logs and generated documentation stay free of
+escape codes.
 
 - An invalid `PATH` (neither a file nor a directory) prints a message to
   standard error and exits with status 1.

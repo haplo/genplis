@@ -159,6 +159,7 @@ from genplis.exceptions import GenplisError
 - Main entry point: `src/genplis/__main__.py`
 - Core logic: `src/genplis/core.py`
 - Rule-tree, trace and selection rendering: `src/genplis/diagnostics.py`
+- Color themes, terminal detection and output streams: `src/genplis/output.py`
 - Parsing executors: `src/genplis/executors.py`
 - Configuration loading: `src/genplis/config.py`
 - Database operations: `src/genplis/db.py`
@@ -217,6 +218,7 @@ from genplis.exceptions import GenplisError
 - `src/genplis/`: Main source code directory
 - `src/genplis/types.py`: Shared type aliases (`TagValue`, `Tags`)
 - `src/genplis/diagnostics.py`: Rule trees, evaluation traces and selection output
+- `src/genplis/output.py`: Color roles, light/dark palettes, terminal detection and Output
 - `src/genplis/py.typed`: PEP 561 marker for typed package consumers
 - `tests/`: Test files and fixtures
 - `examples/`: Sample M3UG filter files and the annotated `config.ini`

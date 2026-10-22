@@ -167,6 +167,48 @@ def test_show_rules_quiet_modes(
     assert capsys.readouterr().out == ""
 
 
+def test_main_show_rules_color_flags_and_auto_theme(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    filter_file = tmp_path / "favorites.m3ug"
+    filter_file.write_text("artist = X\n", encoding="utf-8")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "genplis",
+            "--show-rules",
+            "--color",
+            "--no-config",
+            str(filter_file),
+        ],
+    )
+
+    monkeypatch.setenv("COLORFGBG", "15;0")
+    main()
+    assert "\x1b[38;5;51martist\x1b[0m" in capsys.readouterr().out
+
+    monkeypatch.setenv("COLORFGBG", "0;15")
+    main()
+    assert "\x1b[38;5;30martist\x1b[0m" in capsys.readouterr().out
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "genplis",
+            "--show-rules",
+            "--no-color",
+            "--no-config",
+            str(filter_file),
+        ],
+    )
+    main()
+    assert "\x1b[" not in capsys.readouterr().out
+
+
 def test_show_rules_mode_conflicts(
     tmp_path: Path,
 ) -> None:
