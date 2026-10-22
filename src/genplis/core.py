@@ -5,7 +5,7 @@ import re
 import sqlite3
 import sys
 from collections.abc import Iterator, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum, auto
 from functools import cmp_to_key
 from pathlib import Path
@@ -16,12 +16,14 @@ import psutil
 from . import db
 from .config import Config, load_config
 from .diagnostics import (
+    FileTrace,
     FilterSelectionTrace,
     PlaylistInput,
     SelectionTrace,
     format_file_trace,
     format_filter_tree,
     format_playlist_input,
+    format_selection_trace,
     format_tags_consulted,
     trace_file,
 )
@@ -78,6 +80,7 @@ class Mode(Enum):
     TAG_STATS = auto()
     SHOW_RULES = auto()
     TRACE = auto()
+    TRACE_FULL = auto()
 
 
 @dataclass(frozen=True, slots=True)
@@ -256,6 +259,16 @@ def setup_argparse() -> argparse.ArgumentParser:
         ),
     )
     mode_group.add_argument(
+        "--trace-full",
+        dest="trace_full_path",
+        type=Path,
+        metavar="SONG",
+        help=(
+            "Trace SONG and simulate its exact playlist selection. No "
+            "playlists are written."
+        ),
+    )
+    mode_group.add_argument(
         "--tag-stats",
         dest="tag_stats",
         help=(
@@ -334,8 +347,10 @@ def resolve_args(args: argparse.Namespace, config: Config) -> Args:
         raise GenplisConfigError("--tag cannot be combined with --clean")
     if args.show_rules and args.tags:
         raise GenplisConfigError("--tag cannot be combined with --show-rules")
-    if args.trace_path is not None and args.tags:
-        raise GenplisConfigError("--tag cannot be combined with --trace")
+    if (args.trace_path is not None or args.trace_full_path is not None) and args.tags:
+        raise GenplisConfigError(
+            "--tag cannot be combined with --trace or --trace-full"
+        )
 
     requested_tags: list[str] = []
     for raw_tag in args.tags or ():
@@ -344,15 +359,20 @@ def resolve_args(args: argparse.Namespace, config: Config) -> Args:
             raise GenplisConfigError("tag name must not be empty")
         requested_tags.append(name)
     tags = tuple(dict.fromkeys(requested_tags))
+    raw_trace_path = (
+        args.trace_path if args.trace_path is not None else args.trace_full_path
+    )
     if args.show_rules:
         mode = Mode.SHOW_RULES
+    elif args.trace_full_path is not None:
+        mode = Mode.TRACE_FULL
     elif args.trace_path is not None:
         mode = Mode.TRACE
     elif args.tag_stats or tags:
         mode = Mode.TAG_STATS
     else:
         mode = Mode.PROCESS
-    trace_path = args.trace_path.expanduser() if args.trace_path is not None else None
+    trace_path = raw_trace_path.expanduser() if raw_trace_path is not None else None
 
     if args.path is not None:
         path = args.path
@@ -634,8 +654,21 @@ def build_playlist_input(
     )
 
 
-def trace_path(conn: sqlite3.Connection, cursor: sqlite3.Cursor, args: Args) -> None:
-    """Print an annotated evaluation of one audio file against filters."""
+type FilterTraceItem = tuple[Path, FileTrace, PlaylistInput]
+
+
+def _scan_root(args: Args) -> Path:
+    path = args.path
+    if path is None:
+        raise GenplisError("Attempted to trace a file but no filter path was given")
+    return path if path.is_dir() else path.parent
+
+
+def _load_trace_target(
+    conn: sqlite3.Connection,
+    cursor: sqlite3.Cursor,
+    args: Args,
+) -> tuple[Tags, db.CacheStatus]:
     target = args.trace_path
     if target is None:
         raise GenplisError("Attempted to trace a file but none was given")
@@ -649,14 +682,21 @@ def trace_path(conn: sqlite3.Connection, cursor: sqlite3.Cursor, args: Args) -> 
     tags, _, cache_status = process_file(conn, cursor, target, args)
     if tags is None:
         raise GenplisError(f"Trace target {target} is not a supported music file")
+    return tags, cache_status
 
+
+def _prepare_traces(
+    conn: sqlite3.Connection,
+    cursor: sqlite3.Cursor,
+    args: Args,
+    target: Path,
+    tags: Tags,
+) -> tuple[dict[Path, M3UGFile], list[FilterTraceItem]] | None:
     all_filters = _trace_filters(conn, cursor, args)
-    quiet = args.verbosity is Verbosity.REALLY_QUIET
     if not all_filters:
-        if not quiet:
+        if args.verbosity is not Verbosity.REALLY_QUIET:
             print(f"No filters found in {args.path}")
-        return
-
+        return None
     traces = [
         (
             filter_file,
@@ -665,35 +705,134 @@ def trace_path(conn: sqlite3.Connection, cursor: sqlite3.Cursor, args: Args) -> 
         )
         for filter_file, parsed in all_filters.items()
     ]
-    if not quiet:
-        print(f"Trace target: {target}")
-        print(f"Cache status: {CACHE_STATUS_MESSAGES[cache_status]}")
-        print(f"Filters: {len(traces)}")
-        if is_excluded(target, args):
-            print("WARNING: This file is excluded by current configuration.")
-        path = args.path
-        if path is None:
-            raise GenplisError("Attempted to trace a file but no filter path was given")
-        scan_root = path if path.is_dir() else path.parent
+    return all_filters, traces
+
+
+def _print_filter_traces(
+    args: Args,
+    target: Path,
+    cache_status: db.CacheStatus,
+    traces: list[FilterTraceItem],
+) -> None:
+    if args.verbosity is Verbosity.REALLY_QUIET:
+        return
+    print(f"Trace target: {target}")
+    print(f"Cache status: {CACHE_STATUS_MESSAGES[cache_status]}")
+    print(f"Filters: {len(traces)}")
+    if is_excluded(target, args):
+        print("WARNING: This file is excluded by current configuration.")
+    scan_root = _scan_root(args)
+    try:
+        target.relative_to(scan_root)
+    except ValueError:
+        print(f"WARNING: {target} is outside the scan root {scan_root}.")
+
+    for filter_file, traced, playlist_input in traces:
+        print()
+        print(f"Filter: {filter_file}")
+        print(format_tags_consulted(traced.consulted))
+        print(format_file_trace(traced, title=str(filter_file)))
+        print(format_playlist_input(playlist_input))
+        print("MATCH" if traced.passed else "NO MATCH")
+
+    if len(traces) > 1:
+        print()
+        print("Summary:")
+        for filter_file, traced, _playlist_input in traces:
+            result = "MATCH" if traced.passed else "NO MATCH"
+            print(f"  {result} {filter_file}")
+
+
+def trace_path(conn: sqlite3.Connection, cursor: sqlite3.Cursor, args: Args) -> None:
+    """Print an annotated evaluation of one audio file against filters."""
+    target = args.trace_path
+    if target is None:
+        raise GenplisError("Attempted to trace a file but none was given")
+    tags, cache_status = _load_trace_target(conn, cursor, args)
+    prepared = _prepare_traces(conn, cursor, args, target, tags)
+    if prepared is None:
+        return
+    _all_filters, traces = prepared
+    _print_filter_traces(args, target, cache_status, traces)
+
+
+def _selection_without_scan(
+    target: Path,
+    traces: list[FilterTraceItem],
+    reason: str,
+) -> SelectionTrace:
+    selection = SelectionTrace(target=target)
+    for filter_file, traced, playlist_input in traces:
+        entry = FilterSelectionTrace(
+            filter_file=filter_file,
+            sort=playlist_input.sort,
+            sort_is_default=playlist_input.sort_is_default,
+            no_playlist=playlist_input.no_playlist,
+        )
+        if playlist_input.no_playlist:
+            entry.considered = False
+            entry.reason = "@NO-PLAYLIST"
+        elif not traced.passed:
+            entry.considered = False
+            entry.reason = "no match"
+        else:
+            entry.considered = False
+            entry.skipped = True
+            entry.reason = reason
+        selection.filters[filter_file] = entry
+    return selection
+
+
+def trace_full_path(
+    conn: sqlite3.Connection, cursor: sqlite3.Cursor, args: Args
+) -> None:
+    """Trace a file and simulate its exact selection in every playlist."""
+    target = args.trace_path
+    if target is None:
+        raise GenplisError("Attempted to trace a file but none was given")
+    tags, cache_status = _load_trace_target(conn, cursor, args)
+    prepared = _prepare_traces(conn, cursor, args, target, tags)
+    if prepared is None:
+        return
+    all_filters, traces = prepared
+    _print_filter_traces(args, target, cache_status, traces)
+
+    scan_root = _scan_root(args)
+    matching = [item for item in traces if item[1].passed]
+    skip_reason: str | None = None
+    if is_excluded(target, args):
+        skip_reason = "target is excluded by current configuration"
+    else:
         try:
             target.relative_to(scan_root)
         except ValueError:
-            print(f"WARNING: {target} is outside the scan root {scan_root}.")
+            skip_reason = f"target is outside the scan root {scan_root}"
+    if skip_reason is None and not matching:
+        skip_reason = "no filter expression matches the target"
+    if skip_reason is None and all(item[2].no_playlist for item in matching):
+        skip_reason = "every matching filter has @NO-PLAYLIST"
 
-        for filter_file, traced, playlist_input in traces:
+    if skip_reason is not None:
+        selection = _selection_without_scan(target, traces, skip_reason)
+        if args.verbosity is not Verbosity.REALLY_QUIET:
             print()
-            print(f"Filter: {filter_file}")
-            print(format_tags_consulted(traced.consulted))
-            print(format_file_trace(traced, title=str(filter_file)))
-            print(format_playlist_input(playlist_input))
-            print("MATCH" if traced.passed else "NO MATCH")
+            print(f"Selection scan skipped: {skip_reason}")
+    else:
+        selection = SelectionTrace(target=target)
+        simulation_args = replace(args, verbosity=Verbosity.REALLY_QUIET)
+        process_directory(
+            conn,
+            cursor,
+            scan_root,
+            simulation_args,
+            filters=all_filters,
+            dry_run=True,
+            selection_trace=selection,
+        )
 
-        if len(traces) > 1:
-            print()
-            print("Summary:")
-            for filter_file, traced, _playlist_input in traces:
-                result = "MATCH" if traced.passed else "NO MATCH"
-                print(f"  {result} {filter_file}")
+    if args.verbosity is not Verbosity.REALLY_QUIET:
+        print()
+        print(format_selection_trace(selection))
 
 
 def display_tag_stats(
@@ -1529,6 +1668,8 @@ def _run(args: Args) -> None:
 
             if args.mode is Mode.TRACE:
                 trace_path(conn, cursor, args)
+            elif args.mode is Mode.TRACE_FULL:
+                trace_full_path(conn, cursor, args)
             elif args.mode is Mode.TAG_STATS:
                 if args.path is not None:
                     display_tag_stats(conn, cursor, args)

@@ -121,6 +121,7 @@ class FilterSelectionTrace:
     position: int | None = None
     no_playlist: bool = False
     considered: bool = True
+    skipped: bool = False
     reason: str | None = None
 
 
@@ -723,3 +724,57 @@ def format_playlist_input(entry: PlaylistInput) -> str:
 def format_playlist_inputs(trace: PlaylistInputsTrace) -> str:
     """Render playlist inputs for several filters."""
     return "\n\n".join(format_playlist_input(entry) for entry in trace.inputs)
+
+
+def format_selection_trace(trace: SelectionTrace) -> str:
+    """Render where the traced file ended up in each playlist."""
+    lines = ["selection:"]
+    if not trace.filters:
+        lines.append("  (no filters)")
+        return "\n".join(lines)
+
+    for filter_file, entry in trace.filters.items():
+        lines.append(f"  {filter_file}")
+        if entry.no_playlist:
+            lines.append("    result: @NO-PLAYLIST")
+            continue
+        if entry.skipped:
+            reason = entry.reason or "scan skipped"
+            lines.append(f"    result: SKIPPED ({reason})")
+            continue
+        if entry.reason == "no match" or (
+            entry.sorted_position is None and entry.total_matches == 0
+        ):
+            lines.append("    result: NO MATCH")
+            continue
+
+        lines.append(f"    matches: {entry.total_matches}")
+        if entry.sorted_position is not None:
+            lines.append(
+                f"    sorted position: {entry.sorted_position} of {entry.total_matches}"
+            )
+        sort_suffix = " (default)" if entry.sort_is_default else ""
+        lines.append(f"    sort: {format_sort_spec(entry.sort)}{sort_suffix}")
+        names = [key.name for key in entry.sort if not key.is_random]
+        for name, value in zip(names, entry.sort_values, strict=True):
+            suffix = " (sorts last)" if value is None else ""
+            lines.append(f"      {name} = {_format_playlist_value(value)}{suffix}")
+
+        if entry.dedupe is not None:
+            if entry.dedupe:
+                result = entry.dedupe_result or "not reached"
+                lines.append(f"    dedupe: {result}")
+                if entry.dedupe_winner is not None:
+                    lines.append(f"      winner: {entry.dedupe_winner}")
+            else:
+                lines.append("    dedupe: (disabled)")
+        lines.append(f"    count: {entry.limit_result or 'not reached'}")
+        lines.append(f"    per-tag: {entry.per_tag_result or 'not reached'}")
+        lines.append(f"    duration: {entry.duration_result or 'not reached'}")
+        if not entry.selected and entry.reason is not None:
+            lines.append(f"    reason: {entry.reason}")
+        if entry.selected:
+            lines.append(f"    result: IN PLAYLIST at position {entry.position}")
+        else:
+            lines.append("    result: NOT IN PLAYLIST")
+    return "\n".join(lines)
