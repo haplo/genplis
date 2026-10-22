@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from genplis.config import Config
-from genplis.core import Args
+from genplis.core import Args, Mode
 from genplis.db import (
     create_files_table,
     setup_database_connection,
@@ -53,7 +53,7 @@ def make_args() -> Callable[..., Args]:
         extended_m3u: bool = True,
         clean: bool = False,
         jobs: int = 1,
-        display_tags: bool = False,
+        mode: Mode = Mode.PROCESS,
         tags: tuple[str, ...] = (),
     ) -> Args:
         return Args(
@@ -67,7 +67,7 @@ def make_args() -> Callable[..., Args]:
             extended_m3u=extended_m3u,
             clean=clean,
             jobs=jobs,
-            display_tags=display_tags,
+            mode=mode,
             tags=tags,
         )
 

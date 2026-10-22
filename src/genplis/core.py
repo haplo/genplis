@@ -6,6 +6,7 @@ import sqlite3
 import sys
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
+from enum import Enum, auto
 from functools import cmp_to_key
 from pathlib import Path
 from timeit import default_timer as timer
@@ -61,6 +62,13 @@ CACHE_STATUS_MESSAGES = {
 COMMIT_EVERY = 128
 
 
+class Mode(Enum):
+    """The primary operation selected on the command line."""
+
+    PROCESS = auto()
+    TAG_STATS = auto()
+
+
 @dataclass(frozen=True, slots=True)
 class Args:
     path: Path | None
@@ -74,7 +82,7 @@ class Args:
     clean: bool = False
     config_disabled: bool = False
     jobs: int = 1
-    display_tags: bool = False
+    mode: Mode = Mode.PROCESS
     tags: tuple[str, ...] = ()
 
 
@@ -220,7 +228,7 @@ def setup_argparse() -> argparse.ArgumentParser:
     )
     mode_group.add_argument(
         "--tag-stats",
-        dest="display_tags",
+        dest="tag_stats",
         help=(
             "Show every tag found in the collection with file counts. "
             "No playlists are written."
@@ -303,7 +311,7 @@ def resolve_args(args: argparse.Namespace, config: Config) -> Args:
             raise GenplisConfigError("tag name must not be empty")
         requested_tags.append(name)
     tags = tuple(dict.fromkeys(requested_tags))
-    display_tags = args.display_tags or bool(tags)
+    mode = Mode.TAG_STATS if args.tag_stats or tags else Mode.PROCESS
 
     if args.path is not None:
         path = args.path
@@ -352,7 +360,7 @@ def resolve_args(args: argparse.Namespace, config: Config) -> Args:
         clean=args.clean,
         config_disabled=args.no_config,
         jobs=_resolve_jobs(args, config),
-        display_tags=display_tags,
+        mode=mode,
         tags=tags,
     )
 
@@ -1156,11 +1164,11 @@ def _run(args: Args) -> None:
             db.create_files_table(cursor, db.get_cache_version(args.config.tags))
             conn.commit()
 
-            if args.path is not None:
-                if args.display_tags:
+            if args.mode is Mode.TAG_STATS:
+                if args.path is not None:
                     display_tag_stats(conn, cursor, args)
-                else:
-                    process_path(conn, cursor, args)
+            elif args.path is not None:
+                process_path(conn, cursor, args)
             if args.clean:
                 clean_database(
                     conn,
