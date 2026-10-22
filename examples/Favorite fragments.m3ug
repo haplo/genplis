@@ -1,5 +1,6 @@
 # Include-only fragment of shared synthwave rules.
 @NO-PLAYLIST
 
+# Use [ ... | ... ] to match multiple tags or values
 [artist | albumartist] = ["DANCE WITH THE DEAD" | Perturbator]
 @OR [genre | style] ~ [Synthwave | Retrowave]

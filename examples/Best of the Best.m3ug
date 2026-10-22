@@ -1,6 +1,7 @@
 # 5-star songs
-# the actual rating tag depends on your music player
-# if the rating by your music app is not picked up by genplis
-# feel free to open an issue!
+# genplis try to normalize ratings to 0-5, but the actual rating tag depends on your
+# music player. If ratings are not working feel free to open an issue!
 rating >= 5
-@sort rating desc, artist, album, disc, track, title
+@LIMIT 50
+# different ordering on each generation, get surprised!
+@SORT random
