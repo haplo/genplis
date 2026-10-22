@@ -4,6 +4,7 @@ from collections import Counter
 from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 
+from .output import ColorRole, Palette
 from .tags import AUDIO_PROPERTY_TAGS
 from .types import TagValue
 
@@ -253,12 +254,12 @@ def _coverage(files: int, total: int) -> str:
     return f"{files / total:.1%}"
 
 
-def _summary_line(report: TagStats) -> str:
+def _summary_line(report: TagStats, palette: Palette) -> str:
     if report.files == 0:
-        return "No supported audio files found."
+        return palette.source("No supported audio files found.")
     return (
-        f"{report.files_with_embedded:,} of {report.files:,} supported files "
-        "have embedded tags"
+        f"{palette.value(f'{report.files_with_embedded:,}')} of "
+        f"{palette.value(f'{report.files:,}')} supported files have embedded tags"
     )
 
 
@@ -267,24 +268,47 @@ def _format_table(
     rows: Sequence[Sequence[str]],
     *,
     right: Collection[int] = (),
+    palette: Palette | None = None,
+    roles: Mapping[int, ColorRole] | None = None,
 ) -> list[str]:
-    """Format a simple two-space-separated table."""
+    """Format a simple two-space-separated table.
+
+    Widths are measured before styling so ANSI escape codes never affect
+    alignment. Only cell content is painted; padding stays outside the codes.
+    """
+    colors = Palette() if palette is None else palette
+    cell_roles = {} if roles is None else roles
     widths = [
         max(len(row[index]) for row in (headers, *rows))
         for index in range(len(headers))
     ]
 
-    def format_row(row: Sequence[str]) -> str:
-        return "  ".join(
-            (cell.rjust(width) if index in right else cell.ljust(width))
-            for index, (cell, width) in enumerate(zip(row, widths, strict=True))
-        ).rstrip()
+    def format_row(
+        row: Sequence[str],
+        row_roles: Mapping[int, ColorRole],
+    ) -> str:
+        cells: list[str] = []
+        last = len(row) - 1
+        for index, (cell, width) in enumerate(zip(row, widths, strict=True)):
+            content = cell.rstrip() if index == last else cell
+            role = row_roles.get(index)
+            if role is not None:
+                content = colors.paint(role, content)
+            if index in right:
+                padding = " " * (width - len(cell))
+                cells.append(f"{padding}{content}")
+            else:
+                padding = "" if index == last else " " * (width - len(cell))
+                cells.append(f"{content}{padding}")
+        return "  ".join(cells).rstrip()
 
+    header_roles = dict.fromkeys(range(len(headers)), ColorRole.TITLE)
+    divider_roles = dict.fromkeys(range(len(headers)), ColorRole.SOURCE)
     lines = [
-        format_row(headers),
-        format_row(tuple("-" * width for width in widths)),
+        format_row(headers, header_roles),
+        format_row(tuple("-" * width for width in widths), divider_roles),
     ]
-    lines.extend(format_row(row) for row in rows)
+    lines.extend(format_row(row, cell_roles) for row in rows)
     return lines
 
 
@@ -305,33 +329,57 @@ def _summary_rows(report: TagStats, stats: Sequence[TagStat]) -> list[list[str]]
     return rows
 
 
-def render_tag_stats(report: TagStats) -> str:
-    """Render the summary table for a collection scan."""
-    if report.files == 0:
-        return _summary_line(report)
+_SUMMARY_ROLES = {
+    0: ColorRole.TAG,
+    1: ColorRole.VALUE,
+    2: ColorRole.VALUE,
+    3: ColorRole.VALUE,
+    4: ColorRole.VALUE,
+}
 
-    lines = [_summary_line(report), ""]
+_DETAIL_ROLES = {
+    0: ColorRole.VALUE,
+    1: ColorRole.VALUE,
+    2: ColorRole.VALUE,
+}
+
+
+def render_tag_stats(
+    report: TagStats,
+    *,
+    palette: Palette | None = None,
+) -> str:
+    """Render the summary table for a collection scan."""
+    colors = Palette() if palette is None else palette
+    if report.files == 0:
+        return _summary_line(report, colors)
+
+    lines = [_summary_line(report, colors), ""]
     headers = ["Tag", "Files", "Coverage", "Distinct", "Examples"]
     if report.embedded:
-        lines.append("Embedded tags")
+        lines.append(colors.title("Embedded tags"))
         lines.extend(
             _format_table(
                 headers,
                 _summary_rows(report, report.embedded),
                 right={1, 2, 3},
+                palette=colors,
+                roles=_SUMMARY_ROLES,
             )
         )
     else:
-        lines.append("No embedded tags found.")
+        lines.append(colors.source("No embedded tags found."))
 
     if report.calculated:
         lines.append("")
-        lines.append("Calculated tags")
+        lines.append(colors.title("Calculated tags"))
         lines.extend(
             _format_table(
                 headers,
                 _summary_rows(report, report.calculated),
                 right={1, 2, 3},
+                palette=colors,
+                roles=_SUMMARY_ROLES,
             )
         )
     return "\n".join(lines)
@@ -357,18 +405,21 @@ def _render_tag_detail(
     stat: TagStat,
     *,
     calculated: bool,
+    palette: Palette,
 ) -> list[str]:
     kind = "calculated" if calculated else "embedded"
+    distinct = f"{stat.distinct:,}{'+' if stat.capped else ''}"
     lines = [
-        f"Tag: {stat.name} ({kind})",
+        f"Tag: {palette.tag(stat.name)} {palette.source(f'({kind})')}",
         (
-            f"Files: {stat.files:,} of {report.files:,} "
-            f"({_coverage(stat.files, report.files)})"
+            f"Files: {palette.value(f'{stat.files:,}')} of "
+            f"{palette.value(f'{report.files:,}')} "
+            f"({palette.value(_coverage(stat.files, report.files))})"
         ),
-        f"Distinct values: {stat.distinct:,}{'+' if stat.capped else ''}",
+        f"Distinct values: {palette.value(distinct)}",
     ]
     if not stat.values:
-        lines.append("No values recorded.")
+        lines.append(palette.source("No values recorded."))
         return lines
 
     lines.append("")
@@ -380,29 +431,46 @@ def _render_tag_detail(
         ]
         for value in stat.values
     ]
-    lines.extend(_format_table(["Value", "Files", "Coverage"], rows, right={1, 2}))
+    lines.extend(
+        _format_table(
+            ["Value", "Files", "Coverage"],
+            rows,
+            right={1, 2},
+            palette=palette,
+            roles=_DETAIL_ROLES,
+        )
+    )
 
     if sum(value.files for value in stat.values) > stat.files:
         lines.append("")
         lines.append(
-            "A file can contain more than one value, so coverage values "
-            "can add up to more than 100%."
+            palette.source(
+                "A file can contain more than one value, so coverage values "
+                "can add up to more than 100%."
+            )
         )
 
     missing = report.files - stat.files
     lines.append("")
     lines.append(
-        f"Files without this tag: {missing:,} ({_coverage(missing, report.files)})"
+        f"Files without this tag: {palette.value(f'{missing:,}')} "
+        f"({palette.value(_coverage(missing, report.files))})"
     )
     return lines
 
 
-def render_tag_details(report: TagStats, requested: Sequence[str]) -> str:
+def render_tag_details(
+    report: TagStats,
+    requested: Sequence[str],
+    *,
+    palette: Palette | None = None,
+) -> str:
     """Render full value details for the requested tags."""
+    colors = Palette() if palette is None else palette
     if report.files == 0:
-        return _summary_line(report)
+        return _summary_line(report, colors)
 
-    lines = [_summary_line(report)]
+    lines = [_summary_line(report, colors)]
     seen: set[str] = set()
     for raw in requested:
         name = _normalize_name(raw)
@@ -414,10 +482,18 @@ def render_tag_details(report: TagStats, requested: Sequence[str]) -> str:
         if not matches:
             lines.append("")
             lines.append(
-                f"Tag '{name}' was not found. It may be hidden by [tags] ignore."
+                f"Tag '{colors.tag(name)}' was not found. "
+                "It may be hidden by [tags] ignore."
             )
             continue
         for stat, calculated in matches:
             lines.append("")
-            lines.extend(_render_tag_detail(report, stat, calculated=calculated))
+            lines.extend(
+                _render_tag_detail(
+                    report,
+                    stat,
+                    calculated=calculated,
+                    palette=colors,
+                )
+            )
     return "\n".join(lines)

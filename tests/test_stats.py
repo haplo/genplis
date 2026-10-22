@@ -1,3 +1,4 @@
+import re
 import shutil
 import sqlite3
 import sys
@@ -19,6 +20,7 @@ from genplis.core import (
 )
 from genplis.db import create_files_table, setup_database_connection
 from genplis.exceptions import GenplisConfigError, GenplisError
+from genplis.output import Palette, Theme
 from genplis.stats import (
     TagStatsCollector,
     TagValueStat,
@@ -182,6 +184,75 @@ def test_render_details_uses_empty_marker() -> None:
     assert "<empty>" in output
 
 
+def test_render_summary_uses_palette() -> None:
+    collector = TagStatsCollector()
+    collector.record_file(
+        {"artist": ["A"], "genre": ["Rock"]},
+        {"*duration": 3.0},
+    )
+    palette = Palette(theme=Theme.DARK, enabled=True)
+
+    output = render_tag_stats(collector.report(), palette=palette)
+
+    assert "\x1b[1;38;5;255mEmbedded tags\x1b[0m" in output
+    assert "\x1b[1;38;5;255mCalculated tags\x1b[0m" in output
+    assert "\x1b[1;38;5;255mTag\x1b[0m" in output
+    assert "\x1b[38;5;51martist\x1b[0m" in output
+    assert "\x1b[38;5;220mRock\x1b[0m" in output
+    assert "\x1b[38;5;220m100.0%\x1b[0m" in output
+    assert "\x1b[38;5;244m----" in output
+
+
+def test_render_details_uses_palette() -> None:
+    collector = TagStatsCollector(full_tags={"genre"})
+    collector.record_file({"genre": ["Rock", "Metal"]}, {})
+    collector.record_file({"genre": ["Rock"]}, {})
+    palette = Palette(theme=Theme.DARK, enabled=True)
+
+    output = render_tag_details(collector.report(), ("genre",), palette=palette)
+
+    assert "Tag: \x1b[38;5;51mgenre\x1b[0m \x1b[38;5;244m(embedded)\x1b[0m" in output
+    assert "\x1b[38;5;220mRock\x1b[0m" in output
+    assert "\x1b[38;5;220m100.0%\x1b[0m" in output
+    assert "\x1b[38;5;244mA file can contain more than one value" in output
+
+
+def test_stats_light_theme_uses_light_codes() -> None:
+    collector = TagStatsCollector(full_tags={"genre"})
+    collector.record_file({"genre": ["Rock"]}, {})
+    palette = Palette(theme=Theme.LIGHT, enabled=True)
+
+    output = render_tag_details(collector.report(), ("genre",), palette=palette)
+
+    assert "\x1b[38;5;30mgenre\x1b[0m" in output
+    assert "\x1b[38;5;90mRock\x1b[0m" in output
+
+
+def test_colored_stats_preserve_plain_layout() -> None:
+    collector = TagStatsCollector(full_tags={"genre"})
+    collector.record_file(
+        {"artist": ["Artist"], "genre": ["Rock"]},
+        {"*duration": 3.0},
+    )
+    collector.record_file(
+        {"artist": ["Artist"], "genre": ["Metal"]},
+        {"*duration": 4.0},
+    )
+    report = collector.report()
+    palette = Palette(theme=Theme.DARK, enabled=True)
+
+    assert _strip_ansi(render_tag_stats(report, palette=palette)) == render_tag_stats(
+        report
+    )
+    assert _strip_ansi(
+        render_tag_details(report, ("genre",), palette=palette)
+    ) == render_tag_details(report, ("genre",))
+
+
+def _strip_ansi(text: str) -> str:
+    return re.sub(r"\x1b\[[0-9;]*m", "", text)
+
+
 def test_resolve_args_tag_stats() -> None:
     args = resolve_args(
         setup_argparse().parse_args(["--tag-stats", "/music"]),
@@ -267,6 +338,72 @@ def test_main_tag_stats_writes_no_playlist(
     assert f"Tag statistics for {music}" in output
     assert "Embedded tags" in output
     assert not (music / "favorites.m3u").exists()
+
+
+def test_main_tag_stats_uses_color_flags(
+    file_mp3: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    music = tmp_path / "music"
+    music.mkdir()
+    shutil.copy2(file_mp3, music / "song.mp3")
+    db_path = tmp_path / "cache.db"
+    argv = [
+        "genplis",
+        "--tag-stats",
+        "--theme",
+        "dark",
+        "--no-config",
+        "--db",
+        str(db_path),
+        str(music),
+    ]
+    monkeypatch.setattr(sys, "argv", [*argv, "--color"])
+
+    main()
+
+    output = capsys.readouterr().out
+    assert f"\x1b[1;38;5;255m{music}\x1b[0m" in output
+    assert "\x1b[1;38;5;255mEmbedded tags\x1b[0m" in output
+    assert "\x1b[38;5;51martist\x1b[0m" in output
+
+    monkeypatch.setattr(sys, "argv", [*argv, "--no-color"])
+    main()
+
+    assert "\x1b[" not in capsys.readouterr().out
+
+
+def test_main_tag_single_file_uses_color(
+    file_mp3: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    db_path = tmp_path / "cache.db"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "genplis",
+            "-t",
+            "artist",
+            "--color",
+            "--theme",
+            "dark",
+            "--no-config",
+            "--db",
+            str(db_path),
+            str(file_mp3),
+        ],
+    )
+
+    main()
+
+    output = capsys.readouterr().out
+    assert "\x1b[38;5;51martist\x1b[0m" in output
+    assert "\x1b[1;38;5;255mParsed tags:\x1b[0m" in output
 
 
 def test_display_tag_stats_uses_configured_path(

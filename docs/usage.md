@@ -365,16 +365,6 @@ error. `-q` and `-v` cannot be used together on the command line; the same
 applies to `verbose = true` and `quiet = true` in the config file. A
 command-line verbosity flag overrides the configured one.
 
-Colored output is enabled automatically for interactive terminals. Set
-`NO_COLOR` to disable it, or use `--color`/`--no-color` to override automatic
-detection. `FORCE_COLOR=1` also forces color when output is redirected.
-`--theme dark` and `--theme light` choose colors for the terminal
-background; the default `auto` reads the last field of `COLORFGBG` when the
-terminal provides it and otherwise assumes dark. The `[general] color` and
-`theme` settings provide the same controls in the config file. Piped output is
-plain unless color is forced, so logs and generated documentation stay free of
-escape codes.
-
 - An invalid `PATH` (neither a file nor a directory) prints a message to
   standard error and exits with status 1.
 - Configuration problems and other fatal errors are reported to standard
@@ -386,6 +376,21 @@ escape codes.
 - A playlist that exists and cannot be overwritten because of
   `--no-overwrite` produces a warning, not an error. The warning is
   suppressed by `-q`.
+
+## Color
+
+Colored output is enabled automatically for interactive terminals. Set
+`NO_COLOR` to disable it, or use `--color`/`--no-color` to override automatic
+detection. `FORCE_COLOR=1` also forces color when output is redirected.
+`--theme dark` and `--theme light` choose colors for the terminal
+background; the default `auto` reads the last field of `COLORFGBG` when the
+terminal provides it and otherwise assumes dark. The `[general] color` and
+`theme` settings provide the same controls in the config file. Piped output is
+plain unless color is forced, so logs and generated documentation stay free of
+escape codes.
+
+Tag names, tag values, rule trees, traces, and tag statistics all use the same
+semantic palette.
 
 ## See also
 

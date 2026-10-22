@@ -937,8 +937,11 @@ def display_tag_stats(
     conn: sqlite3.Connection,
     cursor: sqlite3.Cursor,
     args: Args,
+    output: Output | None = None,
 ) -> None:
     """Print tag statistics for a collection or a single audio file."""
+    out = Output.plain() if output is None else output
+    palette = out.palette
     path = args.path
     if path is None:
         raise GenplisError("Attempted to display tag statistics but no path was given")
@@ -946,7 +949,7 @@ def display_tag_stats(
     if path.is_dir():
         collector = TagStatsCollector(full_tags=full_tag_names(args.tags))
         if args.verbosity is not Verbosity.REALLY_QUIET:
-            print(f"Tag statistics for {path}")
+            out.line(f"Tag statistics for {palette.title(str(path))}")
         process_directory(
             conn,
             cursor,
@@ -954,13 +957,14 @@ def display_tag_stats(
             args,
             filters={},
             stats=collector,
+            output=out,
         )
         if args.verbosity is not Verbosity.REALLY_QUIET:
             report = collector.report()
-            print(
-                render_tag_details(report, args.tags)
+            out.line(
+                render_tag_details(report, args.tags, palette=palette)
                 if args.tags
-                else render_tag_stats(report)
+                else render_tag_stats(report, palette=palette)
             )
         return
 
@@ -975,12 +979,14 @@ def display_tag_stats(
     tags, _, cache_status = process_file(conn, cursor, path, args)
     if tags is None:
         if args.verbosity is not Verbosity.REALLY_QUIET:
-            print(f"{path} is not a supported music file")
+            out.line(f"{path} is not a supported music file")
         return
     if args.verbosity is not Verbosity.REALLY_QUIET:
-        display_file_tags(path, tags, cache_status, args.tags)
+        display_file_tags(path, tags, cache_status, args.tags, output=out)
     if is_excluded(path, args) and args.verbosity.shows_normal_output:
-        print("WARNING: This file is excluded by current configuration.")
+        out.line(
+            palette.warning("WARNING: This file is excluded by current configuration.")
+        )
 
 
 def matches_rules(tags: Mapping[str, TagValue], expression: FilterNode | None) -> bool:
@@ -1785,7 +1791,7 @@ def _run(args: Args) -> None:
                 trace_full_path(conn, cursor, args, out)
             elif args.mode is Mode.TAG_STATS:
                 if args.path is not None:
-                    display_tag_stats(conn, cursor, args)
+                    display_tag_stats(conn, cursor, args, out)
             elif args.path is not None:
                 process_path(conn, cursor, args, out)
             if args.clean:

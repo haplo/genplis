@@ -133,6 +133,9 @@ no `.m3ug` file is parsed and no playlist is written. Each supported file's
 tags are passed to `stats.TagStatsCollector`, which keeps only aggregate
 counters; the tags are still released after every file. `-t/--tag` selects
 tags whose distinct values are kept without the usual cardinality cap.
+`stats.render_tag_stats` and `stats.render_tag_details` accept a `Palette`;
+column widths are measured from plain text and only cell content is painted,
+so ANSI codes do not disturb table alignment.
 
 The primary CLI operation is a single `core.Mode` value (`PROCESS`,
 `TAG_STATS`, `SHOW_RULES`, `TRACE`, or `TRACE_FULL`) resolved in
