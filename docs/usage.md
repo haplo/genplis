@@ -2,8 +2,8 @@
 
 This page explains how to run genplis, what it writes, and how the cache
 behaves. For the filter language, see
-[M3UG](https://github.com/haplo/genplis/blob/main/docs/m3ug.md); for settings,
-see [Configuration](https://github.com/haplo/genplis/blob/main/docs/config.md).
+[M3UG](m3ug.md); for settings,
+see [Configuration](config.md).
 
 ## Synopsis
 
@@ -65,7 +65,7 @@ collection and update cache rows normally while it simulates selection.
 
 1. `[collection] path` is set in the config file. Running `genplis` with no
    arguments then scans that collection, which is convenient for
-   [scheduled runs](https://github.com/haplo/genplis/blob/main/docs/scheduling.md).
+   [scheduled runs](scheduling.md).
 2. `--clean` is used without a path, which cleans the **whole** database
    instead of a subtree.
 3. `--show-rules` is used with `--filter`, which needs no scan root.
@@ -277,7 +277,7 @@ uv run genplis --trace-full song.mp3 --filter Favorites.m3ug
 - `-q` keeps the requested tree or trace and suppresses progress chatter.
   `-qq` suppresses all normal output. Errors still go to standard error.
 
-See [Testing and debugging filters](https://github.com/haplo/genplis/blob/main/docs/m3ug.md#testing-and-debugging-filters)
+See [Testing and debugging filters](m3ug.md#testing-and-debugging-filters)
 for annotated examples.
 
 ## Generated playlists
@@ -292,7 +292,7 @@ for annotated examples.
   `[output] sort` applies; its default is `filename`, the absolute path.
   Equal keys keep directory-walk order. `@sort random` (optionally with an
   integer seed) shuffles entries. See
-  [Ordering](https://github.com/haplo/genplis/blob/main/docs/m3ug.md#ordering).
+  [Ordering](m3ug.md#ordering).
 - `@DEDUPE` keeps the first entry for each key after ordering; entries missing
   a key are always kept. `@LIMIT` caps the total number of entries,
   `@LIMIT N PER tag` caps how many share one tag value, and `@MAX-DURATION`
@@ -417,8 +417,8 @@ progress lines, warnings, and errors all use the same semantic palette.
 
 ## See also
 
-- [M3UG reference](https://github.com/haplo/genplis/blob/main/docs/m3ug.md)
-- [Configuration reference](https://github.com/haplo/genplis/blob/main/docs/config.md)
-- [Tags](https://github.com/haplo/genplis/blob/main/docs/tags.md)
-- [Scheduling runs](https://github.com/haplo/genplis/blob/main/docs/scheduling.md)
+- [M3UG reference](m3ug.md)
+- [Configuration reference](config.md)
+- [Tags](tags.md)
+- [Scheduling runs](scheduling.md)
 - [Example filters](https://github.com/haplo/genplis/tree/main/examples)

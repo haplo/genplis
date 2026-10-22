@@ -7,7 +7,7 @@ copy it to `$XDG_CONFIG_HOME/genplis/config.ini` (usually
 the file is missing, genplis uses the defaults below.
 
 For the command-line options and how they interact with these settings, see
-[Usage](https://github.com/haplo/genplis/blob/main/docs/usage.md).
+[Usage](usage.md).
 
 ## Location and loading
 
@@ -118,7 +118,7 @@ path = ~/Music
 
 Relative paths are resolved against the config file's directory. This is what
 lets a timer or service run plain `genplis` with no arguments; see [Running
-genplis on a schedule](https://github.com/haplo/genplis/blob/main/docs/scheduling.md).
+genplis on a schedule](scheduling.md).
 
 ### `exclude`
 
@@ -195,7 +195,7 @@ Changing `ignore` invalidates the cache.
 The default is usually `~/.cache/genplis/genplis.db`. `~` is expanded and
 relative paths are resolved against the config file. The database is
 disposable; deleting it only costs a re-parse on the next run. See
-[Usage](https://github.com/haplo/genplis/blob/main/docs/usage.md#cache) for
+[Usage](usage.md#cache) for
 cache behavior and cleaning.
 
 ## `[output]`
@@ -267,7 +267,7 @@ still break ties (including when both entries are missing the same key), and
 equal keys keep directory-walk order. Numeric-looking values sort numerically,
 other text sorts case-insensitively, and multi-valued tags use their first
 non-empty value. See
-[Ordering](https://github.com/haplo/genplis/blob/main/docs/m3ug.md#ordering)
+[Ordering](m3ug.md#ordering)
 for the full key semantics and examples.
 
 ## Settings that invalidate the cache
@@ -283,7 +283,7 @@ such a change is slower.
 
 ## See also
 
-- [Usage guide](https://github.com/haplo/genplis/blob/main/docs/usage.md)
-- [M3UG reference](https://github.com/haplo/genplis/blob/main/docs/m3ug.md)
-- [Tags](https://github.com/haplo/genplis/blob/main/docs/tags.md)
+- [Usage guide](usage.md)
+- [M3UG reference](m3ug.md)
+- [Tags](tags.md)
 - [Annotated example config](https://github.com/haplo/genplis/blob/main/examples/config.ini)

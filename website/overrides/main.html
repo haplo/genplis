@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+
+{% block extrahead %}
+  {% set description = config.site_description %}
+  {% if page.meta and page.meta.description %}
+    {% set description = page.meta.description %}
+  {% endif %}
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Genplis">
+  <meta property="og:title" content="{{ page.title | default(config.site_name, true) }}">
+  <meta property="og:description" content="{{ description }}">
+  <meta property="og:url" content="{{ page.canonical_url }}">
+  <meta property="og:image" content="{{ config.site_url }}assets/branding/social.png">
+  <meta property="og:image:alt" content="Genplis — Your music. Your rules. Your playlists.">
+  <meta name="twitter:card" content="summary_large_image">
+{% endblock %}
+
+{% block content %}
+  {% if page.meta and page.meta.home %}<div class="gp-home">{% endif %}
+  {{ super() }}
+  {% if page.meta and page.meta.home %}</div>{% endif %}
+  {% if page.meta and not page.meta.home %}
+    <div class="gp-doc-actions">
+      {% if page.meta.source_path %}
+        <a href="{{ config.repo_url }}/edit/main/{{ page.meta.source_path }}">Edit this page</a>
+      {% elif page.meta.generated %}
+        <a href="{{ config.repo_url }}/tree/main/examples">Browse example sources</a>
+      {% endif %}
+      <a href="{{ config.repo_url }}/issues/new?title=Documentation%3A%20{{ page.title | urlencode }}">Report a documentation issue</a>
+    </div>
+  {% endif %}
+{% endblock %}

@@ -16,3 +16,8 @@ wheels/
 coverage.xml
 coverage.md
 htmlcov/
+
+# generated website sources, output, and Zensical cache
+.website-src/
+site/
+.cache/

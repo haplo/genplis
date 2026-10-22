@@ -395,6 +395,8 @@ User docs are Markdown files under `docs/`:
 
 | File | Audience | Contents |
 | --- | --- | --- |
+| `home.md` | visitors | project website landing page |
+| `index.md` | users | documentation overview, installation, first playlist |
 | `usage.md` | users | running genplis, options, playlists, cache, cleaning |
 | `m3ug.md` | users | filter language, operators, sets, logic, ordering, limits, includes, examples |
 | `config.md` | users | every config setting and precedence |
@@ -404,16 +406,95 @@ User docs are Markdown files under `docs/`:
 
 Guidelines:
 
-- Link with **absolute** GitHub URLs, for example
-  `https://github.com/haplo/genplis/blob/main/docs/m3ug.md`. The README is
-  rendered on PyPI, where relative links do not work. Use the same form
-  between docs so links also work outside GitHub.
+- Between guides, use relative Markdown links such as `[M3UG](m3ug.md)`;
+  these work on GitHub and are resolved into website URLs during the build.
+  Keep **absolute** GitHub links in the README, which is also rendered on
+  PyPI, and for repository files outside the documentation.
 - Keep `README.md` short: overview, install, quick start, and a table of links
   into `docs/`.
 - Keep `examples/config.ini` and `examples/*.m3ug` valid; they are linked from
   the docs and the config is loaded by the test suite.
 - Avoid duplicating settings tables or operator semantics across files. Each
   fact should have one home and be linked from the others.
+
+## Website development
+
+The [project website](https://haplo.github.io/genplis/) is built with
+[Zensical](https://zensical.org/). Its dependencies are isolated in the
+`docs` dependency group; normal application installs do not need them.
+
+### Run the website locally
+
+From the repository root, start the live development server:
+
+```bash
+uv run --group docs python scripts/website.py serve
+```
+
+`uv run --group docs` installs the website dependencies automatically. Open
+**http://localhost:8000/genplis/** (or the preview URL printed by Zensical).
+Keep the command running while you work; edits to `docs/` and `examples/`
+regenerate the website sources, and Zensical reloads the preview. Stop the
+server with **Ctrl+C**. Restart it after changing `scripts/website.py` itself.
+
+Edit the original Markdown, examples, stylesheets, and template overrides,
+not the generated `.website-src/` or `site/` directories.
+
+### Build and validate
+
+Before opening a pull request, run the same strict build used in CI:
+
+```bash
+uv run --group docs python scripts/website.py build
+```
+
+The output is written to `site/`. The build validates every local HTML link,
+asset, and anchor, including the `/genplis/` prefix used on GitHub Pages.
+To check an existing build without rebuilding it:
+
+```bash
+uv run --group docs python scripts/website.py check
+```
+
+Search runs locally in the browser, includes all guides and examples, and
+excludes the landing page. Try a search in the live preview when changing
+navigation or generated examples.
+
+### Sources and deployment
+
+Source files and routes:
+
+| Source | Website path (under `/genplis/`) |
+| --- | --- |
+| `docs/home.md` | `/` — project landing page |
+| `docs/index.md` | `/docs/` — documentation overview and quick start |
+| `docs/usage.md`, etc. | `/docs/usage/`, etc. — existing guides |
+| `examples/*.m3ug` | `/docs/examples/` — generated gallery |
+| `docs/assets/` | `/assets/` — local styles and branding |
+
+`scripts/website.py` prepares ignored `.website-src/` inputs before Zensical
+writes `site/`. Neither directory should be edited or committed. It rewrites
+source-relative links for the published layout; links to the repository's
+`examples/` directory become links to the gallery on the website. Individual
+repository-file links still point to GitHub. Source edit links always point
+to the original files, not the generated inputs.
+
+The gallery discovers all `examples/*.m3ug` in filename order. Each file gets
+a heading, copyable code, and a byte-for-byte download. The generated ZIP
+preserves filenames and companion includes. Do not create `docs/examples.md`
+or maintain a second copy of an example. Add or edit the original instead.
+
+`zensical.toml` controls navigation and theme settings. Small template
+overrides live in `website/overrides/`; custom CSS lives in
+`docs/assets/stylesheets/website.css`. Replace the temporary branding in
+`docs/assets/branding/` when the final logo, favicon, and social image are
+ready. Fonts and assets are served locally; no analytics are installed.
+
+`.github/workflows/pages.yml` builds and validates on pull requests, pushes
+to `main`, and manual dispatch. Only `main` push/manual runs can deploy,
+using a Pages artifact and the `github-pages` environment. In repository
+**Settings → Pages**, select **GitHub Actions** as the source once. No
+`gh-pages` branch or personal access token is needed.
 
 ## Release
 
@@ -483,6 +564,7 @@ pending; see the roadmap.
 - [x] Display all available tags, with stats
 - [x] Debug M3UG
 - [x] Color output
+- [x] Website
 - [ ] Improve Windows support (**HELP NEEDED!**)
 - [ ] Improve MacOS support (**HELP NEEDED!**)
 - [ ] Publish to PyPI! 🚀

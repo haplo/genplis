@@ -82,6 +82,11 @@ rule. The references below cover the details and the common pitfalls.
 
 ## Documentation
 
+Visit the **[Genplis website](https://haplo.github.io/genplis/)** for the
+[documentation index](https://haplo.github.io/genplis/docs/) and
+[copyable, downloadable M3UG examples](https://haplo.github.io/genplis/docs/examples/).
+The guides below are the same Markdown sources used by the website.
+
 | Guide | Contents |
 | --- | --- |
 | [Usage](https://github.com/haplo/genplis/blob/main/docs/usage.md) | Options, single-file inspection, tag statistics, generated playlists, the tag cache, `--clean` |

@@ -6,9 +6,9 @@ with systemd or cron. Both examples run genplis as your user, so they read your
 config file and write to your cache.
 
 For the options genplis accepts, see
-[Usage](https://github.com/haplo/genplis/blob/main/docs/usage.md); for the
+[Usage](usage.md); for the
 collection path, see
-[Configuration](https://github.com/haplo/genplis/blob/main/docs/config.md).
+[Configuration](config.md).
 
 ## Install genplis for your user
 
@@ -245,8 +245,8 @@ The service name differs between distributions (`cronie`, `cron`, `crond`).
 
 ## See also
 
-- [Usage guide](https://github.com/haplo/genplis/blob/main/docs/usage.md)
-- [Configuration reference](https://github.com/haplo/genplis/blob/main/docs/config.md)
+- [Usage guide](usage.md)
+- [Configuration reference](config.md)
 - [systemd/Timers on the Arch Wiki](https://wiki.archlinux.org/title/Systemd/Timers)
 - [systemd.timer manual](https://www.freedesktop.org/software/systemd/man/latest/systemd.timer.html)
 - [crontab(5) manual](https://man7.org/linux/man-pages/man5/crontab.5.html)

@@ -5,9 +5,9 @@ file contains one rule or directive per line, and the file's filter expression
 must match a song for it to appear in the generated playlist.
 
 This page is the language reference. For the tags you can use in rules, see
-[Tags](https://github.com/haplo/genplis/blob/main/docs/tags.md). For running
+[Tags](tags.md). For running
 genplis and the generated playlist format, see
-[Usage](https://github.com/haplo/genplis/blob/main/docs/usage.md).
+[Usage](usage.md).
 
 ## How M3UG files work
 
@@ -163,7 +163,7 @@ with `Unrecognized operator`.
 - `@CASE` has no meaning for comparisons and is rejected.
 - Units depend on the tag: `duration` is in seconds, `bitrate` in kilobits
   per second, `samplerate` in hertz. See
-  [Tags](https://github.com/haplo/genplis/blob/main/docs/tags.md).
+  [Tags](tags.md).
 
 ### Multi-value rules
 
@@ -383,7 +383,7 @@ keep directory-walk order.
 Numeric-looking values sort numerically, so `track` values `2` and `10` come
 out in the expected order. Other text sorts case-insensitively. Multi-valued
 tags use their first non-empty value. `rating` uses the same raw-or-derived
-handling as filters; see [Rating](https://github.com/haplo/genplis/blob/main/docs/tags.md#rating)
+handling as filters; see [Rating](tags.md#rating)
 for the scale caveat.
 
 ## Playlist limits
@@ -544,7 +544,7 @@ are the same. Three groups are worth knowing about:
   inspecting a file: write `duration >= 600`, not `*duration >= 600`.
 - **`rating`**, which uses the raw `rating` tag when present and otherwise
   derives one from `fmps_rating`. See
-  [Tags](https://github.com/haplo/genplis/blob/main/docs/tags.md#rating) for
+  [Tags](tags.md#rating) for
   the scale caveats.
 
 An unknown or absent tag is not an error: the rule simply does not match
@@ -584,7 +584,7 @@ rating >= 5
 
 Rating scales differ between players. If `rating >= 4` matches nothing or
 everything, inspect your files first; see
-[Tags](https://github.com/haplo/genplis/blob/main/docs/tags.md#rating).
+[Tags](tags.md#rating).
 
 ### Great metal songs
 
@@ -802,4 +802,4 @@ uv run genplis --verbose ~/Music
 - Text sorting is case-insensitive but not locale-aware or natural-number
   aware; numeric-looking values are compared as numbers.
 
-Some of these are on the [roadmap](https://github.com/haplo/genplis/blob/main/docs/dev.md#roadmap).
+Some of these are on the [roadmap](dev.md#roadmap).

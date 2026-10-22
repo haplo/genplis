@@ -5,9 +5,9 @@ those tags come from, which names are available, and the special cases such as
 `rating` and calculated audio properties.
 
 For the operators that combine tags into rules, see
-[M3UG](https://github.com/haplo/genplis/blob/main/docs/m3ug.md). For the
+[M3UG](m3ug.md). For the
 settings that limit which tags are stored, see
-[Configuration](https://github.com/haplo/genplis/blob/main/docs/config.md#tags).
+[Configuration](config.md#tags).
 
 ## Where tags come from
 
@@ -78,7 +78,7 @@ uv run genplis -t genre ~/Music
 
 The report uses the same `*` marker for calculated properties and respects
 `[tags] ignore` and `[tags] max_size`. See
-[Tag statistics](https://github.com/haplo/genplis/blob/main/docs/usage.md#inspecting-tags-across-a-collection)
+[Tag statistics](usage.md#inspecting-tags-across-a-collection)
 for the full behavior.
 
 ## Tag names
@@ -129,7 +129,7 @@ keeps longer lists as lists:
   passes.
 - Sets on the right-hand side work the same way: `genre = [Metal | Rock]`
   matches if any tag value equals either value. See
-  [Multi-value rules](https://github.com/haplo/genplis/blob/main/docs/m3ug.md#multi-value-rules).
+  [Multi-value rules](m3ug.md#multi-value-rules).
 
 ## Calculated audio properties
 
@@ -201,7 +201,7 @@ Two settings affect the tags available to filters:
 - `[tags] max_size` (default 1000) discards values whose combined UTF-8
   encoded length exceeds the limit. `0` disables the limit. Calculated audio
   properties are exempt. See
-  [Configuration](https://github.com/haplo/genplis/blob/main/docs/config.md#max_size).
+  [Configuration](config.md#max_size).
 - `[tags] ignore` discards named tags before the size check and before
   caching. Names are case-insensitive. Ignoring `rating` removes the raw tag,
   but a rating is still derived when `fmps_rating` is available; ignore both
@@ -217,7 +217,7 @@ afterwards re-reads every file.
 
 ## See also
 
-- [M3UG reference](https://github.com/haplo/genplis/blob/main/docs/m3ug.md)
-- [Configuration](https://github.com/haplo/genplis/blob/main/docs/config.md)
-- [Usage guide](https://github.com/haplo/genplis/blob/main/docs/usage.md)
+- [M3UG reference](m3ug.md)
+- [Configuration](config.md)
+- [Usage guide](usage.md)
 - [tinytag documentation](https://github.com/tinytag/tinytag)
