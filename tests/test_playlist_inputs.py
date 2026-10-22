@@ -144,6 +144,17 @@ def test_max_duration_and_missing_duration() -> None:
     assert "    target duration: 10s" in disabled
 
 
+def test_selection_simulation_label() -> None:
+    output = format_playlist_input(_input())
+
+    assert "  selection: not simulated; use --trace-full" in output
+    assert "simulated below" not in output
+
+    simulated = format_playlist_input(_input(), selection_simulated=True)
+    assert "  selection: simulated below" in simulated
+    assert "use --trace-full" not in simulated
+
+
 def test_no_playlist_is_a_deterministic_result() -> None:
     output = format_playlist_input(_input(no_playlist=True))
 

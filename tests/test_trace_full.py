@@ -83,6 +83,8 @@ def test_trace_full_selected(
     )
 
     output = capsys.readouterr().out
+    assert "selection: simulated below" in output
+    assert "use --trace-full" not in output
     assert "selection:" in output
     assert "sorted position: 2 of 2" in output
     assert "result: IN PLAYLIST at position 2" in output

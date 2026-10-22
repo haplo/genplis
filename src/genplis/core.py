@@ -456,8 +456,8 @@ def get_calculated_tags(tags: Mapping[str, TagValue]) -> Tags:
     return calculated
 
 
-def _select_display_tags(
-    display_tags: Mapping[str, TagValue],
+def _select_requested_tags(
+    tag_values: Mapping[str, TagValue],
     requested: Sequence[str],
 ) -> tuple[Tags, tuple[str, ...]]:
     """Limit displayed tags to the requested names and report misses."""
@@ -471,7 +471,7 @@ def _select_display_tags(
             wanted.add(f"*{name}")
 
     selected: Tags = {
-        key: value for key, value in display_tags.items() if key.lower() in wanted
+        key: value for key, value in tag_values.items() if key.lower() in wanted
     }
     found: set[str] = set()
     for key in selected:
@@ -493,14 +493,14 @@ def display_file_tags(
     print(f"{path} detected as music file")
     print(f"Cache status: {CACHE_STATUS_MESSAGES[cache_status]}")
     print("Parsed tags:")
-    display_tags: Tags = {
+    shown_tags: Tags = {
         key: value for key, value in tags.items() if key not in AUDIO_PROPERTY_TAGS
     }
-    display_tags.update(get_calculated_tags(tags))
+    shown_tags.update(get_calculated_tags(tags))
     missing: tuple[str, ...] = ()
     if requested:
-        display_tags, missing = _select_display_tags(display_tags, requested)
-    for key, value in sorted(display_tags.items(), key=lambda tag: tag[0]):
+        shown_tags, missing = _select_requested_tags(shown_tags, requested)
+    for key, value in sorted(shown_tags.items(), key=lambda tag: tag[0]):
         print(f"    {key} = {value}")
     for name in missing:
         print(f"Tag '{name}' was not found. It may be hidden by [tags] ignore.")
@@ -713,6 +713,8 @@ def _print_filter_traces(
     target: Path,
     cache_status: db.CacheStatus,
     traces: list[FilterTraceItem],
+    *,
+    selection_simulated: bool = False,
 ) -> None:
     if args.verbosity is Verbosity.REALLY_QUIET:
         return
@@ -732,7 +734,12 @@ def _print_filter_traces(
         print(f"Filter: {filter_file}")
         print(format_tags_consulted(traced.consulted))
         print(format_file_trace(traced, title=str(filter_file)))
-        print(format_playlist_input(playlist_input))
+        print(
+            format_playlist_input(
+                playlist_input,
+                selection_simulated=selection_simulated,
+            )
+        )
         print("MATCH" if traced.passed else "NO MATCH")
 
     if len(traces) > 1:
@@ -795,7 +802,13 @@ def trace_full_path(
     if prepared is None:
         return
     all_filters, traces = prepared
-    _print_filter_traces(args, target, cache_status, traces)
+    _print_filter_traces(
+        args,
+        target,
+        cache_status,
+        traces,
+        selection_simulated=True,
+    )
 
     scan_root = _scan_root(args)
     matching = [item for item in traces if item[1].passed]

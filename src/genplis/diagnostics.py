@@ -220,15 +220,19 @@ def _directive_lines(
     return [f"{indent}directives:", *rows]
 
 
+def _include_header(include: IncludeInfo, parent_filename: str | None) -> str:
+    return (
+        f"@INCLUDE {include.raw_path} "
+        f"({_filename_label(parent_filename)}:{include.line}) -> {include.path}"
+    )
+
+
 def _render_include(
     include: IncludeInfo,
     current_filename: str | None,
     indent: str,
 ) -> list[str]:
-    header = (
-        f"{indent}@INCLUDE {include.raw_path} "
-        f"({_filename_label(current_filename)}:{include.line}) -> {include.path}"
-    )
+    header = f"{indent}{_include_header(include, current_filename)}"
     lines = [header]
     if include.file.expression is None:
         lines.append(f"{indent}  (no rules; directives only)")
@@ -516,7 +520,7 @@ def _status(trace: ExpressionTrace | IncludeTrace | FileTrace) -> str:
     return "PASS" if trace.passed else "FAIL"
 
 
-def _format_lookup_value(value: TagValue) -> str:
+def _format_value_or_missing(value: object) -> str:
     if value is None:
         return "<missing>"
     return repr(value)
@@ -531,12 +535,14 @@ def _format_lookup(lookup: TagLookup) -> str:
     if lookup.source == "calculated":
         source = lookup.key or "fmps_rating"
         return (
-            f"calculated rating = {_format_lookup_value(lookup.normalized)} "
+            f"calculated rating = {_format_value_or_missing(lookup.normalized)} "
             f"(from {source})"
         )
-    text = f"tag {lookup.key or lookup.requested} = {_format_lookup_value(lookup.raw)}"
+    text = (
+        f"tag {lookup.key or lookup.requested} = {_format_value_or_missing(lookup.raw)}"
+    )
     if lookup.normalized != lookup.raw:
-        text += f" -> {_format_lookup_value(lookup.normalized)}"
+        text += f" -> {_format_value_or_missing(lookup.normalized)}"
     if lookup.note is not None:
         text += f" ({lookup.note})"
     return text
@@ -592,11 +598,7 @@ def _render_file_body(
 ) -> list[str]:
     lines: list[str] = []
     for include in trace.includes:
-        header = (
-            f"@INCLUDE {include.include.raw_path} "
-            f"({_filename_label(current_filename)}:{include.include.line}) "
-            f"-> {include.include.path}"
-        )
+        header = _include_header(include.include, current_filename)
         if include.skipped:
             line = f"{indent}SKIP {header}"
             if include.reason is not None:
@@ -656,13 +658,9 @@ def format_tags_consulted(consulted: tuple[TagLookup, ...], *, indent: str = "")
     return "\n".join(lines)
 
 
-def _format_playlist_value(value: SortValue | None) -> str:
-    if value is None:
-        return "<missing>"
-    return repr(value)
-
-
-def format_playlist_input(entry: PlaylistInput) -> str:
+def format_playlist_input(
+    entry: PlaylistInput, *, selection_simulated: bool = False
+) -> str:
     """Render the deterministic playlist inputs for one filter."""
     lines = ["playlist inputs:"]
     sort_suffix = " (default)" if entry.sort_is_default else ""
@@ -670,7 +668,7 @@ def format_playlist_input(entry: PlaylistInput) -> str:
     names = [key.name for key in entry.sort if not key.is_random]
     for name, value in zip(names, entry.sort_values, strict=True):
         suffix = " (sorts last)" if value is None else ""
-        lines.append(f"    {name} = {_format_playlist_value(value)}{suffix}")
+        lines.append(f"    {name} = {_format_value_or_missing(value)}{suffix}")
     for key in entry.sort:
         if key.is_random:
             seed = "unseeded" if key.seed is None else f"seed {key.seed}"
@@ -683,7 +681,7 @@ def format_playlist_input(entry: PlaylistInput) -> str:
             lines.append(f"  dedupe: {', '.join(entry.dedupe)}")
             for name, value in zip(entry.dedupe, entry.dedupe_values, strict=True):
                 suffix = " (kept)" if value is None else ""
-                lines.append(f"    {name} = {_format_playlist_value(value)}{suffix}")
+                lines.append(f"    {name} = {_format_value_or_missing(value)}{suffix}")
 
     if entry.limit is not None:
         suffix = " (disabled)" if entry.limit == 0 else ""
@@ -698,7 +696,7 @@ def format_playlist_input(entry: PlaylistInput) -> str:
                 lines.append(f"    {per_tag.tag} = <missing> (file would be skipped)")
             else:
                 lines.append(
-                    f"    {per_tag.tag} = {_format_playlist_value(entry.limit_key)}"
+                    f"    {per_tag.tag} = {_format_value_or_missing(entry.limit_key)}"
                 )
 
     if entry.max_duration is not None:
@@ -716,6 +714,8 @@ def format_playlist_input(entry: PlaylistInput) -> str:
         lines.append("  selection: no playlist (@NO-PLAYLIST)")
     elif entry.exclusion is not None:
         lines.append(f"  selection: excluded: {entry.exclusion}")
+    elif selection_simulated:
+        lines.append("  selection: simulated below")
     else:
         lines.append("  selection: not simulated; use --trace-full")
     return "\n".join(lines)
@@ -758,7 +758,7 @@ def format_selection_trace(trace: SelectionTrace) -> str:
         names = [key.name for key in entry.sort if not key.is_random]
         for name, value in zip(names, entry.sort_values, strict=True):
             suffix = " (sorts last)" if value is None else ""
-            lines.append(f"      {name} = {_format_playlist_value(value)}{suffix}")
+            lines.append(f"      {name} = {_format_value_or_missing(value)}{suffix}")
 
         if entry.dedupe is not None:
             if entry.dedupe:

@@ -154,7 +154,7 @@ def test_process_path_prints_m3ug_filters(
     assert "    rating >= 3 (line 1)" in output
     assert '    genre ~ "Metal" (line 2)' in output
     assert "    sort: filename (default)" in output
-    assert "Parsed filters:" not in output
+    assert "Parsed" + " filters:" not in output
     assert "detected as music file" not in output
     assert "Parsed tags:" not in output
 
@@ -1504,7 +1504,7 @@ def test_process_dir_verbose_prints_each_filter_tree_once(
     _, all_filters = process_directory(genplis_db, genplis_db.cursor(), tmp_path, args)
     output = capsys.readouterr().out
     assert output.count(f"{filter_file}\n  AND") == 1
-    assert "Parsed rules:" not in output
+    assert "Parsed" + " rules:" not in output
 
     process_directory(
         genplis_db,
