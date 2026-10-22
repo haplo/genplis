@@ -55,6 +55,7 @@ def make_args() -> Callable[..., Args]:
         jobs: int = 1,
         mode: Mode = Mode.PROCESS,
         tags: tuple[str, ...] = (),
+        trace_path: Path | None = None,
     ) -> Args:
         return Args(
             path=Path(path_str),
@@ -69,6 +70,7 @@ def make_args() -> Callable[..., Args]:
             jobs=jobs,
             mode=mode,
             tags=tags,
+            trace_path=trace_path,
         )
 
     return _make_args

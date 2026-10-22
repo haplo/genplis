@@ -15,7 +15,12 @@ import psutil
 
 from . import db
 from .config import Config, load_config
-from .diagnostics import format_filter_tree
+from .diagnostics import (
+    format_file_trace,
+    format_filter_tree,
+    format_tags_consulted,
+    trace_file,
+)
 from .exceptions import GenplisConfigError, GenplisError
 from .executors import (
     ParseItem,
@@ -68,6 +73,7 @@ class Mode(Enum):
     PROCESS = auto()
     TAG_STATS = auto()
     SHOW_RULES = auto()
+    TRACE = auto()
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,6 +91,7 @@ class Args:
     jobs: int = 1
     mode: Mode = Mode.PROCESS
     tags: tuple[str, ...] = ()
+    trace_path: Path | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -236,6 +243,15 @@ def setup_argparse() -> argparse.ArgumentParser:
         action="store_true",
     )
     mode_group.add_argument(
+        "--trace",
+        dest="trace_path",
+        type=Path,
+        metavar="SONG",
+        help=(
+            "Trace how every selected filter evaluates SONG. No playlists are written."
+        ),
+    )
+    mode_group.add_argument(
         "--tag-stats",
         dest="tag_stats",
         help=(
@@ -314,6 +330,8 @@ def resolve_args(args: argparse.Namespace, config: Config) -> Args:
         raise GenplisConfigError("--tag cannot be combined with --clean")
     if args.show_rules and args.tags:
         raise GenplisConfigError("--tag cannot be combined with --show-rules")
+    if args.trace_path is not None and args.tags:
+        raise GenplisConfigError("--tag cannot be combined with --trace")
 
     requested_tags: list[str] = []
     for raw_tag in args.tags or ():
@@ -324,10 +342,13 @@ def resolve_args(args: argparse.Namespace, config: Config) -> Args:
     tags = tuple(dict.fromkeys(requested_tags))
     if args.show_rules:
         mode = Mode.SHOW_RULES
+    elif args.trace_path is not None:
+        mode = Mode.TRACE
     elif args.tag_stats or tags:
         mode = Mode.TAG_STATS
     else:
         mode = Mode.PROCESS
+    trace_path = args.trace_path.expanduser() if args.trace_path is not None else None
 
     if args.path is not None:
         path = args.path
@@ -378,6 +399,7 @@ def resolve_args(args: argparse.Namespace, config: Config) -> Args:
         jobs=_resolve_jobs(args, config),
         mode=mode,
         tags=tags,
+        trace_path=trace_path,
     )
 
 
@@ -549,6 +571,84 @@ def show_rules(args: Args) -> None:
         found += 1
     if found == 0 and args.verbosity is not Verbosity.REALLY_QUIET:
         print(f"No filters found in {path}")
+
+
+def _trace_filters(
+    conn: sqlite3.Connection,
+    cursor: sqlite3.Cursor,
+    args: Args,
+) -> dict[Path, M3UGFile]:
+    """Resolve the filters a trace should evaluate."""
+    path = args.path
+    if path is None:
+        raise GenplisError("Attempted to trace a file but no filter path was given")
+    if path.is_file():
+        if path.suffix.lower() != ".m3ug":
+            raise GenplisError(f"{path} must be a .m3ug file or a directory")
+        _, parsed, _ = process_file(conn, cursor, path, args)
+        if parsed is None:
+            raise GenplisError(f"{path} could not be parsed as a .m3ug file")
+        return {path: parsed}
+    if path.is_dir():
+        return _discover_filters(conn, cursor, path, args)
+    raise GenplisError(f"{path} must be a .m3ug file or a directory")
+
+
+def trace_path(conn: sqlite3.Connection, cursor: sqlite3.Cursor, args: Args) -> None:
+    """Print an annotated evaluation of one audio file against filters."""
+    target = args.trace_path
+    if target is None:
+        raise GenplisError("Attempted to trace a file but none was given")
+    if target.is_dir():
+        raise GenplisError(f"Trace target {target} is a directory")
+    if target.suffix.lower() == ".m3ug":
+        raise GenplisError(f"Trace target {target} is a .m3ug filter, not audio")
+    if not target.is_file():
+        raise GenplisError(f"Trace target {target} does not exist")
+
+    tags, _, cache_status = process_file(conn, cursor, target, args)
+    if tags is None:
+        raise GenplisError(f"Trace target {target} is not a supported music file")
+
+    all_filters = _trace_filters(conn, cursor, args)
+    quiet = args.verbosity is Verbosity.REALLY_QUIET
+    if not all_filters:
+        if not quiet:
+            print(f"No filters found in {args.path}")
+        return
+
+    traces = [
+        (filter_file, trace_file(parsed, tags))
+        for filter_file, parsed in all_filters.items()
+    ]
+    if not quiet:
+        print(f"Trace target: {target}")
+        print(f"Cache status: {CACHE_STATUS_MESSAGES[cache_status]}")
+        print(f"Filters: {len(traces)}")
+        if is_excluded(target, args):
+            print("WARNING: This file is excluded by current configuration.")
+        path = args.path
+        if path is None:
+            raise GenplisError("Attempted to trace a file but no filter path was given")
+        scan_root = path if path.is_dir() else path.parent
+        try:
+            target.relative_to(scan_root)
+        except ValueError:
+            print(f"WARNING: {target} is outside the scan root {scan_root}.")
+
+        for filter_file, traced in traces:
+            print()
+            print(f"Filter: {filter_file}")
+            print(format_tags_consulted(traced.consulted))
+            print(format_file_trace(traced, title=str(filter_file)))
+            print("MATCH" if traced.passed else "NO MATCH")
+
+        if len(traces) > 1:
+            print()
+            print("Summary:")
+            for filter_file, traced in traces:
+                result = "MATCH" if traced.passed else "NO MATCH"
+                print(f"  {result} {filter_file}")
 
 
 def display_tag_stats(
@@ -1232,7 +1332,9 @@ def _run(args: Args) -> None:
             db.create_files_table(cursor, db.get_cache_version(args.config.tags))
             conn.commit()
 
-            if args.mode is Mode.TAG_STATS:
+            if args.mode is Mode.TRACE:
+                trace_path(conn, cursor, args)
+            elif args.mode is Mode.TAG_STATS:
                 if args.path is not None:
                     display_tag_stats(conn, cursor, args)
             elif args.path is not None:
