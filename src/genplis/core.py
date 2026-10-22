@@ -100,6 +100,7 @@ class Args:
     mode: Mode = Mode.PROCESS
     tags: tuple[str, ...] = ()
     trace_path: Path | None = None
+    filters: tuple[Path, ...] = ()
     color: bool | None = None
     theme: Theme = Theme.AUTO
 
@@ -240,6 +241,19 @@ def setup_argparse() -> argparse.ArgumentParser:
         metavar="PATH",
     )
     parser.add_argument(
+        "-f",
+        "--filter",
+        dest="filters",
+        help=(
+            "Process only this .m3ug filter. PATH (or the configured "
+            "collection) is the scan root. May be repeated."
+        ),
+        action="append",
+        default=None,
+        type=Path,
+        metavar="FILE",
+    )
+    parser.add_argument(
         "-j",
         "--jobs",
         help=(
@@ -254,9 +268,9 @@ def setup_argparse() -> argparse.ArgumentParser:
     mode_group.add_argument(
         "--clean",
         help=(
-            "Remove cache entries for files that no longer exist. With PATH, "
-            "process it normally first and clean only entries under it; "
-            "without PATH, clean the whole database."
+            "Remove cache entries for files that no longer exist. With a "
+            "directory PATH, process it normally first and clean only entries "
+            "under it; without PATH, clean the whole database."
         ),
         action="store_true",
     )
@@ -356,6 +370,21 @@ def _resolve_jobs(args: argparse.Namespace, config: Config) -> int:
     return auto_workers() if raw_jobs == 0 else raw_jobs
 
 
+def _normalize_filters(raw_filters: Sequence[Path] | None) -> tuple[Path, ...]:
+    """Expand, validate and deduplicate filters selected with --filter."""
+    filters: list[Path] = []
+    for raw_path in raw_filters or ():
+        filter_path = raw_path.expanduser()
+        if filter_path.suffix.lower() != ".m3ug":
+            raise GenplisConfigError(
+                f"--filter expects a .m3ug file, got {filter_path}"
+            )
+        if not filter_path.is_file():
+            raise GenplisConfigError(f"filter file not found: {filter_path}")
+        filters.append(filter_path)
+    return tuple(dict.fromkeys(filters))
+
+
 def resolve_args(args: argparse.Namespace, config: Config) -> Args:
     """Combine command-line arguments with configuration file values.
 
@@ -364,11 +393,17 @@ def resolve_args(args: argparse.Namespace, config: Config) -> Args:
     """
     if args.clean and args.tags:
         raise GenplisConfigError("--tag cannot be combined with --clean")
+    if args.clean and args.filters:
+        raise GenplisConfigError("--filter cannot be combined with --clean")
     if args.show_rules and args.tags:
         raise GenplisConfigError("--tag cannot be combined with --show-rules")
     if (args.trace_path is not None or args.trace_full_path is not None) and args.tags:
         raise GenplisConfigError(
             "--tag cannot be combined with --trace or --trace-full"
+        )
+    if args.filters and (args.tag_stats or args.tags):
+        raise GenplisConfigError(
+            "--filter cannot be combined with --tag-stats or --tag"
         )
 
     requested_tags: list[str] = []
@@ -392,6 +427,7 @@ def resolve_args(args: argparse.Namespace, config: Config) -> Args:
     else:
         mode = Mode.PROCESS
     trace_path = raw_trace_path.expanduser() if raw_trace_path is not None else None
+    filters = _normalize_filters(args.filters)
 
     if args.path is not None:
         path = args.path
@@ -401,9 +437,30 @@ def resolve_args(args: argparse.Namespace, config: Config) -> Args:
         path = None
     elif config.collection.path is not None:
         path = config.collection.path
+    elif mode is Mode.SHOW_RULES and filters:
+        # Showing selected filters does not need a scan root.
+        path = None
     else:
         raise GenplisConfigError(
             "PATH is required unless [collection] path is set in the config file"
+        )
+
+    if path is not None and not path.is_dir():
+        if args.clean:
+            raise GenplisConfigError(f"--clean requires a directory, got {path}")
+        if path.suffix.lower() == ".m3ug":
+            if mode is Mode.TAG_STATS:
+                raise GenplisConfigError(
+                    f"{path} is a .m3ug filter; --tag-stats requires a directory "
+                    "or an audio file"
+                )
+            raise GenplisConfigError(
+                f"{path} is a .m3ug filter; pass the collection directory as PATH "
+                "and use --filter FILE to process that filter"
+            )
+    if filters and path is not None and path.exists() and not path.is_dir():
+        raise GenplisConfigError(
+            f"PATH must be a directory when --filter is used, got {path}"
         )
 
     exclude = (
@@ -449,6 +506,7 @@ def resolve_args(args: argparse.Namespace, config: Config) -> Args:
         mode=mode,
         tags=tags,
         trace_path=trace_path,
+        filters=filters,
         color=color,
         theme=theme,
     )
@@ -539,6 +597,49 @@ def display_file_tags(
         )
 
 
+def _parse_filter_file(filter_file: Path, args: Args) -> M3UGFile:
+    """Parse one .m3ug filter without touching the cache."""
+    if filter_file.suffix.lower() != ".m3ug":
+        raise GenplisError(f"{filter_file} is not a .m3ug filter")
+    if not filter_file.is_file():
+        raise GenplisError(f"filter file not found: {filter_file}")
+    return parse_m3ug(
+        filter_file.read_text(encoding="utf-8-sig"),
+        str(filter_file),
+        args.verbosity,
+    )
+
+
+def _parse_selected_filters(
+    args: Args,
+    output: Output,
+) -> dict[Path, M3UGFile] | None:
+    """Parse the filters selected with --filter and show their rule trees."""
+    if not args.filters:
+        return None
+
+    parsed_filters: dict[Path, M3UGFile] = {}
+    for filter_file in args.filters:
+        parsed = _parse_filter_file(filter_file, args)
+        parsed_filters[filter_file] = parsed
+        if args.verbosity.shows_normal_output:
+            output.line(
+                format_filter_tree(
+                    parsed,
+                    title=f"{filter_file} detected as M3UG file",
+                    default_sort=args.config.output.sort,
+                    palette=output.palette,
+                )
+            )
+            if is_excluded(filter_file, args):
+                output.line(
+                    output.palette.warning(
+                        "WARNING: This file is excluded by current configuration."
+                    )
+                )
+    return parsed_filters
+
+
 def process_path(
     conn: sqlite3.Connection,
     cursor: sqlite3.Cursor,
@@ -554,38 +655,32 @@ def process_path(
     path = args.path
     if path is None:
         raise GenplisError("Attempted to process a path but none was given")
+    if args.filters and path.exists() and not path.is_dir():
+        raise GenplisError("PATH must be a directory when --filter is used")
 
     if path.is_dir():
-        process_directory(conn, cursor, path, args, output=out)
+        process_directory(
+            conn,
+            cursor,
+            path,
+            args,
+            filters=_parse_selected_filters(args, out),
+            output=out,
+        )
     elif path.is_file():
-        tags, parsed, cache_status = process_file(conn, cursor, path, args, output=out)
+        if path.suffix.lower() == ".m3ug":
+            raise GenplisError(
+                f"{path} is a .m3ug filter; pass the collection directory as "
+                "PATH and use --filter FILE to process that filter"
+            )
+        tags, _, cache_status = process_file(conn, cursor, path, args, output=out)
         if tags is not None and args.verbosity.shows_normal_output:
             display_file_tags(path, tags, cache_status, output=out)
-        if parsed is not None and args.verbosity.shows_normal_output:
-            out.line(
-                format_filter_tree(
-                    parsed,
-                    title=f"{path} detected as M3UG file",
-                    default_sort=args.config.output.sort,
-                    palette=out.palette,
-                )
-            )
         if is_excluded(path, args) and args.verbosity.shows_normal_output:
             out.line(
                 out.palette.warning(
                     "WARNING: This file is excluded by current configuration."
                 )
-            )
-        if parsed is not None:
-            # An explicit M3UG path processes only that filter. Its directory
-            # is scanned for songs, and @INCLUDE still pulls in shared rules.
-            process_directory(
-                conn,
-                cursor,
-                path.parent,
-                args,
-                filters={path: parsed},
-                output=out,
             )
     else:
         raise GenplisError(f"{path} must be either a directory or a file.")
@@ -594,31 +689,28 @@ def process_path(
 def show_rules(args: Args, output: Output | None = None) -> None:
     """Print parsed rule trees without touching the cache or audio files."""
     out = Output.plain() if output is None else output
-    if args.path is None:
-        raise GenplisError("Attempted to show rules but no path was given")
-    path = args.path.expanduser()
-
-    if path.is_file():
-        if path.suffix.lower() != ".m3ug":
-            raise GenplisError(f"{path} is not a .m3ug filter")
-        parsed = parse_m3ug(
-            path.read_text(encoding="utf-8-sig"),
-            str(path),
-            args.verbosity,
-        )
-        if args.verbosity is not Verbosity.REALLY_QUIET:
-            out.line(
-                format_filter_tree(
-                    parsed,
-                    title=str(path),
-                    default_sort=args.config.output.sort,
-                    palette=out.palette,
+    if args.filters:
+        for filter_file in args.filters:
+            parsed = _parse_filter_file(filter_file, args)
+            if args.verbosity is not Verbosity.REALLY_QUIET:
+                out.line(
+                    format_filter_tree(
+                        parsed,
+                        title=str(filter_file),
+                        default_sort=args.config.output.sort,
+                        palette=out.palette,
+                    )
                 )
-            )
         return
 
+    if args.path is None:
+        raise GenplisError("Attempted to show rules but no path or --filter was given")
+    path = args.path.expanduser()
     if not path.is_dir():
-        raise GenplisError(f"{path} must be a .m3ug file or a directory")
+        raise GenplisError(
+            f"{path} must be a directory; use --filter FILE to show a single "
+            ".m3ug filter"
+        )
 
     found = 0
     for filter_file in _walk_files(path, args, report_skips=False, only_m3ug=True):
@@ -650,19 +742,21 @@ def _trace_filters(
     args: Args,
 ) -> dict[Path, M3UGFile]:
     """Resolve the filters a trace should evaluate."""
+    if args.filters:
+        return {
+            filter_file: _parse_filter_file(filter_file, args)
+            for filter_file in args.filters
+        }
+
     path = args.path
     if path is None:
         raise GenplisError("Attempted to trace a file but no filter path was given")
-    if path.is_file():
-        if path.suffix.lower() != ".m3ug":
-            raise GenplisError(f"{path} must be a .m3ug file or a directory")
-        _, parsed, _ = process_file(conn, cursor, path, args)
-        if parsed is None:
-            raise GenplisError(f"{path} could not be parsed as a .m3ug file")
-        return {path: parsed}
-    if path.is_dir():
-        return _discover_filters(conn, cursor, path, args)
-    raise GenplisError(f"{path} must be a .m3ug file or a directory")
+    if not path.is_dir():
+        raise GenplisError(
+            f"{path} must be a directory; use --filter FILE to trace a single "
+            ".m3ug filter"
+        )
+    return _discover_filters(conn, cursor, path, args)
 
 
 def build_playlist_input(
@@ -708,6 +802,8 @@ def _scan_root(args: Args) -> Path:
     path = args.path
     if path is None:
         raise GenplisError("Attempted to trace a file but no filter path was given")
+    if args.filters and not path.is_dir():
+        raise GenplisError("PATH must be a directory when --filter is used")
     return path if path.is_dir() else path.parent
 
 

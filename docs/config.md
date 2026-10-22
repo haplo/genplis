@@ -34,9 +34,10 @@ For booleans, the command-line switches are `--verbose`/`--no-verbose`,
 value is used.
 
 `PATH` is special: it may be omitted when `[collection] path` is set. If a path
-is given on the command line, it wins. `--exclude` is also special: any
-`--exclude` option replaces the entire configured list rather than adding to
-it.
+is given on the command line, it wins. `--filter` selects `.m3ug` files
+explicitly; `PATH` then remains the directory to scan, and a `.m3ug` file
+cannot be passed as `PATH`. `--exclude` is also special: any `--exclude` option
+replaces the entire configured list rather than adding to it.
 
 `@sort` is also special: a directive in a `.m3ug` file overrides
 `[output] sort` for that playlist. The configured/built-in value only applies

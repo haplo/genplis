@@ -15,6 +15,7 @@ def _args(
     make_args: Callable[..., Args],
     path: Path,
     *,
+    filters: tuple[Path, ...] = (),
     verbosity: Verbosity = Verbosity.NORMAL,
     exclude: list[re.Pattern[str]] | None = None,
     config: Config | None = None,
@@ -25,6 +26,7 @@ def _args(
         verbosity=verbosity,
         exclude=exclude,
         config=config,
+        filters=filters,
     )
 
 
@@ -36,7 +38,7 @@ def test_show_rules_prints_one_tree(
     filter_file = tmp_path / "favorites.m3ug"
     filter_file.write_text("artist = X\nrating >= 4\n", encoding="utf-8")
 
-    show_rules(_args(make_args, filter_file))
+    show_rules(_args(make_args, tmp_path, filters=(filter_file,)))
 
     output = capsys.readouterr().out
     assert output.splitlines()[0] == str(filter_file)
@@ -82,7 +84,7 @@ def test_show_rules_renders_includes(
     base.write_text("genre = Metal\n", encoding="utf-8")
     main_filter.write_text("@INCLUDE Base.m3ug\nartist = X\n", encoding="utf-8")
 
-    show_rules(_args(make_args, main_filter))
+    show_rules(_args(make_args, tmp_path, filters=(main_filter,)))
 
     output = capsys.readouterr().out
     assert f"  @INCLUDE Base.m3ug (Main.m3ug:1) -> {base.resolve()}" in output
@@ -121,6 +123,7 @@ def test_main_show_rules_opens_no_database_or_playlist(
             "--no-config",
             "--db",
             str(db_path),
+            "--filter",
             str(filter_file),
         ],
     )
@@ -138,8 +141,16 @@ def test_show_rules_rejects_audio_path(
     make_args: Callable[..., Args],
     file_mp3: Path,
 ) -> None:
-    with pytest.raises(GenplisError, match="not a .m3ug filter"):
+    with pytest.raises(GenplisError, match="must be a directory"):
         show_rules(_args(make_args, file_mp3))
+
+
+def test_show_rules_rejects_m3ug_path(
+    make_args: Callable[..., Args],
+    file_m3ug: Path,
+) -> None:
+    with pytest.raises(GenplisError, match="must be a directory"):
+        show_rules(_args(make_args, file_m3ug))
 
 
 def test_show_rules_reports_empty_directory(
@@ -160,10 +171,19 @@ def test_show_rules_quiet_modes(
     filter_file = tmp_path / "favorites.m3ug"
     filter_file.write_text("artist = X\n", encoding="utf-8")
 
-    show_rules(_args(make_args, filter_file, verbosity=Verbosity.QUIET))
+    show_rules(
+        _args(make_args, tmp_path, filters=(filter_file,), verbosity=Verbosity.QUIET)
+    )
     assert "artist = X" in capsys.readouterr().out
 
-    show_rules(_args(make_args, filter_file, verbosity=Verbosity.REALLY_QUIET))
+    show_rules(
+        _args(
+            make_args,
+            tmp_path,
+            filters=(filter_file,),
+            verbosity=Verbosity.REALLY_QUIET,
+        )
+    )
     assert capsys.readouterr().out == ""
 
 
@@ -182,6 +202,7 @@ def test_main_show_rules_color_flags_and_auto_theme(
             "--show-rules",
             "--color",
             "--no-config",
+            "--filter",
             str(filter_file),
         ],
     )
@@ -202,6 +223,7 @@ def test_main_show_rules_color_flags_and_auto_theme(
             "--show-rules",
             "--no-color",
             "--no-config",
+            "--filter",
             str(filter_file),
         ],
     )

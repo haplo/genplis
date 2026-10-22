@@ -48,23 +48,23 @@ docs/               user and developer documentation
 
 ## Data flow
 
-A directory run goes through these stages. A `.m3ug` path given directly on
-the command line uses the same pipeline with its parent directory as the scan
-root and its single parsed filter passed to `process_directory(filters=...)`,
-so neighbouring playlists are not touched.
+A directory run goes through these stages. `--filter` selects specific filters
+and passes them to `process_directory(filters=...)`, so neighbouring playlists
+are not touched; `PATH` (or the configured collection) is always the scan root.
 
 ```text
 resolve config + CLI arguments
         ↓
 open/create SQLite cache
         ↓
-walk PATH to discover .m3ug files (prune excluded directories)
+select filters: --filter files, or walk PATH to discover .m3ug files
+    (prune excluded directories)
         ↓
-parse every .m3ug file in the main process:
+parse every selected .m3ug file in the main process:
     recursively resolve @INCLUDE, detect cycles and depth
     merge included directives as defaults, own directives last
         ↓
-walk PATH again for audio files:
+walk PATH for audio files:
     .m3ug  → skip (already parsed)
     audio  → cache hit? apply every filter now : queue for parsing
     keep matching entries with walk order, sort, dedupe, limit and duration keys

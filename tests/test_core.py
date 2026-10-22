@@ -138,7 +138,20 @@ def test_process_path_reports_cache_status(
     assert "Cache status: valid" in capsys.readouterr().out
 
 
-def test_process_path_prints_m3ug_filters(
+def test_process_path_rejects_m3ug_filters(
+    genplis_db: sqlite3.Connection,
+    make_args: Callable[..., Args],
+    file_m3ug: Path,
+    tmp_path: Path,
+) -> None:
+    filter_file = tmp_path / file_m3ug.name
+    shutil.copy2(file_m3ug, filter_file)
+
+    with pytest.raises(GenplisError, match="use --filter"):
+        process_path(genplis_db, genplis_db.cursor(), make_args(str(filter_file)))
+
+
+def test_process_path_prints_selected_filters(
     genplis_db: sqlite3.Connection,
     make_args: Callable[..., Args],
     file_m3ug: Path,
@@ -148,7 +161,11 @@ def test_process_path_prints_m3ug_filters(
     filter_file = tmp_path / file_m3ug.name
     shutil.copy2(file_m3ug, filter_file)
 
-    process_path(genplis_db, genplis_db.cursor(), make_args(str(filter_file)))
+    process_path(
+        genplis_db,
+        genplis_db.cursor(),
+        make_args(str(tmp_path), filters=(filter_file,)),
+    )
 
     output = capsys.readouterr().out
     assert f"{filter_file} detected as M3UG file" in output
@@ -177,11 +194,74 @@ def test_process_path_generates_playlist_for_m3ug_file_only(
     process_path(
         genplis_db,
         genplis_db.cursor(),
-        make_args(str(filter_file), include_source=False, extended_m3u=False),
+        make_args(
+            str(tmp_path),
+            filters=(filter_file,),
+            include_source=False,
+            extended_m3u=False,
+        ),
     )
 
     assert filter_file.with_suffix(".m3u").read_text() == "song.mp3\n"
     assert not other_filter.with_suffix(".m3u").exists()
+
+
+def test_process_path_processes_multiple_selected_filters(
+    genplis_db: sqlite3.Connection,
+    make_args: Callable[..., Args],
+    file_mp3: Path,
+    tmp_path: Path,
+) -> None:
+    shutil.copy2(file_mp3, tmp_path / "song.mp3")
+    matching = tmp_path / "matching.m3ug"
+    matching.write_text('artist = "Test Artist"\n', encoding="utf-8")
+    other = tmp_path / "other.m3ug"
+    other.write_text("genre ~ Synthwave\n", encoding="utf-8")
+    skipped = tmp_path / "skipped.m3ug"
+    skipped.write_text('artist = "Nobody"\n', encoding="utf-8")
+
+    process_path(
+        genplis_db,
+        genplis_db.cursor(),
+        make_args(
+            str(tmp_path),
+            filters=(matching, other),
+            include_source=False,
+            extended_m3u=False,
+        ),
+    )
+
+    assert matching.with_suffix(".m3u").read_text() == "song.mp3\n"
+    assert other.with_suffix(".m3u").read_text() == "song.mp3\n"
+    assert not skipped.with_suffix(".m3u").exists()
+
+
+def test_process_path_scans_collection_for_filter_in_subdirectory(
+    genplis_db: sqlite3.Connection,
+    make_args: Callable[..., Args],
+    file_mp3: Path,
+    tmp_path: Path,
+) -> None:
+    """A filter in a playlists folder must scan the collection passed as PATH."""
+    song = tmp_path / "song.mp3"
+    shutil.copy2(file_mp3, song)
+    playlists = tmp_path / "Playlists"
+    playlists.mkdir()
+    filter_file = playlists / "favorites.m3ug"
+    filter_file.write_text('artist = "Test Artist"\n', encoding="utf-8")
+
+    process_path(
+        genplis_db,
+        genplis_db.cursor(),
+        make_args(
+            str(tmp_path),
+            filters=(filter_file,),
+            include_source=False,
+            extended_m3u=False,
+        ),
+    )
+
+    assert filter_file.with_suffix(".m3u").read_text() == "../song.mp3\n"
 
 
 def test_process_path_warns_for_excluded_single_file(
@@ -1380,7 +1460,11 @@ def test_process_path_reports_no_playlist(
     filter_file = tmp_path / "fragment.m3ug"
     filter_file.write_text("@NO-PLAYLIST\nartist = X\n", encoding="utf-8")
 
-    process_path(genplis_db, genplis_db.cursor(), make_args(str(filter_file)))
+    process_path(
+        genplis_db,
+        genplis_db.cursor(),
+        make_args(str(tmp_path), filters=(filter_file,)),
+    )
 
     output = capsys.readouterr().out
     assert "    no playlist: yes (@NO-PLAYLIST)" in output
@@ -2006,6 +2090,119 @@ def test_resolve_args_requires_path() -> None:
         resolve_args(setup_argparse().parse_args([]), Config())
 
 
+def test_resolve_args_clean_requires_directory(
+    tmp_path: Path,
+    file_mp3: Path,
+) -> None:
+    parser = setup_argparse()
+    filter_file = tmp_path / "favorites.m3ug"
+    filter_file.write_text("artist = X\n", encoding="utf-8")
+
+    for raw_path in (file_mp3, tmp_path / "missing", filter_file):
+        with pytest.raises(GenplisConfigError, match="--clean requires a directory"):
+            resolve_args(parser.parse_args(["--clean", str(raw_path)]), Config())
+
+
+def test_resolve_args_rejects_m3ug_path(tmp_path: Path) -> None:
+    filter_file = tmp_path / "favorites.m3ug"
+    filter_file.write_text("artist = X\n", encoding="utf-8")
+
+    with pytest.raises(GenplisConfigError, match="use --filter"):
+        resolve_args(setup_argparse().parse_args([str(filter_file)]), Config())
+
+
+def test_resolve_args_filter_uses_config_path(tmp_path: Path) -> None:
+    filter_file = tmp_path / "favorites.m3ug"
+    filter_file.write_text("artist = X\n", encoding="utf-8")
+    config = Config(collection=CollectionConfig(path=tmp_path))
+
+    args = resolve_args(
+        setup_argparse().parse_args(["--filter", str(filter_file)]),
+        config,
+    )
+
+    assert args.path == tmp_path
+    assert args.filters == (filter_file,)
+
+
+def test_resolve_args_filter_requires_directory_path(
+    tmp_path: Path,
+    file_mp3: Path,
+) -> None:
+    filter_file = tmp_path / "favorites.m3ug"
+    filter_file.write_text("artist = X\n", encoding="utf-8")
+
+    with pytest.raises(GenplisConfigError, match="must be a directory"):
+        resolve_args(
+            setup_argparse().parse_args(["--filter", str(filter_file), str(file_mp3)]),
+            Config(),
+        )
+
+
+def test_resolve_args_filter_requires_m3ug_suffix(tmp_path: Path) -> None:
+    filter_file = tmp_path / "favorites.txt"
+    filter_file.write_text("artist = X\n", encoding="utf-8")
+
+    with pytest.raises(GenplisConfigError, match=".m3ug"):
+        resolve_args(
+            setup_argparse().parse_args(["--filter", str(filter_file), str(tmp_path)]),
+            Config(),
+        )
+
+
+def test_resolve_args_filter_must_exist(tmp_path: Path) -> None:
+    with pytest.raises(GenplisConfigError, match="not found"):
+        resolve_args(
+            setup_argparse().parse_args(
+                ["--filter", str(tmp_path / "missing.m3ug"), str(tmp_path)]
+            ),
+            Config(),
+        )
+
+
+def test_resolve_args_filter_deduplicates(tmp_path: Path) -> None:
+    filter_file = tmp_path / "favorites.m3ug"
+    filter_file.write_text("artist = X\n", encoding="utf-8")
+
+    args = resolve_args(
+        setup_argparse().parse_args(
+            ["-f", str(filter_file), "--filter", str(filter_file), str(tmp_path)]
+        ),
+        Config(),
+    )
+
+    assert args.filters == (filter_file,)
+
+
+def test_resolve_args_filter_conflicts_with_clean_and_tag_stats(
+    tmp_path: Path,
+) -> None:
+    filter_file = tmp_path / "favorites.m3ug"
+    filter_file.write_text("artist = X\n", encoding="utf-8")
+    parser = setup_argparse()
+
+    for argv in (
+        ["--clean", "--filter", str(filter_file)],
+        ["--tag-stats", "--filter", str(filter_file), str(tmp_path)],
+        ["-t", "genre", "--filter", str(filter_file), str(tmp_path)],
+    ):
+        with pytest.raises(GenplisConfigError, match="cannot be combined"):
+            resolve_args(parser.parse_args(argv), Config())
+
+
+def test_resolve_args_show_rules_filter_without_path(tmp_path: Path) -> None:
+    filter_file = tmp_path / "favorites.m3ug"
+    filter_file.write_text("artist = X\n", encoding="utf-8")
+
+    args = resolve_args(
+        setup_argparse().parse_args(["--show-rules", "--filter", str(filter_file)]),
+        Config(),
+    )
+
+    assert args.path is None
+    assert args.filters == (filter_file,)
+
+
 def test_resolve_args_cli_exclude_replaces_config() -> None:
     config = Config(
         collection=CollectionConfig(
@@ -2400,6 +2597,94 @@ def test_main_clean_without_database(
 
     assert "Database does not exist; nothing to clean." in capsys.readouterr().out
     assert not db_path.exists()
+
+
+def test_main_filter_scans_configured_collection(
+    file_mp3: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression: a filter in a playlists folder must scan the collection."""
+    music = tmp_path / "Music"
+    playlists = music / "Playlists"
+    playlists.mkdir(parents=True)
+    shutil.copy2(file_mp3, music / "song.mp3")
+    filter_file = playlists / "Synthwave.m3ug"
+    filter_file.write_text('artist = "Test Artist"\n', encoding="utf-8")
+    config = tmp_path / "config.ini"
+    config.write_text(f"[collection]\npath = {music}\n", encoding="utf-8")
+    db_path = tmp_path / "genplis.db"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "genplis",
+            "--config",
+            str(config),
+            "--filter",
+            str(filter_file),
+            "--no-include-source",
+            "--no-extended-m3u",
+            "--db",
+            str(db_path),
+        ],
+    )
+
+    main()
+
+    assert filter_file.with_suffix(".m3u").read_text() == "../song.mp3\n"
+
+
+def test_main_rejects_m3ug_path_with_filter_hint(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    filter_file = tmp_path / "favorites.m3ug"
+    filter_file.write_text("artist = X\n", encoding="utf-8")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "genplis",
+            "--no-config",
+            "--db",
+            str(tmp_path / "genplis.db"),
+            str(filter_file),
+        ],
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        main()
+
+    assert exc_info.value.code == 1
+    assert "use --filter FILE" in capsys.readouterr().err
+
+
+def test_main_clean_rejects_non_directory_path(
+    file_mp3: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "genplis",
+            "--clean",
+            "--no-config",
+            "--db",
+            str(tmp_path / "genplis.db"),
+            str(file_mp3),
+        ],
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        main()
+
+    assert exc_info.value.code == 1
+    assert "--clean requires a directory" in capsys.readouterr().err
 
 
 def test_main_rejects_quiet_and_verbose_together(

@@ -22,14 +22,17 @@ from genplis.types import Verbosity
 
 def _args(
     make_args: Callable[..., Args],
-    filter_path: Path,
+    path: Path,
     target: Path,
+    *,
+    filters: tuple[Path, ...] = (),
     **kwargs: object,
 ) -> Args:
     return make_args(
-        str(filter_path),
+        str(path),
         mode=Mode.TRACE,
         trace_path=target,
+        filters=filters,
         **kwargs,
     )
 
@@ -49,7 +52,7 @@ def test_trace_matching_filter(
     trace_path(
         genplis_db,
         genplis_db.cursor(),
-        _args(make_args, filter_file, song),
+        _args(make_args, tmp_path, song, filters=(filter_file,)),
     )
 
     output = capsys.readouterr().out
@@ -79,7 +82,7 @@ def test_trace_failing_filter(
     trace_path(
         genplis_db,
         genplis_db.cursor(),
-        _args(make_args, filter_file, song),
+        _args(make_args, tmp_path, song, filters=(filter_file,)),
     )
 
     output = capsys.readouterr().out
@@ -105,7 +108,7 @@ def test_trace_or_short_circuit(
     trace_path(
         genplis_db,
         genplis_db.cursor(),
-        _args(make_args, filter_file, song),
+        _args(make_args, tmp_path, song, filters=(filter_file,)),
     )
 
     output = capsys.readouterr().out
@@ -131,7 +134,7 @@ def test_trace_included_rules(
     trace_path(
         genplis_db,
         genplis_db.cursor(),
-        _args(make_args, main_filter, song),
+        _args(make_args, tmp_path, song, filters=(main_filter,)),
     )
 
     output = capsys.readouterr().out
@@ -234,8 +237,9 @@ def test_trace_warns_for_excluded_target(
         genplis_db.cursor(),
         _args(
             make_args,
-            filter_file,
+            tmp_path,
             song,
+            filters=(filter_file,),
             exclude=[re.compile(r"song\.mp3$")],
         ),
     )
@@ -319,8 +323,9 @@ def test_trace_quiet_modes(
         genplis_db.cursor(),
         _args(
             make_args,
-            filter_file,
+            tmp_path,
             song,
+            filters=(filter_file,),
             verbosity=Verbosity.QUIET,
         ),
     )
@@ -331,8 +336,9 @@ def test_trace_quiet_modes(
         genplis_db.cursor(),
         _args(
             make_args,
-            filter_file,
+            tmp_path,
             song,
+            filters=(filter_file,),
             verbosity=Verbosity.REALLY_QUIET,
         ),
     )
@@ -374,7 +380,9 @@ def test_main_trace_writes_no_playlist(
             "--no-config",
             "--db",
             str(db_path),
+            "--filter",
             str(filter_file),
+            str(tmp_path),
         ],
     )
 

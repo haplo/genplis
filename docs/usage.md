@@ -11,16 +11,19 @@ see [Configuration](https://github.com/haplo/genplis/blob/main/docs/config.md).
 genplis [OPTIONS] [PATH]
 ```
 
-`PATH` is a directory (your music collection), a single audio file, or a
-`.m3ug` filter file. It may be omitted when `[collection] path` is set in the
-config file. If neither is available, genplis exits with an error explaining
-that `PATH` is required.
+`PATH` is a directory (your music collection) or a single audio file. To
+process one specific `.m3ug` filter, name it with `--filter FILE`; `PATH` is
+then the collection to scan and may be omitted when `[collection] path` is set
+in the config file. If neither `PATH` nor a configured collection is available,
+genplis exits with an error explaining that `PATH` is required. A `.m3ug` file
+passed as `PATH` is rejected; use `--filter` instead.
 
 ## Options
 
 | Option | Meaning |
 | --- | --- |
-| `PATH` | Directory to scan, an audio file to inspect, or a `.m3ug` filter to process on its own. |
+| `PATH` | Directory to scan or an audio file to inspect. Use `--filter` to process a specific `.m3ug` file. |
+| `-f FILE`, `--filter FILE` | Process only this `.m3ug` filter. `PATH` (or the configured collection) is the scan root. May be repeated. |
 | `-e REGEX`, `--exclude REGEX` | Skip files and folders whose path matches this regular expression. May be repeated. **Replaces** the config file's `exclude` list entirely. |
 | `--config FILE` | Read settings from this file instead of the XDG default. |
 | `--no-config` | Ignore all configuration files. |
@@ -30,9 +33,9 @@ that `PATH` is required.
 | `--theme THEME` | Color theme: `auto` (default), `dark`, or `light`. `auto` uses `COLORFGBG` when available and otherwise assumes a dark terminal. |
 | `--db PATH` | Use this SQLite database instead of the default cache location. |
 | `-j N`, `--jobs N` | Parse cache misses with `N` worker processes. `0` uses one worker per CPU, capped at eight; `1` disables the process pool. Default is `0`. |
-| `--clean` | Remove cache entries for files that no longer exist. See [Cleaning the cache](#cleaning-the-cache). |
-| `--show-rules` | Parse `PATH` (a `.m3ug` file or directory) and print the rule trees. No cache, audio scan, or playlists. |
-| `--trace SONG` | Evaluate the filters selected by `PATH` for one audio file and print an annotated trace. No playlists. |
+| `--clean` | Remove cache entries for files that no longer exist. With `PATH`, regenerate that collection first; `PATH` must be a directory. See [Cleaning the cache](#cleaning-the-cache). |
+| `--show-rules` | Parse the filters selected with `--filter`, or every `.m3ug` file under `PATH`, and print the rule trees. No cache, audio scan, or playlists. |
+| `--trace SONG` | Evaluate the filters selected with `--filter`, or the filters under `PATH`, for one audio file and print an annotated trace. No playlists. |
 | `--trace-full SONG` | Like `--trace`, plus an exact dry-run simulation of playlist selection. No playlists. |
 | `--tag-stats` | Show every tag found in the collection with file counts. No playlists are written. |
 | `-t TAG`, `--tag TAG` | Show every distinct value of `TAG` with file counts. Implies `--tag-stats` and may be repeated. |
@@ -45,25 +48,27 @@ Every option with an on/off form overrides the corresponding config setting.
 `--config` and `--no-config` are mutually exclusive.
 
 `--show-rules`, `--trace`, `--trace-full`, `--clean`, and `--tag-stats` are
-mutually exclusive modes. `--trace SONG` and `--trace-full SONG` use `PATH` as
-the filter file or directory and take the audio file as their option value.
-`--tag` cannot be combined with `--show-rules`, `--trace`, `--trace-full`, or
-`--clean`.
+mutually exclusive modes. `--trace SONG` and `--trace-full SONG` search `PATH`
+for filters, or use the filters selected with `--filter`, and take the audio
+file as their option value. `--tag` cannot be combined with
+`--show-rules`, `--trace`, `--trace-full`, or `--clean`. `--filter` cannot be
+combined with `--clean` or `--tag-stats`.
 
 None of the debugging modes writes a playlist. `--show-rules` opens no cache
 database and scans no audio. `--trace` loads only `SONG` through the tag cache,
-so it may add or refresh that one cache row. `--trace-full` may scan the filter
-directory and update cache rows normally while it simulates selection.
+so it may add or refresh that one cache row. `--trace-full` may scan the
+collection and update cache rows normally while it simulates selection.
 
 ## PATH and the config file
 
-`PATH` is optional in two situations:
+`PATH` is optional in three situations:
 
 1. `[collection] path` is set in the config file. Running `genplis` with no
    arguments then scans that collection, which is convenient for
    [scheduled runs](https://github.com/haplo/genplis/blob/main/docs/scheduling.md).
 2. `--clean` is used without a path, which cleans the **whole** database
    instead of a subtree.
+3. `--show-rules` is used with `--filter`, which needs no scan root.
 
 A path given on the command line always wins over the configured collection
 path. Relative command-line paths are resolved against the current directory,
@@ -80,19 +85,20 @@ edit the config file instead.
 1. Loads the config file (unless `--no-config`) and merges it with the
    command-line options.
 2. Opens or creates the cache database.
-3. Walks the scan root to find and parse every `.m3ug` file, pruning excluded
-   folders and files. The scan root is `PATH` when it is a directory; for a
-   `.m3ug` `PATH` it is the directory containing that file. Includes are
+3. Selects the filters: the files named with `--filter`, or every `.m3ug` file
+   found by walking the scan root (pruning excluded folders and files). The
+   scan root is always `PATH` (or the configured collection). Includes are
    resolved recursively and their directives merged as defaults for the
    including file.
-4. Walks the scan root again for audio files, skipping unsupported formats
-   silently (`--verbose` explains why). It parses each file's tags, reusing
-   cached tags when the file has not changed, and applies every `.m3ug` file's
+4. Walks the scan root for audio files, skipping unsupported formats silently
+   (`--verbose` explains why). It parses each file's tags, reusing cached tags
+   when the file has not changed, and applies every selected `.m3ug` file's
    rules as soon as that file's tags are available.
-5. Writes a playlist for each `.m3ug` file that matched at least one song.
-   Entries are ordered by the file's `@sort` directive, or by `[output] sort`
-   (default `filename`) when it has none. `@LIMIT`, `@LIMIT N PER tag`, and
-   `@MAX-DURATION` can cap the selected entries after ordering.
+5. Writes a playlist for each selected `.m3ug` file that matched at least one
+   song. Entries are ordered by the file's `@sort` directive, or by
+   `[output] sort` (default `filename`) when it has none. `@LIMIT`,
+   `@LIMIT N PER tag`, and `@MAX-DURATION` can cap the selected entries after
+   ordering.
 6. Prints how many files were processed, how long it took, and the process's
    RAM usage.
 
@@ -101,9 +107,21 @@ folders are not used to build playlists, and a `.m3ug` file does not pull
 audio files in from outside the scanned tree. An `@INCLUDE` may read a filter
 file from outside the scan root, but it only adds rules and defaults.
 
-When `PATH` is a `.m3ug` file, genplis processes only that filter: it scans
-the file's directory for songs and writes its `.m3u`. Other `.m3ug` files in
-that tree are ignored, so their playlists are not updated.
+To regenerate only one filter, name it with `--filter`; the scan root is still
+`PATH` (or the configured collection):
+
+```bash
+cd ~/Music
+genplis . --filter Playlists/Synthwave.m3ug
+```
+
+With `[collection] path` configured, the `PATH` argument can be omitted:
+`genplis --filter Playlists/Synthwave.m3ug`.
+
+This scans the collection but processes only that filter, writes
+`Playlists/Synthwave.m3u` next to it, and leaves every other playlist
+untouched. A `.m3ug` file passed as `PATH` is rejected with a message pointing
+to `--filter`.
 
 ### Parallel parsing
 
@@ -137,17 +155,20 @@ values are prefixed with `*` (`*filename`, `*duration`, `*bitrate`,
 `*samplerate`, `*rating`) to distinguish them from tags embedded in the file.
 Filter names do **not** include the `*`.
 
+To process one specific filter, pass the collection as `PATH` (or use the
+configured collection) and select the filter with `--filter`:
+
 ```bash
-uv run genplis /path/to/Favorites.m3ug
+uv run genplis ~/Music --filter ~/Music/Favorites.m3ug
 ```
 
 This prints the rule tree, including inline `@INCLUDE` nodes and the effective
-directives. It then scans the file's directory for audio files using only this
+directives. It then scans the collection for audio files using only this
 filter, so `Favorites.m3ug` produces its `Favorites.m3u` without processing any
-other `.m3ug` files in that tree. A file marked `@NO-PLAYLIST` is still parsed
-and may satisfy includes, but no playlist is written for it. To inspect the
-tree without scanning audio or writing a playlist, use
-`genplis --show-rules Favorites.m3ug`.
+other `.m3ug` files. A file marked `@NO-PLAYLIST` is still parsed and may
+satisfy includes, but no playlist is written for it. To inspect the tree
+without scanning audio or writing a playlist, use
+`genplis --show-rules --filter Favorites.m3ug`.
 
 Both forms also warn when the file matches the current exclude configuration.
 
@@ -234,24 +255,25 @@ rating; `-t rating` shows both the embedded `rating` and the calculated
 ### Debugging filters
 
 ```bash
-uv run genplis --show-rules Favorites.m3ug
+uv run genplis --show-rules --filter Favorites.m3ug
 uv run genplis --show-rules ~/Music
-uv run genplis --trace song.mp3 Favorites.m3ug
-uv run genplis --trace-full song.mp3 Favorites.m3ug
+uv run genplis --trace song.mp3 --filter Favorites.m3ug
+uv run genplis --trace-full song.mp3 --filter Favorites.m3ug
 ```
 
-- `--show-rules` parses one `.m3ug` path, or every non-excluded `.m3ug` file
-  under a directory, and prints the rule trees. It does not open the cache,
-  read audio, or write playlists. An audio path is an error.
+- `--show-rules` parses the filters named with `--filter`, or every
+  non-excluded `.m3ug` file under a directory, and prints the rule trees. It
+  does not open the cache, read audio, or write playlists. A `.m3ug` file or an
+  audio file passed as `PATH` is an error; use `--filter` for a single filter.
 - `--trace` prints the evaluation tree for one audio file: `PASS`, `FAIL`, and
   `SKIP` nodes, the tags consulted, playlist inputs, and the final match
   result. It loads the target through the normal cache path, so that one file
   may be parsed or refreshed. It never writes a playlist.
 - `--trace-full` adds the deterministic selection result for every filter:
   sorted position, dedupe winner, cap failures, and the final playlist
-  position. It may scan the filter directory and update the cache like a
-  normal run, but it writes no playlists. Use it when count or duration caps
-  make the ordinary trace report `selection: not simulated`.
+  position. It may scan the collection and update the cache like a normal run,
+  but it writes no playlists. Use it when count or duration caps make the
+  ordinary trace report `selection: not simulated`.
 - `-q` keeps the requested tree or trace and suppresses progress chatter.
   `-qq` suppresses all normal output. Errors still go to standard error.
 
@@ -329,7 +351,8 @@ uv run genplis --clean ~/Music
 ```
 
 With a path, genplis runs normally first and then removes entries for files
-under that path that no longer exist. This keeps the behavior predictable: the
+under that path that no longer exist. The path must be a directory; audio files
+and `.m3ug` filters are rejected. This keeps the behavior predictable: the
 playlists are regenerated and the cache is cleaned in one pass.
 
 Without a path, the whole database is cleaned:

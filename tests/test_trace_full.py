@@ -30,15 +30,14 @@ def _run_full(
     content: str,
     target_name: str,
     *,
-    filter_path: Path | None = None,
+    scan_root: Path | None = None,
     **kwargs: object,
 ) -> Path:
     for name in tracks:
         (tmp_path / name).write_bytes(b"")
-    filter_file = filter_path or (tmp_path / "favorites.m3ug")
-    if filter_path is not None:
-        filter_file.mkdir(parents=True, exist_ok=True)
-        filter_file = filter_file / "favorites.m3ug"
+    root = scan_root if scan_root is not None else tmp_path
+    root.mkdir(parents=True, exist_ok=True)
+    filter_file = root / "favorites.m3ug"
     filter_file.write_text(content, encoding="utf-8")
 
     def fake_get_tags(path: Path, *_args: object, **_kwargs: object) -> Tags | None:
@@ -49,9 +48,10 @@ def _run_full(
         genplis_db,
         genplis_db.cursor(),
         make_args(
-            str(filter_path or tmp_path),
+            str(root),
             mode=Mode.TRACE_FULL,
             trace_path=tmp_path / target_name,
+            filters=(filter_file,),
             include_source=False,
             extended_m3u=False,
             **kwargs,
@@ -354,7 +354,7 @@ def test_trace_full_outside_root_skips_the_scan(
         tracks,
         "artist = A\n",
         "song.mp3",
-        filter_path=music,
+        scan_root=music,
     )
 
     output = capsys.readouterr().out
@@ -440,7 +440,9 @@ def test_main_trace_full_writes_no_playlist(
             "--no-config",
             "--db",
             str(db_path),
+            "--filter",
             str(filter_file),
+            str(tmp_path),
         ],
     )
 
@@ -468,9 +470,10 @@ def test_trace_mode_has_no_selection_section(
         genplis_db,
         genplis_db.cursor(),
         make_args(
-            str(filter_file),
+            str(tmp_path),
             mode=Mode.TRACE,
             trace_path=song,
+            filters=(filter_file,),
         ),
     )
 

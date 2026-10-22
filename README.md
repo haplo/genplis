@@ -57,10 +57,10 @@ parallel by default; see [Parallel parsing](https://github.com/haplo/genplis/blo
 for `--jobs`.
 
 To regenerate just one playlist without processing the other filters in the
-collection, pass the filter file itself:
+collection, select the filter with `--filter`:
 
 ```bash
-uv run genplis ~/Music/Favorites.m3ug
+uv run genplis ~/Music --filter ~/Music/Favorites.m3ug
 ```
 
 To see which tags a file actually has (useful when writing filters):

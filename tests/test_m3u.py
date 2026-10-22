@@ -191,6 +191,20 @@ def test_cross_drive_entry_falls_back_to_absolute(
     assert playlist_file.read_text(encoding="utf-8") == f"{entry}\n"
 
 
+def test_mixed_absolute_and_relative_paths_are_relativized(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    playlist_file = Path("Playlists") / "playlist.m3u"
+    playlist_file.parent.mkdir()
+    entry = tmp_path / "song.mp3"
+
+    create_m3u(playlist_file, [entry], extended=False)
+
+    assert playlist_file.read_text(encoding="utf-8") == "../song.mp3\n"
+
+
 def test_existing_playlist_is_not_overwritten(tmp_path: Path) -> None:
     playlist_file = tmp_path / "playlist.m3u"
     playlist_file.write_text("keep this\n", encoding="utf-8")

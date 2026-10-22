@@ -1,4 +1,5 @@
 import math
+import os
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -83,9 +84,16 @@ def create_m3u(
             try:
                 playlist_entry_path = entry.path.relative_to(playlist_dir, walk_up=True)
             except ValueError:
-                # Paths with no common root (for example different Windows
-                # drives) cannot be relative; fall back to the absolute path.
-                playlist_entry_path = entry.path
+                # A mix of relative and absolute paths has no common form;
+                # normalize both against the current directory first.
+                try:
+                    playlist_entry_path = Path(os.path.abspath(entry.path)).relative_to(
+                        Path(os.path.abspath(playlist_dir)), walk_up=True
+                    )
+                except ValueError:
+                    # Paths with no common root (for example different Windows
+                    # drives) cannot be relative; fall back to the absolute path.
+                    playlist_entry_path = entry.path
             if extended:
                 playlist_file.write(_format_extinf(entry))
                 playlist_file.write("\n")

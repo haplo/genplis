@@ -19,8 +19,8 @@ genplis and the generated playlist format, see
   produce a playlist of its own.
 - Filters are applied to every music file found under the `PATH` given on the
   command line (or configured in the config file), not just to the folder that
-  contains the `.m3ug` file. When `PATH` is the `.m3ug` file itself, its
-  containing directory is the scan root and only that filter is processed.
+  contains the `.m3ug` file. Use `--filter FILE` to process one specific
+  filter; a `.m3ug` file cannot be passed as `PATH`.
 - All rules in a file are combined with **AND**. Add `@OR` to a rule to join it
   to the previous rule as an alternative, and `@NOT` to negate one rule.
 - A file may contain directives such as `@sort` to choose the playlist order.
@@ -660,11 +660,12 @@ Use the names **without** the `*` in filters.
 
 ### Show parsed rules
 
-`--show-rules` parses a filter file, or every non-excluded `.m3ug` file under a
-directory, without opening the cache, scanning audio, or writing playlists:
+`--show-rules` parses the filters named with `--filter`, or every non-excluded
+`.m3ug` file under a directory, without opening the cache, scanning audio, or
+writing playlists:
 
 ```bash
-uv run genplis --show-rules Favorites.m3ug
+uv run genplis --show-rules --filter Favorites.m3ug
 uv run genplis --show-rules ~/Music
 ```
 
@@ -707,7 +708,7 @@ target is loaded through the normal tag cache path (so that one file may be
 parsed or refreshed).
 
 ```bash
-uv run genplis --trace song.mp3 Favorites.m3ug
+uv run genplis --trace song.mp3 --filter Favorites.m3ug
 uv run genplis --trace song.mp3 ~/Music
 ```
 
@@ -743,7 +744,7 @@ a dry-run scan and selection. It may read and update the tag cache like a
 normal run, but it writes no playlists:
 
 ```bash
-uv run genplis --trace-full song.mp3 Favorites.m3ug
+uv run genplis --trace-full song.mp3 --filter Favorites.m3ug
 uv run genplis --trace-full song.mp3 ~/Music
 ```
 
@@ -778,13 +779,13 @@ error. None of the debugging modes writes a playlist.
 To process only one `.m3ug` file and regenerate its playlist:
 
 ```bash
-uv run genplis /path/to/Favorites.m3ug
+uv run genplis ~/Music --filter ~/Music/Favorites.m3ug
 ```
 
-This prints the rule tree, scans the file's directory for music, and writes
-`Favorites.m3u` next to it. Other `.m3ug` files under that directory are
-ignored. Add `--verbose` to print each discovered filter tree, the effective
-sort order, each matching song, and match counts during a full run:
+This prints the rule tree, scans the collection (the `PATH`, or the configured
+one when omitted), and writes `Favorites.m3u` next to the filter. Other `.m3ug`
+files are ignored. Add `--verbose` to print each discovered filter tree, the
+effective sort order, each matching song, and match counts during a full run:
 
 ```bash
 uv run genplis --verbose ~/Music

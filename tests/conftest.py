@@ -64,6 +64,7 @@ def make_args() -> Callable[..., Args]:
         mode: Mode = Mode.PROCESS,
         tags: tuple[str, ...] = (),
         trace_path: Path | None = None,
+        filters: tuple[Path, ...] = (),
     ) -> Args:
         return Args(
             path=Path(path_str),
@@ -79,6 +80,7 @@ def make_args() -> Callable[..., Args]:
             mode=mode,
             tags=tags,
             trace_path=trace_path,
+            filters=filters,
         )
 
     return _make_args
