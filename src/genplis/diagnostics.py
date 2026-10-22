@@ -252,7 +252,7 @@ def _render_include(
     header = f"{indent}{_include_header(include, current_filename, palette)}"
     lines = [header]
     if include.file.expression is None:
-        lines.append(f"{indent}  (no rules; directives only)")
+        lines.append(f"{indent}  {palette.source('(no rules; directives only)')}")
         lines.extend(_directive_lines(include.file, None, f"{indent}  ", palette))
         return lines
     lines.extend(_render_file_contents(include.file, f"{indent}  ", palette))
@@ -379,7 +379,7 @@ def format_filter_tree(
         indent = ""
 
     if parsed.expression is None:
-        lines.append(f"{indent}(always)")
+        lines.append(f"{indent}{colors.source('(always)')}")
     else:
         lines.extend(_render_file_contents(parsed, indent, colors))
 
@@ -678,7 +678,7 @@ def _render_file_body(
             continue
         if include.passed is None:
             lines.append(f"{indent}{header}")
-            lines.append(f"{indent}  (no rules; directives only)")
+            lines.append(f"{indent}  {palette.source('(no rules; directives only)')}")
             lines.extend(
                 _directive_lines(
                     include.include.file,
@@ -712,7 +712,7 @@ def _render_file_body(
             )
         )
     elif not trace.includes:
-        lines.append(f"{indent}(always)")
+        lines.append(f"{indent}{palette.source('(always)')}")
     return lines
 
 
@@ -740,7 +740,7 @@ def format_tags_consulted(
     colors = Palette() if palette is None else palette
     heading = colors.title("tags consulted:")
     if not consulted:
-        return f"{indent}{heading} (none)"
+        return f"{indent}{heading} {colors.source('(none)')}"
     lines = [f"{indent}{heading}"]
     for lookup in consulted:
         detail = ""
@@ -784,7 +784,9 @@ def format_playlist_input(
 
     if entry.dedupe is not None:
         if not entry.dedupe:
-            lines.append(f"  {colors.directive('dedupe:')} (disabled)")
+            lines.append(
+                f"  {colors.directive('dedupe:')} {colors.source('(disabled)')}"
+            )
         else:
             lines.append(
                 f"  {colors.directive('dedupe:')} "
@@ -952,7 +954,9 @@ def format_selection_trace(
                         f"{colors.value(str(entry.dedupe_winner))}"
                     )
             else:
-                lines.append(f"    {colors.directive('dedupe:')} (disabled)")
+                lines.append(
+                    f"    {colors.directive('dedupe:')} {colors.source('(disabled)')}"
+                )
         for label, result in (
             ("count:", entry.limit_result or "not reached"),
             ("per-tag:", entry.per_tag_result or "not reached"),

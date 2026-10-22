@@ -30,6 +30,14 @@ def file_m3ug() -> Path:
 
 
 @pytest.fixture()
+def strip_ansi() -> Callable[[str], str]:
+    def _strip_ansi(text: str) -> str:
+        return re.sub(r"\x1b\[[0-9;]*m", "", text)
+
+    return _strip_ansi
+
+
+@pytest.fixture()
 def genplis_db(tmp_path: Path) -> Iterator[sqlite3.Connection]:
     db_path = tmp_path / "genplis.db"
     conn, cursor = setup_database_connection(db_path)

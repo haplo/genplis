@@ -3,6 +3,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from .output import Output
 from .types import TagValue, Verbosity
 
 # RFC 8216 section 4.1 forbids control characters in playlist text. Titles can
@@ -43,6 +44,7 @@ def create_m3u(
     verbosity: Verbosity = Verbosity.NORMAL,
     *,
     extended: bool = True,
+    output: Output | None = None,
 ) -> None:
     """Write an M3U playlist.
 
@@ -56,9 +58,14 @@ def create_m3u(
     passed as plain paths use the file name as their title and ``-1`` as their
     duration. Pass ``extended=False`` to write a plain path-only playlist.
     """
+    out = Output.plain() if output is None else output
     if playlist_path.exists() and not overwrite:
         if verbosity.shows_normal_output:
-            print(f"WARNING: {playlist_path} already exists, skipping...")
+            out.line(
+                f"{out.palette.warning('WARNING:')} "
+                f"{out.palette.title(str(playlist_path))} "
+                f"{out.palette.source('already exists, skipping...')}"
+            )
         return
 
     playlist_dir = playlist_path.parent

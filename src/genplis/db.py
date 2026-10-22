@@ -12,6 +12,7 @@ from .config import TagsConfig
 from .exceptions import GenplisDBError
 from .files import get_last_modified
 from .json import GenplisJSONEncoder
+from .output import Output
 from .types import Tags, Verbosity
 
 DB_NAME = "genplis.db"
@@ -151,6 +152,7 @@ def cache_tags_for_file(
     *,
     last_modified: int | None = None,
     verbosity: Verbosity = Verbosity.NORMAL,
+    output: Output | None = None,
 ) -> None:
     """Save given tags for a music file in DB.
 
@@ -160,6 +162,7 @@ def cache_tags_for_file(
     Caller is responsible for calling commit on the DB connection.
 
     """
+    out = Output.plain() if output is None else output
     file_path = file_path.absolute()
     if last_modified is None:
         last_modified = get_last_modified(file_path)
@@ -178,7 +181,10 @@ def cache_tags_for_file(
         (db_key, last_modified, json_tags, last_modified, json_tags),
     )
     if verbosity.shows_normal_output:
-        print(f"Updated cache for file: {file_path}")
+        out.line(
+            f"{out.palette.source('Updated cache for file:')} "
+            f"{out.palette.title(str(file_path))}"
+        )
 
 
 class WriteBatch:
@@ -191,9 +197,16 @@ class WriteBatch:
 
     """
 
-    def __init__(self, conn: sqlite3.Connection, every: int = 1) -> None:
+    def __init__(
+        self,
+        conn: sqlite3.Connection,
+        every: int = 1,
+        *,
+        output: Output | None = None,
+    ) -> None:
         self._conn = conn
         self._every = every
+        self._output = output
         self._pending = 0
 
     def store(
@@ -212,6 +225,7 @@ class WriteBatch:
             tags,
             last_modified=last_modified,
             verbosity=verbosity,
+            output=self._output,
         )
         self._pending += 1
         if self._every and self._pending >= self._every:

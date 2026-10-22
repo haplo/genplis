@@ -9,6 +9,7 @@ import sys
 import weakref
 from collections.abc import Callable
 from dataclasses import replace
+from io import StringIO
 from pathlib import Path
 
 import pytest
@@ -51,7 +52,7 @@ from genplis.m3ug import (
     NameNode,
     ValueNode,
 )
-from genplis.output import Theme
+from genplis.output import Output, Palette, Theme
 from genplis.sorting import parse_sort_spec
 from genplis.types import Tags, TagValue, Verbosity
 
@@ -203,18 +204,11 @@ def test_process_path_rejects_nonexistent_path(
     genplis_db: sqlite3.Connection,
     make_args: Callable[..., Args],
     tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
 ) -> None:
     missing = tmp_path / "missing.mp3"
 
-    with pytest.raises(SystemExit) as exc_info:
+    with pytest.raises(GenplisError, match="must be either a directory or a file"):
         process_path(genplis_db, genplis_db.cursor(), make_args(str(missing)))
-
-    assert exc_info.value.code == 1
-    assert (
-        f"{missing} must be either a directory or a file. Exiting..."
-        in capsys.readouterr().err
-    )
 
 
 def test_process_path_errors_without_path(
@@ -2258,6 +2252,41 @@ def test_clean_database_reports_stats(
     assert "saved)." in output
 
 
+def test_clean_database_color_preserves_plain_output(
+    tmp_path: Path,
+    strip_ansi: Callable[[str], str],
+) -> None:
+    missing = tmp_path / "gone.mp3"
+
+    def run(enabled: bool) -> str:
+        db_path = tmp_path / ("colored.db" if enabled else "plain.db")
+        conn, cursor = setup_database_connection(db_path)
+        try:
+            create_files_table(cursor)
+            cursor.execute(
+                "INSERT INTO files(path, last_modified, tags) VALUES (?, 0, '{}')",
+                (str(missing),),
+            )
+            conn.commit()
+            stream = StringIO()
+            clean_database(
+                conn,
+                cursor,
+                None,
+                db_path,
+                verbosity=Verbosity.VERBOSE,
+                output=Output(
+                    stream=stream,
+                    palette=Palette(theme=Theme.DARK, enabled=enabled),
+                ),
+            )
+            return stream.getvalue()
+        finally:
+            conn.close()
+
+    assert strip_ansi(run(True)) == run(False)
+
+
 def test_main_clean_without_path_removes_stale_entries(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -2489,3 +2518,234 @@ def test_main_double_quiet_reports_errors_on_stderr(
     captured = capsys.readouterr()
     assert captured.out == ""
     assert f"{missing} must be either a directory or a file." in captured.err
+
+
+def test_main_colorizes_normal_run_output(
+    file_mp3: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    music = tmp_path / "music"
+    music.mkdir()
+    song = music / "song.mp3"
+    shutil.copy2(file_mp3, song)
+    db_path = tmp_path / "genplis.db"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "genplis",
+            "--color",
+            "--theme",
+            "dark",
+            "--no-config",
+            "--db",
+            str(db_path),
+            str(music),
+        ],
+    )
+
+    main()
+
+    output = capsys.readouterr().out
+    assert "\x1b[38;5;244mUpdated cache for file:\x1b[0m" in output
+    assert f"\x1b[1;38;5;255m{song}\x1b[0m" in output
+    assert "Processed \x1b[38;5;220m1\x1b[0m files in" in output
+    assert "Total RAM usage: \x1b[38;5;220m" in output
+
+
+def test_main_colorizes_exclude_skips(
+    file_mp3: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    music = tmp_path / "music"
+    music.mkdir()
+    song = music / "song.mp3"
+    shutil.copy2(file_mp3, song)
+    db_path = tmp_path / "genplis.db"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "genplis",
+            "-v",
+            "--color",
+            "--theme",
+            "dark",
+            "--exclude",
+            "song.mp3",
+            "--no-config",
+            "--db",
+            str(db_path),
+            str(music),
+        ],
+    )
+
+    main()
+
+    output = capsys.readouterr().out
+    assert "\x1b[38;5;117mSkipping\x1b[0m" in output
+    assert f"\x1b[1;38;5;255m{song}\x1b[0m" in output
+    assert "because of exclude pattern." in output
+
+
+def test_main_colorizes_clean_summary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    db_path = tmp_path / "genplis.db"
+    conn, cursor = setup_database_connection(db_path)
+    try:
+        create_files_table(cursor)
+        cursor.execute(
+            "INSERT INTO files(path, last_modified, tags) VALUES (?, 0, '{}')",
+            (str(tmp_path / "gone.mp3"),),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "genplis",
+            "--clean",
+            "--color",
+            "--theme",
+            "dark",
+            "--no-config",
+            "--db",
+            str(db_path),
+        ],
+    )
+
+    main()
+
+    output = capsys.readouterr().out
+    assert "Removed \x1b[38;5;220m1\x1b[0m stale entry" in output
+    assert "\x1b[38;5;244mDatabase size:\x1b[0m" in output
+    assert "\x1b[38;5;40m(" in output
+
+
+def test_main_colorizes_playlist_overwrite_warning(
+    file_mp3: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    music = tmp_path / "music"
+    music.mkdir()
+    shutil.copy2(file_mp3, music / "song.mp3")
+    (music / "favorites.m3ug").write_text(
+        'artist = "Test Artist"\n',
+        encoding="utf-8",
+    )
+    playlist = music / "favorites.m3u"
+    playlist.write_text("keep this\n", encoding="utf-8")
+    db_path = tmp_path / "genplis.db"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "genplis",
+            "--no-overwrite",
+            "--color",
+            "--theme",
+            "dark",
+            "--no-config",
+            "--db",
+            str(db_path),
+            str(music),
+        ],
+    )
+
+    main()
+
+    output = capsys.readouterr().out
+    assert "\x1b[38;5;214mWARNING:\x1b[0m" in output
+    assert f"\x1b[1;38;5;255m{playlist}\x1b[0m" in output
+    assert "already exists, skipping..." in output
+
+
+def test_main_colorizes_errors_on_stderr(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    db_path = tmp_path / "genplis.db"
+    missing = tmp_path / "missing.mp3"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "genplis",
+            "-qq",
+            "--color",
+            "--theme",
+            "dark",
+            "--no-config",
+            "--db",
+            str(db_path),
+            str(missing),
+        ],
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        main()
+
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "\x1b[38;5;196mgenplis: error:\x1b[0m" in captured.err
+
+
+def test_main_colorizes_config_errors_on_stderr(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    config = tmp_path / "config.ini"
+    config.write_text("[unknown]\noption = value\n", encoding="utf-8")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["genplis", "--color", "--theme", "dark", "--config", str(config)],
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        main()
+
+    assert exc_info.value.code == 1
+    assert "\x1b[38;5;196mgenplis: error:\x1b[0m" in capsys.readouterr().err
+
+
+def test_main_no_color_keeps_output_plain(
+    file_mp3: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    music = tmp_path / "music"
+    music.mkdir()
+    shutil.copy2(file_mp3, music / "song.mp3")
+    db_path = tmp_path / "genplis.db"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "genplis",
+            "--no-color",
+            "--no-config",
+            "--db",
+            str(db_path),
+            str(music),
+        ],
+    )
+
+    main()
+
+    assert "\x1b[" not in capsys.readouterr().out

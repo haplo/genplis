@@ -201,6 +201,16 @@ def test_light_theme_uses_different_codes() -> None:
     assert "\x1b[38;5;90mMetal\x1b[0m" in output
 
 
+def test_empty_expression_markers_use_source_color() -> None:
+    palette = Palette(theme=Theme.DARK, enabled=True)
+
+    tree = format_filter_tree(parse_m3ug(""), palette=palette)
+    consulted = format_tags_consulted((), palette=palette)
+
+    assert "\x1b[38;5;244m(always)\x1b[0m" in tree
+    assert "\x1b[38;5;244m(none)\x1b[0m" in consulted
+
+
 def test_trace_statuses_use_semantic_colors() -> None:
     parsed = parse_m3ug("artist = X\nrating >= 4\ngenre ~ Metal\n")
     palette = Palette(theme=Theme.DARK, enabled=True)

@@ -558,7 +558,7 @@ def process_path(
     if path.is_dir():
         process_directory(conn, cursor, path, args, output=out)
     elif path.is_file():
-        tags, parsed, cache_status = process_file(conn, cursor, path, args)
+        tags, parsed, cache_status = process_file(conn, cursor, path, args, output=out)
         if tags is not None and args.verbosity.shows_normal_output:
             display_file_tags(path, tags, cache_status, output=out)
         if parsed is not None and args.verbosity.shows_normal_output:
@@ -588,11 +588,7 @@ def process_path(
                 output=out,
             )
     else:
-        print(
-            f"{path} must be either a directory or a file. Exiting...",
-            file=sys.stderr,
-        )
-        sys.exit(1)
+        raise GenplisError(f"{path} must be either a directory or a file.")
 
 
 def show_rules(args: Args, output: Output | None = None) -> None:
@@ -642,7 +638,10 @@ def show_rules(args: Args, output: Output | None = None) -> None:
             )
         found += 1
     if found == 0 and args.verbosity is not Verbosity.REALLY_QUIET:
-        out.line(f"No filters found in {path}")
+        out.line(
+            f"{out.palette.warning('No filters found in')} "
+            f"{out.palette.title(str(path))}"
+        )
 
 
 def _trace_filters(
@@ -716,6 +715,7 @@ def _load_trace_target(
     conn: sqlite3.Connection,
     cursor: sqlite3.Cursor,
     args: Args,
+    output: Output,
 ) -> tuple[Tags, db.CacheStatus]:
     target = args.trace_path
     if target is None:
@@ -727,7 +727,7 @@ def _load_trace_target(
     if not target.is_file():
         raise GenplisError(f"Trace target {target} does not exist")
 
-    tags, _, cache_status = process_file(conn, cursor, target, args)
+    tags, _, cache_status = process_file(conn, cursor, target, args, output=output)
     if tags is None:
         raise GenplisError(f"Trace target {target} is not a supported music file")
     return tags, cache_status
@@ -744,7 +744,10 @@ def _prepare_traces(
     all_filters = _trace_filters(conn, cursor, args)
     if not all_filters:
         if args.verbosity is not Verbosity.REALLY_QUIET:
-            output.line(f"No filters found in {args.path}")
+            output.line(
+                f"{output.palette.warning('No filters found in')} "
+                f"{output.palette.title(str(args.path))}"
+            )
         return None
     traces = [
         (
@@ -831,7 +834,7 @@ def trace_path(
     target = args.trace_path
     if target is None:
         raise GenplisError("Attempted to trace a file but none was given")
-    tags, cache_status = _load_trace_target(conn, cursor, args)
+    tags, cache_status = _load_trace_target(conn, cursor, args, out)
     prepared = _prepare_traces(conn, cursor, args, target, tags, out)
     if prepared is None:
         return
@@ -877,7 +880,7 @@ def trace_full_path(
     target = args.trace_path
     if target is None:
         raise GenplisError("Attempted to trace a file but none was given")
-    tags, cache_status = _load_trace_target(conn, cursor, args)
+    tags, cache_status = _load_trace_target(conn, cursor, args, out)
     prepared = _prepare_traces(conn, cursor, args, target, tags, out)
     if prepared is None:
         return
@@ -976,7 +979,7 @@ def display_tag_stats(
             "Tag statistics require a directory or an audio file, not a .m3ug filter"
         )
 
-    tags, _, cache_status = process_file(conn, cursor, path, args)
+    tags, _, cache_status = process_file(conn, cursor, path, args, output=out)
     if tags is None:
         if args.verbosity is not Verbosity.REALLY_QUIET:
             out.line(f"{path} is not a supported music file")
@@ -1207,6 +1210,7 @@ def _walk_files(
     *,
     report_skips: bool = True,
     only_m3ug: bool = False,
+    output: Output | None = None,
 ) -> Iterator[Path]:
     """Yield included files in directory walk order.
 
@@ -1214,6 +1218,8 @@ def _walk_files(
     every audio file. ``report_skips`` is disabled for that scan so verbose
     exclusion messages are printed once, by the audio scan.
     """
+    out = Output.plain() if output is None else output
+    palette = out.palette
     for current_dir, dirnames, filenames in directory.walk():
         current = Path(current_dir)
 
@@ -1222,7 +1228,11 @@ def _walk_files(
             folder = current / name
             if is_excluded(folder, args, is_dir=True):
                 if report_skips and args.verbosity.is_verbose:
-                    print(f"Skipping {folder} because of exclude pattern.")
+                    out.line(
+                        f"{palette.paint(ColorRole.SKIP, 'Skipping')} "
+                        f"{palette.title(str(folder))} "
+                        f"{palette.source('because of exclude pattern.')}"
+                    )
                 continue
             kept_dirs.append(name)
         dirnames[:] = kept_dirs
@@ -1233,7 +1243,11 @@ def _walk_files(
                 continue
             if is_excluded(file, args):
                 if report_skips and args.verbosity.is_verbose:
-                    print(f"Skipping {file} because of exclude pattern.")
+                    out.line(
+                        f"{palette.paint(ColorRole.SKIP, 'Skipping')} "
+                        f"{palette.title(str(file))} "
+                        f"{palette.source('because of exclude pattern.')}"
+                    )
                 continue
             # Path.walk reports symlinks to directories among the filenames.
             if not file.is_file():
@@ -1383,7 +1397,7 @@ def process_directory(
     processed = 0
     pending: list[ParseItem] = []
     order = 0
-    batch = db.WriteBatch(conn, every=COMMIT_EVERY)
+    batch = db.WriteBatch(conn, every=COMMIT_EVERY, output=out)
 
     def handle_tags(current_order: int, file: Path, tags: Tags) -> None:
         """Record one successfully parsed file in every consumer."""
@@ -1404,7 +1418,7 @@ def process_directory(
         )
 
     try:
-        for file in _walk_files(directory, args):
+        for file in _walk_files(directory, args, output=out):
             if file.suffix.lower() == ".m3ug":
                 continue
 
@@ -1412,7 +1426,14 @@ def process_directory(
             order += 1
 
             if args.jobs <= 1:
-                tags, _, _ = process_file(conn, cursor, file, args, batch=batch)
+                tags, _, _ = process_file(
+                    conn,
+                    cursor,
+                    file,
+                    args,
+                    batch=batch,
+                    output=out,
+                )
                 if tags is None:
                     continue
                 handle_tags(current_order, file, tags)
@@ -1435,12 +1456,15 @@ def process_directory(
         if args.jobs > 1:
             executor = make_executor(args.jobs, len(pending), args.config.tags)
             if isinstance(executor, ProcessExecutor) and args.verbosity.is_verbose:
-                print(f"Parsing with {executor.workers} worker processes")
+                out.line(
+                    f"{out.palette.directive('Parsing with')} "
+                    f"{out.palette.value(str(executor.workers))} worker processes"
+                )
             try:
                 for result in executor.parse(pending):
                     if args.verbosity.is_verbose:
                         for message in result.messages:
-                            print(message)
+                            out.line(message)
                     if result.tags is None:
                         continue
                     batch.store(
@@ -1595,6 +1619,7 @@ def process_directory(
                 overwrite=args.overwrite,
                 verbosity=args.verbosity,
                 extended=args.extended_m3u,
+                output=out,
             )
         matches[filter_file].clear()
         matched.clear()
@@ -1603,8 +1628,11 @@ def process_directory(
     process_time = end_time - start_time
     used_memory = psutil.Process().memory_info().rss / (1024 * 1024)
     if args.verbosity.shows_normal_output:
-        print(f"Processed {processed} files in {process_time:.3f} seconds")
-        print(f"Total RAM usage: {used_memory} MiB")
+        out.line(
+            f"Processed {out.palette.value(str(processed))} files in "
+            f"{out.palette.value(f'{process_time:.3f}')} seconds"
+        )
+        out.line(f"Total RAM usage: {out.palette.value(str(used_memory))} MiB")
 
     return all_tags, all_filters
 
@@ -1616,6 +1644,7 @@ def process_file(
     args: Args,
     *,
     batch: db.WriteBatch | None = None,
+    output: Output | None = None,
 ) -> tuple[Tags | None, M3UGFile | None, db.CacheStatus]:
     """Process a single file.
 
@@ -1679,31 +1708,10 @@ def process_file(
             tags,
             last_modified=last_modified,
             verbosity=args.verbosity,
+            output=output,
         )
         conn.commit()
     return tags, None, cache_status
-
-
-def filter_songs(
-    files_and_tags: Mapping[Path, Tags],
-    filter_file: Path,
-    expression: FilterNode | None,
-    verbosity: Verbosity = Verbosity.NORMAL,
-) -> list[Path]:
-    if verbosity.is_verbose:
-        print(f"\nFiltering songs and generating playlist for {filter_file}")
-
-    filtered_songs: list[Path] = []
-    for file, tags in files_and_tags.items():
-        if matches_rules(tags, expression):
-            filtered_songs.append(file)
-
-    if verbosity.is_verbose:
-        print(f"Files that match the filter {filter_file}:")
-        for song in filtered_songs:
-            print(f"  {song}")
-
-    return filtered_songs
 
 
 def clean_database(
@@ -1712,6 +1720,7 @@ def clean_database(
     root: Path | None,
     db_path: Path,
     verbosity: Verbosity = Verbosity.NORMAL,
+    output: Output | None = None,
 ) -> CleanStats:
     """Remove cache entries for missing files and reclaim their space.
 
@@ -1720,6 +1729,8 @@ def clean_database(
     actual change on disk.
 
     """
+    out = Output.plain() if output is None else output
+    palette = out.palette
     conn.commit()
     size_before = db_path.stat().st_size
 
@@ -1731,7 +1742,10 @@ def clean_database(
 
     if verbosity.is_verbose:
         for path in removed:
-            print(f"Removed stale cache entry for {path}")
+            out.line(
+                f"{palette.source('Removed stale cache entry for')} "
+                f"{palette.title(str(path))}"
+            )
 
     stats = CleanStats(
         removed=tuple(removed),
@@ -1740,11 +1754,15 @@ def clean_database(
     )
     entry_word = "entry" if len(removed) == 1 else "entries"
     if verbosity.shows_normal_output:
-        print(f"Removed {len(removed)} stale {entry_word} from the cache database.")
-        print(
-            "Database size: "
-            f"{format_size(size_before)} -> {format_size(size_after)} "
-            f"({format_size(stats.bytes_saved)} saved)."
+        out.line(
+            f"Removed {palette.value(str(len(removed)))} stale {entry_word} "
+            "from the cache database."
+        )
+        out.line(
+            f"{palette.source('Database size:')} "
+            f"{palette.value(format_size(size_before))} -> "
+            f"{palette.value(format_size(size_after))} "
+            f"{palette.paint(ColorRole.PASS, f'({format_size(stats.bytes_saved)} saved)')}."
         )
     return stats
 
@@ -1754,13 +1772,16 @@ def _run(args: Args) -> None:
     out = Output.create(sys.stdout, color=args.color, theme=args.theme)
     if args.verbosity.is_verbose:
         if args.config_disabled:
-            out.line("Configuration disabled with --no-config")
+            out.line(
+                f"{out.palette.directive('Configuration disabled with')} "
+                f"{out.palette.value('--no-config')}"
+            )
         elif args.config.source is not None:
-            out.line(f"Using config file {args.config.source}")
+            out.line(f"Using config file {out.palette.title(str(args.config.source))}")
         else:
-            out.line("No config file found; using defaults")
+            out.line(out.palette.source("No config file found; using defaults"))
         if args.mode is not Mode.SHOW_RULES:
-            out.line(f"Using {args.db_path} for genplis DB")
+            out.line(f"Using {out.palette.title(str(args.db_path))} for genplis DB")
 
     if args.mode is Mode.SHOW_RULES:
         show_rules(args, out)
@@ -1768,7 +1789,7 @@ def _run(args: Args) -> None:
 
     if args.path is None and not args.db_path.exists():
         if args.verbosity.shows_normal_output:
-            out.line("Database does not exist; nothing to clean.")
+            out.line(out.palette.source("Database does not exist; nothing to clean."))
         return
 
     try:
@@ -1801,6 +1822,7 @@ def _run(args: Args) -> None:
                     args.path,
                     args.db_path,
                     verbosity=args.verbosity,
+                    output=out,
                 )
     finally:
         conn.close()
@@ -1820,12 +1842,21 @@ def main() -> None:
         config = Config() if raw_args.no_config else load_config(raw_args.config)
         args = resolve_args(raw_args, config)
     except GenplisConfigError as exc:
-        parser.exit(1, f"genplis: error: {exc}\n")
+        error_out = Output.create(
+            sys.stderr,
+            color=raw_args.color,
+            theme=Theme(raw_args.theme) if raw_args.theme is not None else Theme.AUTO,
+        )
+        parser.exit(
+            1,
+            f"{error_out.palette.error('genplis: error:')} {exc}\n",
+        )
 
     try:
         _run(args)
     except GenplisError as exc:
-        print(f"genplis: error: {exc}", file=sys.stderr)
+        error_out = Output.create(sys.stderr, color=args.color, theme=args.theme)
+        error_out.line(f"{error_out.palette.error('genplis: error:')} {exc}")
         sys.exit(1)
 
 

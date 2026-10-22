@@ -1,4 +1,6 @@
 import sqlite3
+from collections.abc import Callable
+from io import StringIO
 from pathlib import Path
 
 import pytest
@@ -19,6 +21,7 @@ from genplis.db import (
 )
 from genplis.exceptions import GenplisDBError
 from genplis.files import get_last_modified
+from genplis.output import Output, Palette, Theme
 
 
 def test_get_db_path(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -127,6 +130,28 @@ def test_cache_tags_for_file(genplis_db: sqlite3.Connection, file_mp3: Path) -> 
     cache_tags_for_file(genplis_db.cursor(), file_mp3, {"a": "b"})
     rows = genplis_db.execute("SELECT * from files").fetchall()
     assert rows == [(str(file_mp3), timestamp, '{"a": "b"}')]
+
+
+def test_cache_update_color_preserves_plain_output(
+    genplis_db: sqlite3.Connection,
+    file_mp3: Path,
+    strip_ansi: Callable[[str], str],
+) -> None:
+    def run(enabled: bool) -> str:
+        stream = StringIO()
+        out = Output(
+            stream=stream,
+            palette=Palette(theme=Theme.DARK, enabled=enabled),
+        )
+        cache_tags_for_file(
+            genplis_db.cursor(),
+            file_mp3,
+            {"a": "b"},
+            output=out,
+        )
+        return stream.getvalue()
+
+    assert strip_ansi(run(True)) == run(False)
 
 
 def test_cache_lookup_with_relative_path(

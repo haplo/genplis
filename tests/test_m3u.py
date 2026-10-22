@@ -1,8 +1,11 @@
+from collections.abc import Callable
+from io import StringIO
 from pathlib import Path
 
 import pytest
 
 from genplis.m3u import PlaylistEntry, create_m3u, playlist_entry
+from genplis.output import Output, Palette, Theme
 from genplis.types import TagValue
 
 
@@ -200,3 +203,26 @@ def test_existing_playlist_is_not_overwritten(tmp_path: Path) -> None:
     )
 
     assert playlist_file.read_text(encoding="utf-8") == "keep this\n"
+
+
+def test_overwrite_warning_color_preserves_plain_output(
+    tmp_path: Path,
+    strip_ansi: Callable[[str], str],
+) -> None:
+    playlist_file = tmp_path / "playlist.m3u"
+    playlist_file.write_text("keep this\n", encoding="utf-8")
+
+    def run(enabled: bool) -> str:
+        stream = StringIO()
+        create_m3u(
+            playlist_file,
+            [tmp_path / "song.mp3"],
+            overwrite=False,
+            output=Output(
+                stream=stream,
+                palette=Palette(theme=Theme.DARK, enabled=enabled),
+            ),
+        )
+        return stream.getvalue()
+
+    assert strip_ansi(run(True)) == run(False)

@@ -1,4 +1,3 @@
-import re
 import shutil
 import sqlite3
 import sys
@@ -228,7 +227,9 @@ def test_stats_light_theme_uses_light_codes() -> None:
     assert "\x1b[38;5;90mRock\x1b[0m" in output
 
 
-def test_colored_stats_preserve_plain_layout() -> None:
+def test_colored_stats_preserve_plain_layout(
+    strip_ansi: Callable[[str], str],
+) -> None:
     collector = TagStatsCollector(full_tags={"genre"})
     collector.record_file(
         {"artist": ["Artist"], "genre": ["Rock"]},
@@ -241,16 +242,12 @@ def test_colored_stats_preserve_plain_layout() -> None:
     report = collector.report()
     palette = Palette(theme=Theme.DARK, enabled=True)
 
-    assert _strip_ansi(render_tag_stats(report, palette=palette)) == render_tag_stats(
+    assert strip_ansi(render_tag_stats(report, palette=palette)) == render_tag_stats(
         report
     )
-    assert _strip_ansi(
+    assert strip_ansi(
         render_tag_details(report, ("genre",), palette=palette)
     ) == render_tag_details(report, ("genre",))
-
-
-def _strip_ansi(text: str) -> str:
-    return re.sub(r"\x1b\[[0-9;]*m", "", text)
 
 
 def test_resolve_args_tag_stats() -> None:

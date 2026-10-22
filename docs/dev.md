@@ -101,10 +101,13 @@ rebuild include boundaries without reparsing source text.
 `output.py` owns ANSI escape codes, the dark and light palettes, `NO_COLOR`
 and TTY detection, `COLORFGBG` parsing, and the `Output` stream wrapper.
 Renderers accept a `Palette` and paint semantic roles such as `PASS`, `FAIL`,
-`SKIP`, directives, tag names, and values. A disabled palette returns plain
-text, so tests and redirected output never need ANSI stripping. Theme
-resolution is separate from color enablement: `auto` reads `COLORFGBG` and
-falls back to dark when the background cannot be determined.
+`SKIP`, directives, tag names, and values. Stream-producing helpers such as
+the database cache, playlist writer, and core display functions accept an
+optional `Output`; omitting it uses `Output.plain()`, so tests and redirected
+output stay plain. A disabled palette returns plain text, so tests and
+redirected output never need ANSI stripping. Theme resolution is separate from
+color enablement: `auto` reads `COLORFGBG` and falls back to dark when the
+background cannot be determined.
 
 `@INCLUDE` is resolved recursively in the main process. Each file produces a
 `Directives` value with `UNSET` markers, merges its includes in include order,
