@@ -1,9 +1,9 @@
 # Usage guide
 
-This page explains how to run genplis, what it writes, and how the cache
-behaves. For the filter language, see
-[M3UG](m3ug.md); for settings,
-see [Configuration](config.md).
+This page explains how to use genplis to generate playlists for your music collection.
+
+For genplis' filter language, see [M3UG](m3ug.md); for settings, see
+[Configuration](config.md).
 
 ## Synopsis
 
@@ -11,7 +11,13 @@ see [Configuration](config.md).
 genplis [OPTIONS] [PATH]
 ```
 
-`PATH` is a directory (your music collection) or a single audio file. To
+`PATH` is a directory: your music collection. Inside you it define `.m3ug` files, each
+of which will filter through all the music files in your collection and generate
+playlists of those that match.
+
+
+
+To
 process one specific `.m3ug` filter, name it with `--filter FILE`; `PATH` is
 then the collection to scan and may be omitted when `[collection] path` is set
 in the config file. If neither `PATH` nor a configured collection is available,
@@ -48,11 +54,11 @@ Every option with an on/off form overrides the corresponding config setting.
 `--config` and `--no-config` are mutually exclusive.
 
 `--show-rules`, `--trace`, `--trace-full`, `--clean`, and `--tag-stats` are
-mutually exclusive modes. `--trace SONG` and `--trace-full SONG` search `PATH`
-for filters, or use the filters selected with `--filter`, and take the audio
-file as their option value. `--tag` cannot be combined with
-`--show-rules`, `--trace`, `--trace-full`, or `--clean`. `--filter` cannot be
-combined with `--clean` or `--tag-stats`.
+mutually exclusive modes, i.e. only one can be used at a time.
+
+`--trace SONG` and `--trace-full SONG` are used to try the given song against the M3UG
+filters in `PATH` (or a specific one selected with `--filter`), and take the audio file
+as their option value.
 
 None of the debugging modes writes a playlist. `--show-rules` opens no cache
 database and scans no audio. `--trace` loads only `SONG` through the tag cache,
@@ -95,7 +101,7 @@ edit the config file instead.
    when the file has not changed, and applies every selected `.m3ug` file's
    rules as soon as that file's tags are available.
 5. Writes a playlist for each selected `.m3ug` file that matched at least one
-   song. Entries are ordered by the file's `@sort` directive, or by
+   song. Entries are ordered by the file's `@SORT` directive, or by
    `[output] sort` (default `filename`) when it has none. `@LIMIT`,
    `@LIMIT N PER tag`, and `@MAX-DURATION` can cap the selected entries after
    ordering.
@@ -186,8 +192,7 @@ Both forms also warn when the file matches the current exclude configuration.
 uv run genplis --tag-stats ~/Music
 ```
 
-This walks the collection, reuses the tag cache, and prints every tag that at
-least one supported file has:
+This walks the collection and prints every tag with at least one supported file:
 
 ```text
 Tag statistics for /home/me/Music
@@ -228,7 +233,6 @@ Use `-t/--tag` to focus on one or more tags and see every distinct value:
 
 ```bash
 uv run genplis -t genre ~/Music
-uv run genplis --tag-stats -t genre -t year ~/Music
 ```
 
 ```text
@@ -263,8 +267,8 @@ rating; `-t rating` shows both the embedded `rating` and the calculated
 ### Debugging filters
 
 ```bash
-uv run genplis --show-rules --filter Favorites.m3ug
 uv run genplis --show-rules ~/Music
+uv run genplis --show-rules --filter Favorites.m3ug
 uv run genplis --trace song.mp3 --filter Favorites.m3ug
 uv run genplis --trace-full song.mp3 --filter Favorites.m3ug
 ```
@@ -278,10 +282,10 @@ uv run genplis --trace-full song.mp3 --filter Favorites.m3ug
   result. It loads the target through the normal cache path, so that one file
   may be parsed or refreshed. It never writes a playlist.
 - `--trace-full` adds the deterministic selection result for every filter:
-  sorted position, dedupe winner, cap failures, and the final playlist
-  position. It may scan the collection and update the cache like a normal run,
-  but it writes no playlists. Use it when count or duration caps make the
-  ordinary trace report `selection: not simulated`.
+  sorted position, dedupe winner, cap failures, and the final playlist position.
+  It may scan the collection and update the cache like a normal run, but it
+  writes no playlists. Use it when a song matches a filter but still doesn't
+  appear in the playlist, and you expect it to.
 - `-q` keeps the requested tree or trace and suppresses progress chatter.
   `-qq` suppresses all normal output. Errors still go to standard error.
 
