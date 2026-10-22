@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import ClassVar, Literal, Protocol, Self, TypeGuard
@@ -110,12 +110,69 @@ def _find_tag(
     Returns the key as it is actually spelled in the tag mapping, or ``None``
     when the tag is absent.
     """
+    if isinstance(tags, EvaluationTags):
+        return tags._lookup(normalized_name)
     if normalized_name in tags:
         return normalized_name, tags[normalized_name]
     for key, value in tags.items():
         if key.lower() == normalized_name:
             return key, value
     return None, None
+
+
+class EvaluationTags(Mapping[str, TagValue]):
+    """A read-only song view that reuses tag resolution across filters.
+
+    Keep one view per song and do not mutate its underlying mapping while it
+    is in use. Raw keys and values remain available for playlist metadata;
+    case-insensitive lookups and rule normalization are cached separately.
+    """
+
+    def __init__(self, tags: Mapping[str, TagValue]) -> None:
+        self._tags = tags
+        self._index: dict[str, tuple[str, TagValue]] | None = None
+        self._found: dict[str, tuple[str, TagValue]] = {}
+        self._normalized: dict[str, tuple[str, TagValue]] = {}
+
+    def __getitem__(self, key: str) -> TagValue:
+        return self._tags[key]
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._tags)
+
+    def __len__(self) -> int:
+        return len(self._tags)
+
+    def _lookup(self, name: str) -> tuple[str | None, TagValue]:
+        if name in self._tags:
+            return name, self._tags[name]
+        if self._index is None:
+            self._index = {}
+            for key, value in self._tags.items():
+                # As in _find_tag, the first mixed-case spelling wins, but
+                # an exact lowercase key always takes precedence.
+                self._index.setdefault(key.lower(), (key, value))
+        return self._index.get(name, (None, None))
+
+    def _find(self, name: str) -> tuple[str, TagValue]:
+        name = name.lower()
+        found = self._found.get(name)
+        if found is None:
+            key, value = self._lookup(name)
+            if name == "rating" and key is None:
+                value = get_rating(self)
+            found = name, value
+            self._found[name] = found
+        return found
+
+    def _normalize(self, name: str) -> tuple[str, TagValue]:
+        name = name.lower()
+        found = self._normalized.get(name)
+        if found is None:
+            tag_name, raw = self._find(name)
+            found = tag_name, normalize(raw)
+            self._normalized[name] = found
+        return found
 
 
 def get_rating(tags: Mapping[str, TagValue]) -> float | None:
@@ -439,6 +496,8 @@ class NameNode:
         return cls(name)
 
     def find(self, tags: Mapping[str, TagValue]) -> tuple[str, TagValue]:
+        if isinstance(tags, EvaluationTags):
+            return tags._find(self.name)
         normalized_name = self.name.lower()
         key, value = _find_tag(tags, normalized_name)
         # handle special cases
@@ -660,8 +719,11 @@ class RuleNode:
             ) from exc
 
     def apply(self, tags: Mapping[str, TagValue]) -> bool:
-        tag_name, raw_value = self.name_node.find(tags)
-        tag_value = self.value_node.normalize(raw_value)
+        if isinstance(tags, EvaluationTags):
+            tag_name, tag_value = tags._normalize(self.name_node.name)
+        else:
+            tag_name, raw_value = self.name_node.find(tags)
+            tag_value = self.value_node.normalize(raw_value)
         if self.IS_TEXT and _has_boolean(tag_value):
             self._warn_boolean(tag_name)
         return self.check(tag_value)

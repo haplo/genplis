@@ -36,6 +36,7 @@ from .executors import (
 )
 from .m3u import PlaylistEntry, create_m3u, duration_seconds, playlist_entry
 from .m3ug import (
+    EvaluationTags,
     FilterNode,
     LimitPerTag,
     M3UGFile,
@@ -1411,6 +1412,7 @@ def _record_matches(
     default_sort: SortSpec,
 ) -> None:
     """Add a file to every filter it matches, with its effective sort keys."""
+    evaluation_tags = EvaluationTags(tags)
     entry: Path | PlaylistEntry | None = None
     spec_cache: dict[SortSpec, SortValues] = {}
     dedupe_cache: dict[tuple[str, ...], SortValues] = {}
@@ -1418,12 +1420,12 @@ def _record_matches(
     for filter_file, parsed in all_filters.items():
         if parsed.no_playlist:
             continue
-        if matches_rules(tags, parsed.expression):
+        if matches_rules(evaluation_tags, parsed.expression):
             if entry is None:
                 entry = playlist_entry(file, tags) if extended else file
             spec = parsed.sort if parsed.sort is not None else default_sort
             if spec not in spec_cache:
-                spec_cache[spec] = _sort_values(file, tags, spec)
+                spec_cache[spec] = _sort_values(file, evaluation_tags, spec)
             duration = None
             if parsed.max_duration is not None and parsed.max_duration > 0:
                 duration = duration_seconds(tags.get("duration"))
@@ -1432,7 +1434,7 @@ def _record_matches(
                 if parsed.dedupe not in dedupe_cache:
                     dedupe_cache[parsed.dedupe] = _tag_values(
                         file,
-                        tags,
+                        evaluation_tags,
                         parsed.dedupe,
                     )
                 dedupe_values = dedupe_cache[parsed.dedupe]
@@ -1440,7 +1442,7 @@ def _record_matches(
             if parsed.limit_per is not None and parsed.limit_per.count > 0:
                 tag = parsed.limit_per.tag
                 if tag not in limit_key_cache:
-                    limit_key_cache[tag] = _tag_values(file, tags, (tag,))[0]
+                    limit_key_cache[tag] = _tag_values(file, evaluation_tags, (tag,))[0]
                 limit_key = limit_key_cache[tag]
             matches[filter_file].append(
                 Match(

@@ -90,6 +90,17 @@ tags, and calls its own `check()`. `M3UGFile.rules` flattens the leaf rules for
 diagnostics; matching always uses `M3UGFile.expression`. Directives are parsed
 separately and never participate in filtering.
 
+During directory matching, `m3ug.EvaluationTags` wraps one song's raw tags in
+a read-only mapping. It lazily indexes case-insensitive tag names and caches
+resolved values (including missing tags and calculated rating) and rule-value
+normalization. Filtering and sort/dedupe/per-tag key extraction share this
+view; playlist metadata still reads the raw tags. Exact lowercase keys take
+precedence over mixed-case aliases, otherwise the first matching key wins.
+The underlying mapping must not change while its view is in use. Views are
+discarded after each song, so they do not retain the collection's tags.
+Standalone rule evaluation and diagnostic traces still accept ordinary tag
+mappings and preserve the uncached evaluation path.
+
 Every rule carries a `SourceLocation` and every value keeps its original
 literal token. `M3UGFile` stores both the merged `expression` and the file's
 `own_expression`, plus an ordered tuple of `IncludeInfo` records with the raw

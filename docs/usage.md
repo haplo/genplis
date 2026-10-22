@@ -107,6 +107,11 @@ folders are not used to build playlists, and a `.m3ug` file does not pull
 audio files in from outside the scanned tree. An `@INCLUDE` may read a filter
 file from outside the scan root, but it only adds rules and defaults.
 
+During filtering, each song's tag lookups, calculated rating, and rule-value
+normalization are reused across filters. This also applies to cached songs;
+the temporary values are released after that song has been processed. No
+extra configuration or cache rebuild is needed.
+
 To regenerate only one filter, name it with `--filter`; the scan root is still
 `PATH` (or the configured collection):
 
