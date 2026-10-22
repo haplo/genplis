@@ -187,14 +187,15 @@ traces. The directory pipeline accepts `dry_run` and a `SelectionTrace` so
 without retaining non-target matches or writing playlists. Cache writes still
 happen during that scan.
 
-## Parallel parsing
+## Parsing pipeline
 
 `core.process_directory` first discovers and parses every `.m3ug` file, then
-walks the audio files and checks the cache in the main process. With
-`--jobs 1`, it calls `core.process_file` inline during the audio walk. With
-more workers it resolves cache hits during the walk and queues misses and
-stale files. If fewer than `executors.MIN_PARALLEL_FILES` files are queued,
-`SequentialExecutor` parses them in the main process after the walk; otherwise
+walks the audio files and checks the cache in the main process. Cache hits are
+evaluated during the walk; misses and stale files are queued, so the parser
+knows how many files it will attempt before parsing starts. With `--jobs 1`
+the queue is parsed inline through `core.process_file`. With more workers, if
+fewer than `executors.MIN_PARALLEL_FILES` files are queued,
+`SequentialExecutor` parses them in the main process; otherwise
 `ProcessExecutor` sends `ParseItem` batches to worker processes. In both
 `--jobs > 1` cases the miss/stale diagnostics are printed after the walk.
 
@@ -218,8 +219,9 @@ Invariants:
   parsing.
 - **Tags are short-lived.** A file's tags are dropped after it has been
   matched against every filter. Only matching playlist entries are retained.
-- **`--jobs 1` is the inline path.** It uses the same `WriteBatch` plumbing,
-  so output, cache contents, and playlist bytes do not change.
+- **`--jobs 1` is the inline path.** It parses queued files in the main
+  process after the walk and uses the same `WriteBatch` plumbing, so output,
+  cache contents, and playlist bytes do not change.
 - **Flush points.** `WriteBatch` commits every `core.COMMIT_EVERY` writes
   (currently 128) and flushes at the end of the parse phase, on errors, and on
   `KeyboardInterrupt`; an interrupted pool is shut down with

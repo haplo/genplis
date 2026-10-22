@@ -8,6 +8,7 @@ import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import Enum, auto
+from time import monotonic
 from typing import TextIO
 
 RESET = "\x1b[0m"
@@ -253,3 +254,116 @@ class Output:
 
     def write(self, text: str) -> None:
         self.stream.write(text)
+
+    def flush(self) -> None:
+        self.stream.flush()
+
+
+class Progress:
+    """Report collection-scan and tag-parsing progress.
+
+    Interactive terminals get one rewritten line, first a scanning indicator
+    and then a parsing bar. Redirected normal output gets a single summary
+    line when parsing starts. Pass ``enabled=False`` for verbose and quiet
+    modes; no progress is then written at all.
+    """
+
+    def __init__(
+        self,
+        output: Output,
+        *,
+        enabled: bool = True,
+        label: str = "Parsing audio",
+        width: int = 28,
+    ) -> None:
+        self._output = output
+        self._enabled = enabled
+        self._label = label
+        self._width = width
+        self._interactive = enabled and output.stream.isatty()
+        self._scanning = False
+        self._started = False
+        self._total = 0
+        self._current = 0
+        self._last_width = 0
+        self._last_draw = 0.0
+        self._frame = 0
+
+    def scanning(self) -> None:
+        """Show that the collection walk is in progress."""
+        if not self._interactive:
+            return
+        self._scanning = True
+        self._draw("Scanning collection...")
+
+    def tick(self) -> None:
+        """Advance the scanning indicator, if one is showing."""
+        if not self._scanning:
+            return
+        frames = "|/-\\"
+        self._frame = (self._frame + 1) % len(frames)
+        self._draw(f"Scanning collection... {frames[self._frame]}")
+
+    def start(self, total: int) -> None:
+        """Start a parsing bar for ``total`` queued files."""
+        self._scanning = False
+        self._total = total
+        self._current = 0
+        if not self._enabled:
+            return
+        if total <= 0:
+            if self._interactive:
+                self._clear()
+            return
+        if not self._interactive:
+            noun = "file" if total == 1 else "files"
+            self._output.line(f"Parsing {total} {noun}...")
+            return
+        self._started = True
+        self._draw(self._render(), force=True)
+
+    def advance(self, count: int = 1) -> None:
+        """Record completed parsing attempts."""
+        if not self._started:
+            return
+        self._current = min(self._total, self._current + count)
+        self._draw(self._render())
+
+    def close(self) -> None:
+        """Finish the bar, or clear an unfinished scanning line."""
+        if self._started:
+            self._draw(self._render(), force=True)
+            self._output.write("\n")
+            self._output.flush()
+        elif self._scanning and self._interactive:
+            self._clear()
+        self._scanning = False
+        self._started = False
+
+    def _render(self) -> str:
+        ratio = self._current / self._total if self._total else 1.0
+        filled = round(self._width * ratio)
+        bar = "#" * filled + "-" * (self._width - filled)
+        percent = round(ratio * 100)
+        count = self._output.palette.value(f"{self._current}/{self._total}")
+        return (
+            f"{self._output.palette.directive(self._label)} [{bar}] "
+            f"{count} ({percent}%)"
+        )
+
+    def _draw(self, text: str, *, force: bool = False) -> None:
+        if not self._interactive:
+            return
+        now = monotonic()
+        if not force and now - self._last_draw < 0.1:
+            return
+        self._last_draw = now
+        padding = max(0, self._last_width - len(text))
+        self._output.write(f"\r{text}{' ' * padding}")
+        self._output.flush()
+        self._last_width = len(text)
+
+    def _clear(self) -> None:
+        self._output.write(f"\r{' ' * self._last_width}\r")
+        self._output.flush()
+        self._last_width = 0

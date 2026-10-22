@@ -22,6 +22,7 @@ from genplis.db import (
 from genplis.exceptions import GenplisDBError
 from genplis.files import get_last_modified
 from genplis.output import Output, Palette, Theme
+from genplis.types import Verbosity
 
 
 def test_get_db_path(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -147,11 +148,41 @@ def test_cache_update_color_preserves_plain_output(
             genplis_db.cursor(),
             file_mp3,
             {"a": "b"},
+            verbosity=Verbosity.VERBOSE,
             output=out,
         )
         return stream.getvalue()
 
     assert strip_ansi(run(True)) == run(False)
+
+
+def test_cache_update_message_is_verbose_only(
+    genplis_db: sqlite3.Connection,
+    file_mp3: Path,
+) -> None:
+    stream = StringIO()
+    out = Output(
+        stream=stream,
+        palette=Palette(theme=Theme.DARK, enabled=False),
+    )
+
+    cache_tags_for_file(
+        genplis_db.cursor(),
+        file_mp3,
+        {"a": "b"},
+        verbosity=Verbosity.NORMAL,
+        output=out,
+    )
+    assert stream.getvalue() == ""
+
+    cache_tags_for_file(
+        genplis_db.cursor(),
+        file_mp3,
+        {"a": "b"},
+        verbosity=Verbosity.VERBOSE,
+        output=out,
+    )
+    assert "Updated cache for file:" in stream.getvalue()
 
 
 def test_cache_lookup_with_relative_path(

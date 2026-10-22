@@ -45,7 +45,7 @@ from .m3ug import (
     get_rating,
     parse_m3ug,
 )
-from .output import ColorRole, Output, Palette, Theme
+from .output import ColorRole, Output, Palette, Progress, Theme
 from .sorting import (
     SortSpec,
     SortValue,
@@ -65,6 +65,7 @@ from .tags import (
     format_tag_diagnostic,
     get_audio_property_tags,
     get_tags,
+    is_supported_file,
 )
 from .types import Tags, TagValue, Verbosity
 
@@ -1555,27 +1556,28 @@ def process_directory(
             predicate_cache=predicate_cache,
         )
 
+    progress = Progress(out, enabled=args.verbosity is Verbosity.NORMAL)
+    progress.scanning()
     try:
+        # Resolve cache hits while walking and queue misses and stale entries,
+        # so the parsing phase knows how many files it will attempt.
         for file in _walk_files(directory, args, output=out):
+            progress.tick()
             if file.suffix.lower() == ".m3ug":
+                continue
+            if not is_supported_file(file):
+                if args.verbosity.is_verbose:
+                    get_tags(
+                        file,
+                        args.verbosity,
+                        max_size=args.config.tags.max_size,
+                        ignore=args.config.tags.ignore,
+                        output=out,
+                    )
                 continue
 
             current_order = order
             order += 1
-
-            if args.jobs <= 1:
-                tags, _, _ = process_file(
-                    conn,
-                    cursor,
-                    file,
-                    args,
-                    batch=batch,
-                    output=out,
-                )
-                if tags is None:
-                    continue
-                handle_tags(current_order, file, tags)
-                continue
 
             last_modified = db.get_last_modified(file)
             cache_status = db.get_cache_status(cursor, file, last_modified)
@@ -1591,7 +1593,23 @@ def process_directory(
                     )
                 )
 
-        if args.jobs > 1:
+        progress.start(len(pending))
+        if args.jobs <= 1:
+            for item in pending:
+                tags, _, _ = process_file(
+                    conn,
+                    cursor,
+                    item.path,
+                    args,
+                    batch=batch,
+                    last_modified=item.last_modified,
+                    output=out,
+                )
+                progress.advance()
+                if tags is None:
+                    continue
+                handle_tags(item.order, item.path, tags)
+        else:
             executor = make_executor(args.jobs, len(pending), args.config.tags)
             if isinstance(executor, ProcessExecutor) and args.verbosity.is_verbose:
                 out.line(
@@ -1600,6 +1618,7 @@ def process_directory(
                 )
             try:
                 for result in executor.parse(pending):
+                    progress.advance()
                     if args.verbosity.is_verbose:
                         for diagnostic in result.diagnostics:
                             out.line(format_tag_diagnostic(diagnostic, out.palette))
@@ -1622,9 +1641,12 @@ def process_directory(
                 raise
             else:
                 executor.close()
-            pending.clear()
+        pending.clear()
     finally:
-        batch.flush()
+        try:
+            batch.flush()
+        finally:
+            progress.close()
 
     all_tags = (
         {file: tags for _, (file, tags) in sorted(retained.items())}
@@ -1782,6 +1804,7 @@ def process_file(
     args: Args,
     *,
     batch: db.WriteBatch | None = None,
+    last_modified: int | None = None,
     output: Output | None = None,
 ) -> tuple[Tags | None, M3UGFile | None, db.CacheStatus]:
     """Process a single file.
@@ -1793,6 +1816,9 @@ def process_file(
     When ``batch`` is given, cache writes go through it instead of committing
     immediately. ``None`` preserves the single-file behaviour of committing
     each write before returning.
+
+    Pass ``last_modified`` when the caller already read the file's timestamp,
+    so it is not read again.
 
     ``tags`` is ``None`` when the file is not a supported music file. An empty
     dictionary means the file is supported music but has no usable tags (for
@@ -1819,7 +1845,8 @@ def process_file(
         )
         return None, parsed, db.CacheStatus.MISS
 
-    last_modified = db.get_last_modified(file)
+    if last_modified is None:
+        last_modified = db.get_last_modified(file)
     cache_status = db.get_cache_status(cursor, file, last_modified)
     if cache_status is db.CacheStatus.HIT:
         # reuse cached tags from DB instead of parsing them again

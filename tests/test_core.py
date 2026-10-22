@@ -543,6 +543,115 @@ def test_process_dir_walks_nested_directories(
     assert "Processed 3 files" in capsys.readouterr().out
 
 
+class _TtyStream(StringIO):
+    def isatty(self) -> bool:
+        return True
+
+
+@pytest.mark.parametrize("jobs", [1, 2])
+def test_process_dir_progress_counts_misses_and_stale_files(
+    genplis_db: sqlite3.Connection,
+    make_args: Callable[..., Args],
+    file_mp3: Path,
+    tmp_path: Path,
+    jobs: int,
+) -> None:
+    music = tmp_path / "music"
+    music.mkdir()
+    songs = [music / name for name in ("hit.mp3", "stale.mp3", "miss.mp3")]
+    for song in songs:
+        shutil.copy2(file_mp3, song)
+    filter_file = music / "favorites.m3ug"
+    filter_file.write_text('artist = "Test Artist"\n', encoding="utf-8")
+    (music / "notes.txt").write_text("not music\n", encoding="utf-8")
+
+    cursor = genplis_db.cursor()
+    cache_tags_for_file(cursor, songs[0], {"artist": ["Test Artist"]})
+    cache_tags_for_file(cursor, songs[1], {"artist": ["Old Artist"]})
+    genplis_db.execute(
+        "UPDATE files SET last_modified=last_modified-1 WHERE path=?",
+        (str(songs[1]),),
+    )
+    genplis_db.commit()
+
+    stream = _TtyStream()
+    process_directory(
+        genplis_db,
+        cursor,
+        music,
+        make_args(
+            str(music),
+            include_source=False,
+            extended_m3u=False,
+            jobs=jobs,
+        ),
+        output=Output.plain(stream),
+    )
+
+    output = stream.getvalue()
+    assert "Parsing audio [" in output
+    assert "2/2 (100%)" in output
+    playlist_entries = {
+        line
+        for line in filter_file.with_suffix(".m3u").read_text().splitlines()
+        if not line.startswith("#")
+    }
+    assert playlist_entries == {song.name for song in songs}
+
+
+def test_process_dir_progress_is_hidden_when_cache_is_warm(
+    genplis_db: sqlite3.Connection,
+    make_args: Callable[..., Args],
+    file_mp3: Path,
+    tmp_path: Path,
+) -> None:
+    music = tmp_path / "music"
+    music.mkdir()
+    song = music / "song.mp3"
+    shutil.copy2(file_mp3, song)
+    filter_file = music / "favorites.m3ug"
+    filter_file.write_text('artist = "Test Artist"\n', encoding="utf-8")
+    args = make_args(str(music))
+
+    process_directory(genplis_db, genplis_db.cursor(), music, args)
+    assert filter_file.with_suffix(".m3u").exists()
+
+    stream = _TtyStream()
+    process_directory(
+        genplis_db,
+        genplis_db.cursor(),
+        music,
+        args,
+        output=Output.plain(stream),
+    )
+
+    assert "Parsing audio" not in stream.getvalue()
+
+
+def test_process_dir_verbose_reports_unsupported_files(
+    genplis_db: sqlite3.Connection,
+    make_args: Callable[..., Args],
+    file_mp3: Path,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    shutil.copy2(file_mp3, tmp_path / "song.mp3")
+    unsupported = tmp_path / "notes.txt"
+    unsupported.write_text("not music\n", encoding="utf-8")
+
+    process_directory(
+        genplis_db,
+        genplis_db.cursor(),
+        tmp_path,
+        make_args(str(tmp_path), verbosity=Verbosity.VERBOSE),
+    )
+
+    output = capsys.readouterr().out
+    assert f"Skipping {unsupported}: not supported by tinytag" in output
+    assert "Parsing 1 file..." not in output
+    assert "Parsing audio" not in output
+
+
 def test_process_dir_filters_songs_across_subdirectories(
     genplis_db: sqlite3.Connection,
     make_args: Callable[..., Args],
@@ -2835,10 +2944,46 @@ def test_main_colorizes_normal_run_output(
     main()
 
     output = capsys.readouterr().out
-    assert "\x1b[38;5;244mUpdated cache for file:\x1b[0m" in output
-    assert f"\x1b[1;38;5;255m{song}\x1b[0m" in output
+    assert "Updated cache for file:" not in output
+    assert "Parsing 1 file..." in output
     assert "Processed \x1b[38;5;220m1\x1b[0m files in" in output
     assert "Total RAM usage: \x1b[38;5;220m" in output
+
+
+def test_main_colorizes_verbose_cache_update(
+    file_mp3: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    music = tmp_path / "music"
+    music.mkdir()
+    song = music / "song.mp3"
+    shutil.copy2(file_mp3, song)
+    db_path = tmp_path / "genplis.db"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "genplis",
+            "--verbose",
+            "--color",
+            "--theme",
+            "dark",
+            "--no-config",
+            "--db",
+            str(db_path),
+            str(music),
+        ],
+    )
+
+    main()
+
+    output = capsys.readouterr().out
+    assert (
+        f"\x1b[38;5;244mUpdated cache for file:\x1b[0m \x1b[1;38;5;255m{song}\x1b[0m"
+        in output
+    )
 
 
 def test_main_colorizes_exclude_skips(

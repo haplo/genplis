@@ -6,6 +6,7 @@ from genplis.output import (
     ColorRole,
     Output,
     Palette,
+    Progress,
     Theme,
     color_enabled,
     colorfgbg_background,
@@ -143,3 +144,55 @@ def test_output_plain_has_no_color() -> None:
     output.line(output.palette.paint(ColorRole.PASS, "PASS"))
 
     assert stream.getvalue() == "PASS\n"
+
+
+def test_progress_draws_scan_and_parse_bar_on_a_terminal() -> None:
+    stream = FakeStream(tty=True)
+    progress = Progress(Output.plain(stream))
+
+    progress.scanning()
+    progress.start(2)
+    progress.advance(2)
+    progress.close()
+
+    output = stream.getvalue()
+    assert "Scanning collection..." in output
+    assert "Parsing audio [" in output
+    assert "2/2 (100%)" in output
+    assert output.endswith("\n")
+
+
+def test_progress_prints_one_summary_line_when_redirected() -> None:
+    stream = FakeStream(tty=False)
+    progress = Progress(Output.plain(stream))
+
+    progress.scanning()
+    progress.start(1)
+    progress.advance()
+    progress.close()
+
+    assert stream.getvalue() == "Parsing 1 file...\n"
+
+
+def test_progress_is_silent_when_disabled() -> None:
+    stream = FakeStream(tty=True)
+    progress = Progress(Output.plain(stream), enabled=False)
+
+    progress.scanning()
+    progress.tick()
+    progress.start(3)
+    progress.advance()
+    progress.close()
+
+    assert stream.getvalue() == ""
+
+
+def test_progress_skips_empty_parse_queues() -> None:
+    stream = FakeStream(tty=True)
+    progress = Progress(Output.plain(stream))
+
+    progress.scanning()
+    progress.start(0)
+    progress.close()
+
+    assert "Parsing audio" not in stream.getvalue()

@@ -76,7 +76,7 @@ genplis: error: /home/me/.config/genplis/config.ini: [tags] max_size: expected a
 
 | Option | Type | Default | CLI equivalent | Description |
 | --- | --- | --- | --- | --- |
-| `verbose` | boolean | `false` | `--verbose` / `--no-verbose` | Print config and database paths, skip decisions, rule trees, and matching songs. |
+| `verbose` | boolean | `false` | `--verbose` / `--no-verbose` | Print config and database paths, skip decisions, rule trees, matching songs, and cache updates. |
 | `quiet` | boolean | `false` | `-q` / `--quiet` | Print only filter match counts and playlist creation. |
 | `jobs` | integer ≥ 0 | `0` | `--jobs` | Worker processes for cache misses and stale files. `0` = one per CPU (capped at 8), `1` = no pool. |
 | `color` | boolean | `true` | `--color` / `--no-color` | Allow colors when stdout is an interactive terminal. `false` disables color everywhere. |

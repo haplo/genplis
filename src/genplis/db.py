@@ -180,7 +180,7 @@ def cache_tags_for_file(
         """,
         (db_key, last_modified, json_tags, last_modified, json_tags),
     )
-    if verbosity.shows_normal_output:
+    if verbosity.is_verbose:
         out.line(
             f"{out.palette.source('Updated cache for file:')} "
             f"{out.palette.title(str(file_path))}"

@@ -133,6 +133,11 @@ def parse_tags(
     return tags, tuple(diagnostics)
 
 
+def is_supported_file(file_path: Path) -> bool:
+    """Return whether tinytag recognizes the file as supported music."""
+    return TinyTag.is_supported(file_path)
+
+
 def get_tags(
     file_path: Path,
     verbosity: Verbosity = Verbosity.NORMAL,
