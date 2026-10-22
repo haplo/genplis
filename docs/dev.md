@@ -482,7 +482,7 @@ pending; see the roadmap.
 - [ ] Optimize DB space
 - [x] Display all available tags, with stats
 - [x] Debug M3UG
-- [ ] Color output
+- [x] Color output
 - [ ] Improve Windows support (**HELP NEEDED!**)
 - [ ] Improve MacOS support (**HELP NEEDED!**)
 - [ ] Publish to PyPI! 🚀
