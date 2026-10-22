@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
 
 from .m3ug import (
@@ -11,12 +13,60 @@ from .m3ug import (
     M3UGFile,
     NotNode,
     OrNode,
+    RuleExplanation,
     RuleNode,
     SourceLocation,
+    TagLookup,
     ValueNode,
     is_number,
 )
 from .sorting import SortSpec, format_sort_spec
+from .types import TagValue
+
+
+@dataclass(frozen=True, slots=True)
+class RuleTrace:
+    """One evaluated rule and the tag lookup that decided it."""
+
+    rule: RuleNode
+    passed: bool
+    lookup: TagLookup
+
+
+@dataclass(frozen=True, slots=True)
+class ExpressionTrace:
+    """The traced evaluation of one filter expression node."""
+
+    node: FilterNode
+    passed: bool
+    children: tuple[ExpressionTrace, ...] = ()
+    rule: RuleTrace | None = None
+    skipped: bool = False
+    reason: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class IncludeTrace:
+    """The traced evaluation of one ``@INCLUDE`` directive."""
+
+    include: IncludeInfo
+    passed: bool | None
+    file: FileTrace | None = None
+    skipped: bool = False
+    reason: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class FileTrace:
+    """The traced evaluation of a whole ``M3UGFile``."""
+
+    file: M3UGFile
+    passed: bool
+    includes: tuple[IncludeTrace, ...]
+    own_expression: ExpressionTrace | None
+    consulted: tuple[TagLookup, ...]
+    skipped: bool = False
+    reason: str | None = None
 
 
 def _filename_label(filename: str | None) -> str:
@@ -215,4 +265,328 @@ def format_filter_tree(
         lines.extend(_render_file_contents(parsed, indent))
 
     lines.extend(_directive_lines(parsed, default_sort, indent))
+    return "\n".join(lines)
+
+
+def _rule_expression_trace(
+    rule: RuleNode, tags: Mapping[str, TagValue]
+) -> ExpressionTrace:
+    explanation: RuleExplanation = rule.explain(tags)
+    return ExpressionTrace(
+        node=rule,
+        passed=explanation.passed,
+        rule=RuleTrace(
+            rule=rule,
+            passed=explanation.passed,
+            lookup=explanation.lookup,
+        ),
+    )
+
+
+def trace_expression(
+    node: FilterNode,
+    tags: Mapping[str, TagValue],
+    *,
+    skipped: bool = False,
+    reason: str | None = None,
+) -> ExpressionTrace:
+    """Evaluate an expression and record every visited node."""
+    if skipped:
+        return ExpressionTrace(
+            node=node,
+            passed=False,
+            skipped=True,
+            reason=reason,
+        )
+    if isinstance(node, RuleNode):
+        return _rule_expression_trace(node, tags)
+    if isinstance(node, NotNode):
+        child = trace_expression(node.node, tags)
+        return ExpressionTrace(
+            node=node,
+            passed=not child.passed,
+            children=(child,),
+        )
+    if isinstance(node, AndNode):
+        children: list[ExpressionTrace] = []
+        failed = False
+        for child_node in node.nodes:
+            if failed:
+                children.append(
+                    trace_expression(
+                        child_node,
+                        tags,
+                        skipped=True,
+                        reason="short-circuited: an earlier AND child failed",
+                    )
+                )
+                continue
+            child = trace_expression(child_node, tags)
+            children.append(child)
+            if not child.passed:
+                failed = True
+        return ExpressionTrace(
+            node=node,
+            passed=not failed,
+            children=tuple(children),
+        )
+    if isinstance(node, OrNode):
+        children = []
+        passed = False
+        for child_node in node.nodes:
+            if passed:
+                children.append(
+                    trace_expression(
+                        child_node,
+                        tags,
+                        skipped=True,
+                        reason="short-circuited: an earlier OR child passed",
+                    )
+                )
+                continue
+            child = trace_expression(child_node, tags)
+            children.append(child)
+            if child.passed:
+                passed = True
+        return ExpressionTrace(
+            node=node,
+            passed=passed,
+            children=tuple(children),
+        )
+    return ExpressionTrace(node=node, passed=node.apply(tags))
+
+
+def _collect_expression_lookups(
+    trace: ExpressionTrace,
+    seen: set[str],
+    collected: list[TagLookup],
+) -> None:
+    if trace.skipped:
+        return
+    if trace.rule is not None:
+        lookup = trace.rule.lookup
+        if lookup.requested not in seen:
+            seen.add(lookup.requested)
+            collected.append(lookup)
+    for child in trace.children:
+        _collect_expression_lookups(child, seen, collected)
+
+
+def _collect_consulted(
+    includes: tuple[IncludeTrace, ...],
+    own_expression: ExpressionTrace | None,
+) -> tuple[TagLookup, ...]:
+    collected: list[TagLookup] = []
+    seen: set[str] = set()
+    for include in includes:
+        if include.file is None:
+            continue
+        for lookup in include.file.consulted:
+            if lookup.requested not in seen:
+                seen.add(lookup.requested)
+                collected.append(lookup)
+    if own_expression is not None:
+        _collect_expression_lookups(own_expression, seen, collected)
+    return tuple(collected)
+
+
+def trace_file(parsed: M3UGFile, tags: Mapping[str, TagValue]) -> FileTrace:
+    """Evaluate a parsed file, following includes and short-circuiting."""
+    includes: list[IncludeTrace] = []
+    short_reason: str | None = None
+    for include in parsed.includes:
+        if include.file.expression is None:
+            includes.append(IncludeTrace(include=include, passed=None, file=None))
+            continue
+        if short_reason is not None:
+            includes.append(
+                IncludeTrace(
+                    include=include,
+                    passed=None,
+                    skipped=True,
+                    reason=short_reason,
+                )
+            )
+            continue
+        child = trace_file(include.file, tags)
+        includes.append(
+            IncludeTrace(
+                include=include,
+                passed=child.passed,
+                file=child,
+            )
+        )
+        if not child.passed:
+            short_reason = f"short-circuited: include {include.path.name} failed"
+
+    include_traces = tuple(includes)
+    if parsed.own_expression is None:
+        own_trace = None
+        passed = short_reason is None
+    elif short_reason is not None:
+        own_trace = trace_expression(
+            parsed.own_expression,
+            tags,
+            skipped=True,
+            reason=short_reason,
+        )
+        passed = False
+    else:
+        own_trace = trace_expression(parsed.own_expression, tags)
+        passed = own_trace.passed
+
+    return FileTrace(
+        file=parsed,
+        passed=passed,
+        includes=include_traces,
+        own_expression=own_trace,
+        consulted=_collect_consulted(include_traces, own_trace),
+    )
+
+
+def _status(trace: ExpressionTrace | IncludeTrace | FileTrace) -> str:
+    if trace.skipped:
+        return "SKIP"
+    if trace.passed is None:
+        return ""
+    return "PASS" if trace.passed else "FAIL"
+
+
+def _format_lookup_value(value: TagValue) -> str:
+    if value is None:
+        return "<missing>"
+    return repr(value)
+
+
+def _format_lookup(lookup: TagLookup) -> str:
+    if lookup.source == "missing":
+        text = f"missing tag {lookup.requested}"
+        if lookup.note is not None:
+            text += f" ({lookup.note})"
+        return text
+    if lookup.source == "calculated":
+        source = lookup.key or "fmps_rating"
+        return (
+            f"calculated rating = {_format_lookup_value(lookup.normalized)} "
+            f"(from {source})"
+        )
+    text = f"tag {lookup.key or lookup.requested} = {_format_lookup_value(lookup.raw)}"
+    if lookup.normalized != lookup.raw:
+        text += f" -> {_format_lookup_value(lookup.normalized)}"
+    if lookup.note is not None:
+        text += f" ({lookup.note})"
+    return text
+
+
+def _expression_label(node: FilterNode) -> str:
+    if isinstance(node, RuleNode):
+        return f"{node.name_node.name} {node.OPERATOR}"
+    if isinstance(node, AndNode):
+        return "AND"
+    if isinstance(node, OrNode):
+        return "OR"
+    if isinstance(node, NotNode):
+        return "NOT"
+    return type(node).__name__
+
+
+def _render_expression_trace(
+    trace: ExpressionTrace,
+    current_filename: str | None,
+    indent: str,
+) -> list[str]:
+    status = _status(trace)
+    if trace.rule is not None:
+        label = format_rule(trace.rule.rule, current_filename)
+        line = f"{indent}{status} {label}"
+        if trace.skipped and trace.reason is not None:
+            line += f" ({trace.reason})"
+        lines = [line]
+        if not trace.skipped:
+            lines.append(f"{indent}  {_format_lookup(trace.rule.lookup)}")
+        return lines
+
+    if isinstance(trace.node, RuleNode):
+        label = format_rule(trace.node, current_filename)
+    else:
+        label = _expression_label(trace.node)
+    line = f"{indent}{status} {label}"
+    if trace.skipped:
+        if trace.reason is not None:
+            line += f" ({trace.reason})"
+        return [line]
+    lines = [line]
+    for child in trace.children:
+        lines.extend(_render_expression_trace(child, current_filename, f"{indent}  "))
+    return lines
+
+
+def _render_file_body(
+    trace: FileTrace,
+    current_filename: str | None,
+    indent: str,
+) -> list[str]:
+    lines: list[str] = []
+    for include in trace.includes:
+        header = (
+            f"@INCLUDE {include.include.raw_path} "
+            f"({_filename_label(current_filename)}:{include.include.line}) "
+            f"-> {include.include.path}"
+        )
+        if include.skipped:
+            line = f"{indent}SKIP {header}"
+            if include.reason is not None:
+                line += f" ({include.reason})"
+            lines.append(line)
+            continue
+        if include.passed is None:
+            lines.append(f"{indent}{header}")
+            lines.append(f"{indent}  (no rules; directives only)")
+            lines.extend(_directive_lines(include.include.file, None, f"{indent}  "))
+            continue
+        status = "PASS" if include.passed else "FAIL"
+        lines.append(f"{indent}{status} {header}")
+        if include.file is not None:
+            lines.extend(
+                _render_file_body(
+                    include.file,
+                    include.file.file.filename,
+                    f"{indent}  ",
+                )
+            )
+    if trace.own_expression is not None:
+        lines.extend(
+            _render_expression_trace(
+                trace.own_expression,
+                current_filename,
+                indent,
+            )
+        )
+    elif not trace.includes:
+        lines.append(f"{indent}(always)")
+    return lines
+
+
+def format_file_trace(trace: FileTrace, *, title: str | None = None) -> str:
+    """Render a traced file as an annotated tree."""
+    label = title if title is not None else _filename_label(trace.file.filename)
+    lines = [f"{label}: {_status(trace)}"]
+    lines.extend(_render_file_body(trace, trace.file.filename, "  "))
+    return "\n".join(lines)
+
+
+def format_tags_consulted(consulted: tuple[TagLookup, ...], *, indent: str = "") -> str:
+    """Render the tags a trace actually consulted, in first-use order."""
+    if not consulted:
+        return f"{indent}tags consulted: (none)"
+    lines = [f"{indent}tags consulted:"]
+    for lookup in consulted:
+        detail = ""
+        if lookup.source == "missing":
+            detail = " (missing)"
+        elif lookup.source == "calculated":
+            detail = " (calculated)"
+        elif lookup.key is not None and lookup.key != lookup.requested:
+            detail = f" (key {lookup.key})"
+        lines.append(f"{indent}  {lookup.requested}{detail}")
     return "\n".join(lines)

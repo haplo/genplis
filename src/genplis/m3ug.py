@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import re
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import ClassVar, Literal, Protocol, Self, TypeGuard
 
@@ -36,6 +36,30 @@ class SourceLocation:
 
     filename: str
     line: int
+
+
+type LookupSource = Literal["tag", "calculated", "missing"]
+
+
+@dataclass(frozen=True, slots=True)
+class TagLookup:
+    """The result of looking up one tag for a traced rule."""
+
+    requested: str
+    key: str | None
+    raw: TagValue
+    normalized: TagValue
+    source: LookupSource
+    note: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class RuleExplanation:
+    """A rule evaluation with the tag lookup that produced it."""
+
+    rule: RuleNode
+    passed: bool
+    lookup: TagLookup
 
 
 def is_number(value: object) -> TypeGuard[int | float]:
@@ -79,14 +103,18 @@ def normalize(raw: TagValue) -> TagValue:
 
 def _find_tag(
     tags: Mapping[str, TagValue], normalized_name: str
-) -> tuple[bool, TagValue]:
-    """Look up a tag by its lower-case name, ignoring key casing."""
+) -> tuple[str | None, TagValue]:
+    """Look up a tag by its lower-case name, ignoring key casing.
+
+    Returns the key as it is actually spelled in the tag mapping, or ``None``
+    when the tag is absent.
+    """
     if normalized_name in tags:
-        return True, tags[normalized_name]
+        return normalized_name, tags[normalized_name]
     for key, value in tags.items():
         if key.lower() == normalized_name:
-            return True, value
-    return False, None
+            return key, value
+    return None, None
 
 
 def get_rating(tags: Mapping[str, TagValue]) -> float | None:
@@ -100,12 +128,12 @@ def get_rating(tags: Mapping[str, TagValue]) -> float | None:
     tag that is missing, feel free to open an issue with a PR to add support
     for it.
     """
-    has_rating, _ = _find_tag(tags, "rating")
-    if has_rating:
+    rating_key, _ = _find_tag(tags, "rating")
+    if rating_key is not None:
         return None
 
-    found, raw_fmps_rating = _find_tag(tags, "fmps_rating")
-    fmps_rating = normalize(raw_fmps_rating) if found else None
+    fmps_key, raw_fmps_rating = _find_tag(tags, "fmps_rating")
+    fmps_rating = normalize(raw_fmps_rating) if fmps_key is not None else None
     if isinstance(fmps_rating, list):
         # normalize() only leaves lists with more than one item
         logger.warning("Unexpected fmps_rating as list: %s", fmps_rating)
@@ -411,16 +439,65 @@ class NameNode:
 
     def find(self, tags: Mapping[str, TagValue]) -> tuple[str, TagValue]:
         normalized_name = self.name.lower()
-        found, value = _find_tag(tags, normalized_name)
+        key, value = _find_tag(tags, normalized_name)
         # handle special cases
         if normalized_name == "rating":
-            if found:
+            if key is not None:
                 return normalized_name, value
             return normalized_name, get_rating(tags)
-        if found:
+        if key is not None:
             return normalized_name, value
         # default case is no match, no value found
         return normalized_name, None
+
+    def lookup(self, tags: Mapping[str, TagValue]) -> TagLookup:
+        """Look up this tag and record how the value was obtained."""
+        normalized_name = self.name.lower()
+        key, raw = _find_tag(tags, normalized_name)
+        if normalized_name == "rating":
+            if key is not None:
+                return TagLookup(
+                    requested=normalized_name,
+                    key=key,
+                    raw=raw,
+                    normalized=normalize(raw),
+                    source="tag",
+                )
+            rating = get_rating(tags)
+            alias_key, _ = _find_tag(tags, "fmps_rating")
+            if rating is not None:
+                return TagLookup(
+                    requested=normalized_name,
+                    key=alias_key,
+                    raw=rating,
+                    normalized=normalize(rating),
+                    source="calculated",
+                    note="calculated from fmps_rating",
+                )
+            note = "no usable fmps_rating" if alias_key is not None else "no rating tag"
+            return TagLookup(
+                requested=normalized_name,
+                key=None,
+                raw=None,
+                normalized=None,
+                source="missing",
+                note=note,
+            )
+        if key is not None:
+            return TagLookup(
+                requested=normalized_name,
+                key=key,
+                raw=raw,
+                normalized=normalize(raw),
+                source="tag",
+            )
+        return TagLookup(
+            requested=normalized_name,
+            key=None,
+            raw=None,
+            normalized=None,
+            source="missing",
+        )
 
 
 class ValueNode:
@@ -587,6 +664,24 @@ class RuleNode:
         if self.IS_TEXT and _has_boolean(tag_value):
             self._warn_boolean(tag_name)
         return self.check(tag_value)
+
+    def explain(self, tags: Mapping[str, TagValue]) -> RuleExplanation:
+        """Evaluate this rule and describe the tag lookup it performed."""
+        lookup = self.name_node.lookup(tags)
+        tag_value = self.value_node.normalize(lookup.raw)
+        note = lookup.note
+        if self.IS_TEXT and _has_boolean(tag_value):
+            warning = (
+                f"text operator {self.OPERATOR!r} applied to boolean tag "
+                f"{lookup.requested!r}; use = true or = false"
+            )
+            note = f"{note}; {warning}" if note else warning
+        lookup = replace(lookup, normalized=tag_value, note=note)
+        return RuleExplanation(
+            rule=self,
+            passed=self.check(tag_value),
+            lookup=lookup,
+        )
 
     def _warn_boolean(self, tag_name: str) -> None:
         if self._warning_state[0]:
