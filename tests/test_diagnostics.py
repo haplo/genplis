@@ -206,9 +206,14 @@ def test_empty_expression_markers_use_source_color() -> None:
 
     tree = format_filter_tree(parse_m3ug(""), palette=palette)
     consulted = format_tags_consulted((), palette=palette)
+    selection = format_selection_trace(
+        SelectionTrace(target=Path("song.mp3")),
+        palette=palette,
+    )
 
     assert "\x1b[38;5;244m(always)\x1b[0m" in tree
     assert "\x1b[38;5;244m(none)\x1b[0m" in consulted
+    assert "\x1b[38;5;244m  (no filters)\x1b[0m" in selection
 
 
 def test_trace_statuses_use_semantic_colors() -> None:

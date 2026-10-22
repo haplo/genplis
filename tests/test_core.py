@@ -27,6 +27,7 @@ from genplis.core import (
     Args,
     _sort_values,
     clean_database,
+    display_file_tags,
     format_size,
     get_calculated_tags,
     main,
@@ -3034,3 +3035,52 @@ def test_main_no_color_keeps_output_plain(
     main()
 
     assert "\x1b[" not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ("cache_status", "message", "code"),
+    [
+        (CacheStatus.MISS, "not present", "\x1b[38;5;244m"),
+        (CacheStatus.STALE, "stale", "\x1b[38;5;214m"),
+        (CacheStatus.HIT, "valid", "\x1b[38;5;40m"),
+    ],
+)
+def test_display_file_tags_colors_cache_status(
+    file_mp3: Path,
+    cache_status: CacheStatus,
+    message: str,
+    code: str,
+) -> None:
+    stream = StringIO()
+
+    display_file_tags(
+        file_mp3,
+        {"artist": ["Artist"]},
+        cache_status,
+        output=Output(
+            stream=stream,
+            palette=Palette(theme=Theme.DARK, enabled=True),
+        ),
+    )
+
+    assert f"Cache status: {code}{message}\x1b[0m" in stream.getvalue()
+
+
+def test_display_file_tags_colors_missing_tag_message(file_mp3: Path) -> None:
+    stream = StringIO()
+
+    display_file_tags(
+        file_mp3,
+        {"artist": ["Artist"]},
+        CacheStatus.HIT,
+        requested=("nope",),
+        output=Output(
+            stream=stream,
+            palette=Palette(theme=Theme.DARK, enabled=True),
+        ),
+    )
+
+    output = stream.getvalue()
+    assert "\x1b[38;5;51mnope\x1b[0m" in output
+    assert "\x1b[38;5;214mwas not found.\x1b[0m" in output
+    assert "\x1b[38;5;244mIt may be hidden by [tags] ignore.\x1b[0m" in output

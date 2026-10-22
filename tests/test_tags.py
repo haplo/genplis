@@ -1,12 +1,18 @@
+from collections.abc import Callable
+from io import StringIO
 from pathlib import Path
 
 import pytest
 from pytest import approx
 from tinytag import TinyTagException
 
+from genplis.output import Output, Palette, Theme
 from genplis.tags import (
     AUDIO_PROPERTY_TAGS,
+    TagDiagnostic,
+    TagDiagnosticKind,
     exceeds_tag_size,
+    format_tag_diagnostic,
     get_audio_property_tags,
     get_tag_size,
     get_tags,
@@ -80,15 +86,27 @@ def test_parse_tags_returns_messages_without_printing(
     }
     _patch_tinytag(monkeypatch, raw_tags)
 
-    tags, messages = parse_tags(
+    tags, diagnostics = parse_tags(
         Path("song.mp3"),
         max_size=5,
         ignore=frozenset({"artist"}),
     )
 
     assert tags == {"title": ["Test"]}
-    assert "Removing tag artist because it is configured to be ignored" in messages
-    assert "Removing tag long because it's larger than 5 UTF-8 bytes" in messages
+    assert diagnostics == (
+        TagDiagnostic(
+            TagDiagnosticKind.REMOVE,
+            Path("song.mp3"),
+            "it is configured to be ignored",
+            tag="artist",
+        ),
+        TagDiagnostic(
+            TagDiagnosticKind.REMOVE,
+            Path("song.mp3"),
+            "it's larger than 5 UTF-8 bytes",
+            tag="long",
+        ),
+    )
     assert capsys.readouterr().out == ""
 
 
@@ -96,10 +114,65 @@ def test_parse_tags_reports_unsupported_file(tmp_path: Path) -> None:
     unsupported = tmp_path / "notes.txt"
     unsupported.write_text("not music\n", encoding="utf-8")
 
-    tags, messages = parse_tags(unsupported)
+    tags, diagnostics = parse_tags(unsupported)
 
     assert tags is None
-    assert messages == (f"Skipping {unsupported}: not supported by tinytag",)
+    assert diagnostics == (
+        TagDiagnostic(
+            TagDiagnosticKind.SKIP,
+            unsupported,
+            "not supported by tinytag",
+        ),
+    )
+
+
+def test_format_tag_diagnostic_uses_palette(
+    strip_ansi: Callable[[str], str],
+) -> None:
+    palette = Palette(theme=Theme.DARK, enabled=True)
+    skipped = TagDiagnostic(
+        TagDiagnosticKind.SKIP,
+        Path("song.mp3"),
+        "not supported by tinytag",
+    )
+    removed = TagDiagnostic(
+        TagDiagnosticKind.REMOVE,
+        Path("song.mp3"),
+        "it is configured to be ignored",
+        tag="artist",
+    )
+
+    skip_output = format_tag_diagnostic(skipped, palette)
+    remove_output = format_tag_diagnostic(removed, palette)
+
+    assert "Skipping song.mp3: not supported by tinytag" == strip_ansi(skip_output)
+    assert "Removing tag artist because it is configured to be ignored" == strip_ansi(
+        remove_output
+    )
+    assert "\x1b[38;5;117mSkipping\x1b[0m" in skip_output
+    assert "\x1b[38;5;214mRemoving tag\x1b[0m" in remove_output
+    assert "\x1b[38;5;51martist\x1b[0m" in remove_output
+
+
+def test_get_tags_colors_verbose_diagnostics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_tinytag(monkeypatch, {"artist": ["Artist"], "title": ["Title"]})
+    stream = StringIO()
+
+    get_tags(
+        Path("song.mp3"),
+        Verbosity.VERBOSE,
+        ignore=frozenset({"artist"}),
+        output=Output(
+            stream=stream,
+            palette=Palette(theme=Theme.DARK, enabled=True),
+        ),
+    )
+
+    output = stream.getvalue()
+    assert "\x1b[38;5;214mRemoving tag\x1b[0m" in output
+    assert "\x1b[38;5;51martist\x1b[0m" in output
 
 
 def test_get_audio_property_tags() -> None:

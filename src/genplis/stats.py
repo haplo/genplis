@@ -482,8 +482,8 @@ def render_tag_details(
         if not matches:
             lines.append("")
             lines.append(
-                f"Tag '{colors.tag(name)}' was not found. "
-                "It may be hidden by [tags] ignore."
+                f"Tag '{colors.tag(name)}' {colors.warning('was not found.')} "
+                f"{colors.source('It may be hidden by [tags] ignore.')}"
             )
             continue
         for stat, calculated in matches:

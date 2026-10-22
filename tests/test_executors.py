@@ -1,5 +1,6 @@
 import os
 import shutil
+import sys
 from collections import Counter
 from collections.abc import Iterator, Sequence
 from dataclasses import replace
@@ -25,6 +26,7 @@ from genplis.executors import (
     auto_workers,
     make_executor,
 )
+from genplis.output import Output, Palette, Theme
 from genplis.types import Tags, Verbosity
 
 
@@ -352,6 +354,41 @@ def test_parallel_verbose_diagnostics_are_preserved(
         )
         == 4
     )
+
+
+def test_parallel_verbose_diagnostics_use_palette(
+    tmp_path: Path,
+    file_mp3: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    root = tmp_path / "music"
+    root.mkdir()
+    for index in range(4):
+        shutil.copy2(file_mp3, root / f"song-{index}.mp3")
+
+    monkeypatch.setattr(executors, "MIN_PARALLEL_FILES", 4)
+    config = Config(tags=TagsConfig(ignore=frozenset({"artist"})))
+    args = replace(
+        _make_args(root, tmp_path / "cache.db", jobs=2),
+        verbosity=Verbosity.VERBOSE,
+        config=config,
+    )
+    output = Output(
+        stream=sys.stdout,
+        palette=Palette(theme=Theme.DARK, enabled=True),
+    )
+
+    conn, cursor = setup_database_connection(tmp_path / "cache.db")
+    try:
+        create_files_table(cursor, get_cache_version(config.tags))
+        process_directory(conn, cursor, root, args, output=output)
+    finally:
+        conn.close()
+
+    captured = capsys.readouterr().out
+    assert "\x1b[38;5;214mRemoving tag\x1b[0m" in captured
+    assert "\x1b[38;5;51martist\x1b[0m" in captured
 
 
 class _InterruptingExecutor:

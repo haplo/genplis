@@ -2,6 +2,7 @@ import shutil
 import sqlite3
 import sys
 from collections.abc import Callable
+from io import StringIO
 from pathlib import Path
 
 import pytest
@@ -19,7 +20,7 @@ from genplis.core import (
 )
 from genplis.db import create_files_table, setup_database_connection
 from genplis.exceptions import GenplisConfigError, GenplisError
-from genplis.output import Palette, Theme
+from genplis.output import Output, Palette, Theme
 from genplis.stats import (
     TagStatsCollector,
     TagValueStat,
@@ -148,6 +149,18 @@ def test_render_details_reports_missing_tag() -> None:
 
     assert "Tag 'nope' was not found" in output
     assert "[tags] ignore" in output
+
+
+def test_render_details_colors_missing_tag_message() -> None:
+    collector = TagStatsCollector()
+    collector.record_file({"artist": ["A"]}, {})
+    palette = Palette(theme=Theme.DARK, enabled=True)
+
+    output = render_tag_details(collector.report(), ("nope",), palette=palette)
+
+    assert "\x1b[38;5;51mnope\x1b[0m" in output
+    assert "\x1b[38;5;214mwas not found.\x1b[0m" in output
+    assert "\x1b[38;5;244mIt may be hidden by [tags] ignore.\x1b[0m" in output
 
 
 def test_render_details_resolves_embedded_and_calculated_rating() -> None:
@@ -520,6 +533,30 @@ def test_display_tag_stats_single_file_filters_requested_tag(
     output = capsys.readouterr().out
     assert "*duration" in output
     assert "artist" not in output
+
+
+def test_display_tag_stats_colors_unsupported_file(
+    genplis_db: sqlite3.Connection,
+    make_args: Callable[..., Args],
+    tmp_path: Path,
+) -> None:
+    unsupported = tmp_path / "notes.txt"
+    unsupported.write_text("not music\n", encoding="utf-8")
+    stream = StringIO()
+
+    display_tag_stats(
+        genplis_db,
+        genplis_db.cursor(),
+        make_args(str(unsupported)),
+        output=Output(
+            stream=stream,
+            palette=Palette(theme=Theme.DARK, enabled=True),
+        ),
+    )
+
+    output = stream.getvalue()
+    assert f"\x1b[1;38;5;255m{unsupported}\x1b[0m" in output
+    assert "\x1b[38;5;214mis not a supported music file\x1b[0m" in output
 
 
 def test_display_tag_stats_rejects_m3ug_path(

@@ -1,9 +1,12 @@
 from collections.abc import Mapping
+from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 from typing import Final, cast
 
 from tinytag import TinyTag, TinyTagException
 
+from .output import ColorRole, Output, Palette
 from .types import Tags, TagValue, Verbosity
 
 DEFAULT_MAX_TAG_SIZE = 1000
@@ -27,12 +30,44 @@ AUDIO_PROPERTY_TAGS: Final[frozenset[str]] = frozenset(
 )
 
 
+class TagDiagnosticKind(StrEnum):
+    """Kind of verbose message produced while parsing a file's tags."""
+
+    SKIP = "skip"
+    REMOVE = "remove"
+
+
+@dataclass(frozen=True, slots=True)
+class TagDiagnostic:
+    """One verbose tag-parsing diagnostic, independent of terminal colors."""
+
+    kind: TagDiagnosticKind
+    path: Path
+    reason: str
+    tag: str | None = None
+
+
+def format_tag_diagnostic(diagnostic: TagDiagnostic, palette: Palette) -> str:
+    """Render one tag diagnostic with semantic colors."""
+    if diagnostic.kind is TagDiagnosticKind.SKIP:
+        return (
+            f"{palette.paint(ColorRole.SKIP, 'Skipping')} "
+            f"{palette.title(str(diagnostic.path))}: "
+            f"{palette.source(diagnostic.reason)}"
+        )
+    return (
+        f"{palette.warning('Removing tag')} "
+        f"{palette.tag(diagnostic.tag or '')} "
+        f"{palette.source(f'because {diagnostic.reason}')}"
+    )
+
+
 def parse_tags(
     file_path: Path,
     *,
     max_size: int = DEFAULT_MAX_TAG_SIZE,
     ignore: frozenset[str] = frozenset(),
-) -> tuple[Tags | None, tuple[str, ...]]:
+) -> tuple[Tags | None, tuple[TagDiagnostic, ...]]:
     """Return music tags and verbose diagnostics, without printing anything.
 
     The tags are ``None`` when the file is not a music file or cannot be read
@@ -43,18 +78,24 @@ def parse_tags(
 
     Calculated audio properties are never dropped by the size limit.
 
-    The messages are the lines that ``get_tags`` prints in verbose mode.
+    The diagnostics are rendered by ``get_tags`` in verbose mode.
     """
-    messages: list[str] = []
+    diagnostics: list[TagDiagnostic] = []
     if not TinyTag.is_supported(file_path):
-        messages.append(f"Skipping {file_path}: not supported by tinytag")
-        return None, tuple(messages)
+        diagnostics.append(
+            TagDiagnostic(
+                TagDiagnosticKind.SKIP,
+                file_path,
+                "not supported by tinytag",
+            )
+        )
+        return None, tuple(diagnostics)
 
     try:
         tags = cast(Tags, TinyTag.get(file_path).as_dict())
     except (TinyTagException, OSError) as exc:
-        messages.append(f"Skipping {file_path}: {exc}")
-        return None, tuple(messages)
+        diagnostics.append(TagDiagnostic(TagDiagnosticKind.SKIP, file_path, str(exc)))
+        return None, tuple(diagnostics)
 
     ignored = {name.lower() for name in ignore}
 
@@ -63,8 +104,13 @@ def parse_tags(
     # second dictionary until the end of the scan.
     for key in tuple(tags):
         if key.lower() in ignored:
-            messages.append(
-                f"Removing tag {key} because it is configured to be ignored"
+            diagnostics.append(
+                TagDiagnostic(
+                    TagDiagnosticKind.REMOVE,
+                    file_path,
+                    "it is configured to be ignored",
+                    tag=key,
+                )
             )
             del tags[key]
             continue
@@ -74,12 +120,17 @@ def parse_tags(
             and key not in AUDIO_PROPERTY_TAGS
             and exceeds_tag_size(value, max_size)
         ):
-            messages.append(
-                f"Removing tag {key} because it's larger than {max_size} UTF-8 bytes"
+            diagnostics.append(
+                TagDiagnostic(
+                    TagDiagnosticKind.REMOVE,
+                    file_path,
+                    f"it's larger than {max_size} UTF-8 bytes",
+                    tag=key,
+                )
             )
             del tags[key]
             del value
-    return tags, tuple(messages)
+    return tags, tuple(diagnostics)
 
 
 def get_tags(
@@ -88,6 +139,7 @@ def get_tags(
     *,
     max_size: int = DEFAULT_MAX_TAG_SIZE,
     ignore: frozenset[str] = frozenset(),
+    output: Output | None = None,
 ) -> Tags | None:
     """Return music tags as a dictionary, or None if not a music file.
 
@@ -100,10 +152,11 @@ def get_tags(
 
     Calculated audio properties are never dropped by the size limit.
     """
-    tags, messages = parse_tags(file_path, max_size=max_size, ignore=ignore)
+    out = Output.plain() if output is None else output
+    tags, diagnostics = parse_tags(file_path, max_size=max_size, ignore=ignore)
     if verbosity.is_verbose:
-        for message in messages:
-            print(message)
+        for diagnostic in diagnostics:
+            out.line(format_tag_diagnostic(diagnostic, out.palette))
     return tags
 
 

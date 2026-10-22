@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Protocol
 
 from .config import TagsConfig
-from .tags import parse_tags
+from .tags import TagDiagnostic, parse_tags
 from .types import Tags
 
 MIN_PARALLEL_FILES = 64
@@ -38,7 +38,7 @@ class ParseResult:
 
     item: ParseItem
     tags: Tags | None
-    messages: tuple[str, ...]
+    diagnostics: tuple[TagDiagnostic, ...]
 
 
 class ParseExecutor(Protocol):
@@ -58,12 +58,12 @@ def _init_worker(settings: TagsConfig) -> None:
 
 
 def _parse_item(item: ParseItem, settings: TagsConfig) -> ParseResult:
-    tags, messages = parse_tags(
+    tags, diagnostics = parse_tags(
         item.path,
         max_size=settings.max_size,
         ignore=settings.ignore,
     )
-    return ParseResult(item, tags, messages)
+    return ParseResult(item, tags, diagnostics)
 
 
 def _parse_one(item: ParseItem) -> ParseResult:

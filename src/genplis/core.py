@@ -43,7 +43,7 @@ from .m3ug import (
     get_rating,
     parse_m3ug,
 )
-from .output import ColorRole, Output, Theme
+from .output import ColorRole, Output, Palette, Theme
 from .sorting import (
     SortSpec,
     SortValue,
@@ -58,7 +58,12 @@ from .stats import (
     render_tag_details,
     render_tag_stats,
 )
-from .tags import AUDIO_PROPERTY_TAGS, get_audio_property_tags, get_tags
+from .tags import (
+    AUDIO_PROPERTY_TAGS,
+    format_tag_diagnostic,
+    get_audio_property_tags,
+    get_tags,
+)
 from .types import Tags, TagValue, Verbosity
 
 # User-facing description of each cache state.
@@ -67,6 +72,24 @@ CACHE_STATUS_MESSAGES = {
     db.CacheStatus.STALE: "stale",
     db.CacheStatus.HIT: "valid",
 }
+
+_CACHE_STATUS_ROLES = {
+    db.CacheStatus.MISS: ColorRole.SOURCE,
+    db.CacheStatus.STALE: ColorRole.WARNING,
+    db.CacheStatus.HIT: ColorRole.PASS,
+}
+
+
+def _format_cache_status(
+    cache_status: db.CacheStatus,
+    palette: Palette,
+) -> str:
+    """Render a cache state with a semantic color."""
+    return palette.paint(
+        _CACHE_STATUS_ROLES[cache_status],
+        CACHE_STATUS_MESSAGES[cache_status],
+    )
+
 
 # Commit cache writes every N rows during a directory scan. Benchmarked on a
 # 50k-file cold scan: 128 was within 0.7% of the best median and far ahead of
@@ -579,7 +602,7 @@ def display_file_tags(
     out = Output.plain() if output is None else output
     palette = out.palette
     out.line(f"{palette.title(str(path))} detected as music file")
-    out.line(f"Cache status: {CACHE_STATUS_MESSAGES[cache_status]}")
+    out.line(f"Cache status: {_format_cache_status(cache_status, palette)}")
     out.line(palette.title("Parsed tags:"))
     shown_tags: Tags = {
         key: value for key, value in tags.items() if key not in AUDIO_PROPERTY_TAGS
@@ -592,8 +615,8 @@ def display_file_tags(
         out.line(f"    {palette.tag(key)} = {palette.value(str(value))}")
     for name in missing:
         out.line(
-            f"Tag '{palette.tag(name)}' was not found. "
-            "It may be hidden by [tags] ignore."
+            f"Tag '{palette.tag(name)}' {palette.warning('was not found.')} "
+            f"{palette.source('It may be hidden by [tags] ignore.')}"
         )
 
 
@@ -876,7 +899,7 @@ def _print_filter_traces(
         return
     palette = output.palette
     output.line(f"Trace target: {palette.title(str(target))}")
-    output.line(f"Cache status: {CACHE_STATUS_MESSAGES[cache_status]}")
+    output.line(f"Cache status: {_format_cache_status(cache_status, palette)}")
     output.line(f"Filters: {palette.value(str(len(traces)))}")
     if is_excluded(target, args):
         output.line(
@@ -1085,7 +1108,10 @@ def display_tag_stats(
     tags, _, cache_status = process_file(conn, cursor, path, args, output=out)
     if tags is None:
         if args.verbosity is not Verbosity.REALLY_QUIET:
-            out.line(f"{path} is not a supported music file")
+            out.line(
+                f"{palette.title(str(path))} "
+                f"{palette.warning('is not a supported music file')}"
+            )
         return
     if args.verbosity is not Verbosity.REALLY_QUIET:
         display_file_tags(path, tags, cache_status, args.tags, output=out)
@@ -1567,8 +1593,8 @@ def process_directory(
             try:
                 for result in executor.parse(pending):
                     if args.verbosity.is_verbose:
-                        for message in result.messages:
-                            out.line(message)
+                        for diagnostic in result.diagnostics:
+                            out.line(format_tag_diagnostic(diagnostic, out.palette))
                     if result.tags is None:
                         continue
                     batch.store(
@@ -1797,6 +1823,7 @@ def process_file(
         args.verbosity,
         max_size=args.config.tags.max_size,
         ignore=args.config.tags.ignore,
+        output=output,
     )
     if tags is None:
         return None, None, cache_status

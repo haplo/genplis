@@ -891,7 +891,7 @@ def format_selection_trace(
     colors = Palette() if palette is None else palette
     lines = [colors.title("selection:")]
     if not trace.filters:
-        lines.append("  (no filters)")
+        lines.append(colors.source("  (no filters)"))
         return "\n".join(lines)
 
     result_key = colors.directive("result:")
