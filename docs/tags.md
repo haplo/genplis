@@ -1,100 +1,52 @@
 # Tags
 
-Genplis filters on tags read from your audio files. This page explains where
-those tags come from, which names are available, and the special cases such as
-`rating` and calculated audio properties.
+Genplis uses two kinds of information when filtering music:
 
-For the operators that combine tags into rules, see
-[M3UG](m3ug.md). For the
-settings that limit which tags are stored, see
-[Configuration](config.md#tags).
+- **Embedded tags**, such as artist, genre, and year, stored in the audio file.
+- **Calculated properties**, such as duration and bitrate, read from the file
+  or its audio stream.
 
-## Where tags come from
+This page covers their names, units, and behavior in filters. For commands,
+see [Usage](usage.md); for rule syntax, see the [M3UG reference](m3ug.md).
 
-Genplis uses the [tinytag](https://github.com/tinytag/tinytag) library to read
-embedded metadata and audio stream properties. It does not have its own list
-of supported tags: everything tinytag exposes for a file is available to
-filters, including format-specific extra fields.
+## Inspect your tags
 
-Consequences:
-
-- Supported formats are whatever tinytag supports (for example MP3, Ogg
-  Vorbis, Opus, FLAC, MP4/M4A, WAV, AIFF, and WMA). Unsupported files are
-  skipped.
-- The same logical information can have different names in different formats.
-  For example, a release year may appear as `year` or as `original_year`.
-- A missing tag is normal, not an error. In a filter it simply does not match
-  (except with `!=`).
-
-## Inspecting a file's tags
-
-The most reliable way to find the names and values for your collection is to
-ask genplis about a real file:
+Check a few songs before writing a filter: available tags depend on the file
+format and the software that tagged it.
 
 ```bash
-uv run genplis /path/to/song.mp3
+genplis ~/Music/some-song.mp3
 ```
 
-This prints the cache status and every parsed tag. Calculated values are
-prefixed with `*`, for example:
+This prints the cache status and available tags. An excerpt might look like:
 
 ```text
 Parsed tags:
-    *bitrate = 127.99768145161289
-    *channels = 2
-    *duration = 3.239183673469388
-    *filename = /music/song.mp3
-    *filesize = 53235
-    *is_lossless = False
-    *mime_type = audio/mpeg
-    *samplerate = 44100
-    artist = ['Test Artist']
-    genre = ['Synthwave; Retrowave; Electronic']
-    title = ['Test']
+    *duration = 245.5
+    *is_lossless = True
+    album = ['Out of Body (2023 Remastered Edition)']
+    artist = ['DANCE WITH THE DEAD]
+    genre = ['Metal', 'Rock']
+    title = ['Robeast']
+    track = ['2']
 ```
 
-The `*` is only a display marker. In a `.m3ug` file you write the name without
-it: `duration >= 60`, never `*duration >= 60`.
+The `*` marks a calculated value; **leave it off in filters**. Write
+`duration >= 1m`, not `*duration >= 1m`. Brackets show a list of tag values,
+even when there is only one.
 
-Use `--verbose` for extra detail about skipped or removed tags:
+Add `--verbose` for diagnostics about skipped files or discarded tags when
+they are parsed. For collection-wide commands, see
+[Inspecting tags across a collection](usage.md#inspecting-tags-across-a-collection).
 
-```bash
-uv run genplis --verbose /path/to/song.mp3
-```
+## Common tags
 
-To inventory the tags used across a whole collection, including how many
-files have each one, run:
+Genplis uses [tinytag](https://github.com/tinytag/tinytag) to read metadata.
+Supported formats include MP3, Ogg Vorbis, Opus, FLAC, MP4/M4A, WAV, AIFF,
+and WMA; unsupported files are skipped.
 
-```bash
-uv run genplis --tag-stats ~/Music
-```
-
-Add `-t TAG` to see every distinct value of a tag and how many files contain
-it:
-
-```bash
-uv run genplis -t genre ~/Music
-```
-
-The report uses the same `*` marker for calculated properties and respects
-`[tags] ignore` and `[tags] max_size`. See
-[Tag statistics](usage.md#inspecting-tags-across-a-collection)
-for collection-wide inspection commands.
-
-## Tag names
-
-- Names are matched case-insensitively. `Artist`, `artist`, and `ARTIST` all
-  refer to the same tag.
-- Tinytag's names are lower-case with underscores: `albumartist`,
-  `mime_type`, `is_lossless`, `original_year`, `track_total`.
-- There are no wildcards and no aliases beyond the special `rating` handling
-  described below.
-- Names that look like audio properties are listed in
-  [Calculated audio properties](#calculated-audio-properties).
-
-### Common tags
-
-Most files expose some of these:
+These are common embedded tags, not a list that every file is guaranteed to
+have:
 
 | Name | Meaning |
 | --- | --- |
@@ -102,7 +54,7 @@ Most files expose some of these:
 | `albumartist` | Album artist |
 | `album` | Album title |
 | `title` | Track title |
-| `genre` | Genre (often a single string such as `Metal`, or a list) |
+| `genre` | One or more genres |
 | `year` | Release year |
 | `original_year` | Original release year, when the format stores it separately |
 | `track`, `track_total` | Track number and total tracks |
@@ -112,108 +64,140 @@ Most files expose some of these:
 | `bpm` | Beats per minute, when present |
 | `copyright`, `isrc` | Format-dependent extra fields |
 
-This is not a fixed list. Albums, artists, and other fields come straight from
-tinytag's flat dictionary, which also merges format-specific "other" fields
-into the same namespace. Inspect a representative sample of your files rather
-than assuming a name exists.
-
-### Multi-valued tags
-
-Tinytag stores embedded metadata values as lists, even when there is only one
-value. Genplis flattens a one-item list to a single value before filtering, and
-keeps longer lists as lists:
-
-- One value: `genre = Metal` and `genre ~ Metal` behave as expected.
-- Several values: `=` and `~` match if **any** value matches; `!=` matches
-  only if **all** values differ; numeric comparisons match if any value
-  passes.
-- Sets on the right-hand side work the same way: `genre = [Metal | Rock]`
-  matches if any tag value equals either value. See
-  [Multi-value rules](m3ug.md#multi-value-rules).
+Any extra fields tinytag exposes are available too, unless discarded by
+[tag settings](#missing-or-discarded-tags). Use the names shown by inspection,
+not the labels in your music player's interface. For example, `year` and
+`original_year` are separate tags; use the one your files actually have.
 
 ## Calculated audio properties
 
-These values are derived from the file itself rather than from embedded tags.
-They are printed with a `*` prefix but used without it in filters.
+These properties don't require embedded metadata. The table uses their
+filter names, without the display-only `*` prefix.
 
 | Name | Meaning | Unit / type |
 | --- | --- | --- |
 | `filename` | Path of the file as genplis encountered it | string |
 | `filesize` | File size | bytes (integer) |
 | `mime_type` | MIME type reported by tinytag | string |
-| `duration` | Duration | seconds (float); filters also accept duration literals such as `10m` or `1:30` |
+| `duration` | Playing time | seconds (float) |
 | `channels` | Number of audio channels | integer |
 | `bitrate` | Bitrate | kilobits per second (float) |
 | `bitdepth` | Sample bit depth, when available | bits (integer) |
 | `samplerate` | Sample rate | hertz (integer) |
 | `is_lossless` | Whether the format is lossless | boolean |
 
-Notes:
+For example:
 
-- `filename` is the path used when reading the file. If you invoke genplis
-  with a relative path, it can be relative; the cache itself always stores
-  normalized absolute paths. `.` and `..` are collapsed, but symlinks are not
-  resolved.
-- `bitdepth` is absent for many lossy formats, so a rule on it will not match
-  those files.
-- `is_lossless` is a boolean; compare it with `is_lossless = true` or
-  `is_lossless = false`. Text operators do not match boolean values.
-- Calculated properties are exempt from `[tags] max_size`, but can still be
-  removed with `[tags] ignore` (use the unprefixed name).
+```text
+duration < 5m
+samplerate >= 44100
+is_lossless = true
+```
+
+`duration` also accepts [duration literals](m3ug.md#duration-literals) such
+as `10m` or `1:30`. Use `= true` or `= false` for `is_lossless`, not text
+operators such as `~`.
+
+Some properties may be absent: `bitdepth`, for example, is often unavailable
+for lossy formats. `filename` contains a path, not just the file's base name;
+it may be relative if the file was read using a relative path. Sorting by
+`filename` always uses the absolute path; see [Ordering](m3ug.md#ordering).
+
+## Using tags in rules
+
+- **Tag names ignore case:** `Artist` and `artist` are the same. Names have
+  no wildcards; use the spelling from inspection, such as `albumartist` or
+  `original_year`.
+- **Text values ignore case by default:** `genre = metal` matches `Metal`.
+  Add `@CASE` to a rule when case matters.
+- **Numbers in rules should be unquoted:** `track = 7` matches a tag stored
+  as either `7` or `"7"`. Quoting the rule value makes it text instead.
+
+See [Values and types](m3ug.md#values-and-types) for conversion rules and
+[Operators](m3ug.md#operators) for all comparisons.
+
+### Multi-valued tags
+
+A song can have several artists or genres. For a tag displayed as
+`genre = ['Metal', 'Rock']`:
+
+- `genre = Metal` and `genre ~ Metal` match because **at least one** value
+  passes. Numeric comparisons also match when any value passes.
+- `genre != Metal` does not match: **every** value must differ.
+- `genre = [Metal | Pop]` matches either listed genre. See
+  [Multi-value rules](m3ug.md#multi-value-rules) for sets of tags and values.
+
+Genplis does not split a single string into separate values. If inspection
+shows only `['Rock; Metal']`, `genre = Metal` won't match, but
+`genre ~ Metal` will. For sorting, multi-valued tags use their first non-empty
+value; see [Ordering](m3ug.md#ordering).
 
 ## Rating
 
-`rating` is special because music players store ratings in incompatible ways.
+**Check your rating scale before using a rating filter.** Music players may
+store ratings on a 0–5, 0–100, or 0–255 scale. Genplis chooses the value as
+follows:
 
-When a file has a `rating` tag, genplis uses it **as-is**. It is not
-normalized, and its scale depends on the player or tagger that wrote it
-(common scales are 0–5, 0–100, and 0–255). The printed tag has no `*` in this
-case, because it came from the file.
+| Available tags | Value used by `rating` rules | Displayed as |
+| --- | --- | --- |
+| `rating` is present | The raw value, **without rescaling**, even if `fmps_rating` also exists | `rating` |
+| No `rating`, but a numeric `fmps_rating` | `fmps_rating × 5`, converting the usual 0.0–1.0 scale to 0–5 | `*rating` |
+| Neither usable source | Missing; `rating >= 4` does not match | Not listed |
 
-When a file has no `rating` tag, genplis derives one from `fmps_rating`:
+For a 0–5 scale, use `rating >= 4` for four stars or better. For a 0–100
+scale, choose an appropriate threshold such as `rating >= 80` instead.
+In either case the filter name is `rating`, never `*rating`.
 
-```text
-rating = fmps_rating × 5
-```
+A non-numeric `fmps_rating` produces no calculated rating. Ignoring the raw
+`rating` tag still allows the fallback; ignore both `rating` and `fmps_rating`
+to hide ratings entirely. See [Ignored tags](config.md#ignore).
 
-`fmps_rating` is stored on a 0.0–1.0 scale, so the result is 0–5. The derived
-value is printed as `*rating`, with the `*` marking it as calculated.
+## Reading tag statistics
 
-Rules:
+Use `genplis --tag-stats ~/Music` to summarize available tags, or
+`genplis -t genre ~/Music` to list every value of one tag. See
+[Usage](usage.md#inspecting-tags-across-a-collection) for inspection commands.
 
-- A raw `rating` always wins over `fmps_rating`.
-- The derived rating only exists when `fmps_rating` exists and is not ignored
-  by `[tags] ignore`.
-- A non-numeric `fmps_rating` is ignored; no derived rating is produced.
-- If neither tag is present, there is no rating; `rating >= 4` does not match.
-- If your files use a 0–100 or 0–255 scale and you cannot change it, compare
-  against that scale (for example `rating >= 80`) or use a player/tagger that
-  writes `fmps_rating`.
+The summary separates embedded and calculated tags:
 
-Because the raw value is not normalized, the examples `rating >= 4` and
-`rating >= 5` assume a 0–5 scale. Always inspect a few files before trusting a
-rating filter.
+| Column | Meaning |
+| --- | --- |
+| `Files` | Number of supported files with this tag |
+| `Coverage` | Percentage of all supported files that have it |
+| `Distinct` | Number of different values; a `+` means the count was capped |
+| `Examples` | A few values, most common first |
 
-## Which tags are stored
+With `-t`, every distinct value is listed, most common first, with a file
+count and coverage. Each value counts at most once per file, but a file can
+contribute to several values, so their coverage can total more than 100%.
+Long values may be shortened for display; counts still refer to the full
+values. A requested tag that isn't found prints a message, not an error.
 
-Two settings affect the tags available to filters:
+Tag names are case-insensitive. `-t rating` shows both embedded `rating` and
+calculated `*rating` when present; use `-t '*rating'` for only the calculated
+form. This `*` selects a report category, not a filter name or wildcard.
 
-- `[tags] max_size` (default 1000) discards values whose combined UTF-8
-  encoded length exceeds the limit. `0` disables the limit. Calculated audio
-  properties are exempt. See
-  [Configuration](config.md#max_size).
-- `[tags] ignore` discards named tags before the size check and before
-  caching. Names are case-insensitive. Ignoring `rating` removes the raw tag,
-  but a rating is still derived when `fmps_rating` is available; ignore both
-  to remove ratings entirely.
+Reports use the same tag settings as filters and update the cache without
+writing playlists.
 
-An ignored or oversized tag behaves exactly like a missing tag: `=` and
-`~` do not match, `!=` matches, and numeric comparisons do not match. If a
-filter does not behave as expected, run genplis on the file (and with
-`--verbose`) to confirm the tag survived.
+## Missing or discarded tags
 
-Changing either setting invalidates the whole tag cache, so the first run
-afterwards re-reads every file.
+An absent or unknown tag is not an error. Positive tests such as
+`genre = Metal`, `genre ~ Metal`, or `rating >= 4` don't match it, but
+`genre != Metal` does. Zero, `false`, and an empty string are values, not
+missing tags; see [Missing values](m3ug.md#missing-values).
+
+A tag may also be missing because of [tag settings](config.md#tags):
+
+- [`max_size`](config.md#max_size) discards tag values over 1000 UTF-8 bytes
+  by default, often lyrics or long comments. For multiple values, their sizes
+  are added together. Calculated audio properties are exempt.
+- [`ignore`](config.md#ignore) discards named tags, including calculated
+  properties. Use names without `*`, such as `duration`.
+
+Discarded tags behave like absent ones. Changing either setting rebuilds
+the cache automatically. If a song doesn't match as expected, inspect its
+tags first, then use the [filter debugging tools](m3ug.md#testing-and-debugging-filters).
 
 ## See also
 
