@@ -4,9 +4,6 @@ This guide covers everyday commands and playlist behavior. For installation
 and your first playlist, start with the [Quickstart](index.md#quickstart).
 For writing filters, see the [M3UG reference](m3ug.md).
 
-The examples use the installed `genplis` command. If you're working from a
-clone, prefix commands with `uv run` from the project directory.
-
 ## What a run does
 
 When you pass a music directory, genplis:

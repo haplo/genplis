@@ -20,7 +20,7 @@ uv tool install git+https://github.com/haplo/genplis.git
 ```
 
 If you prefer to work from a clone, follow the
-[development setup](dev.md#setup) and prefix commands with `uv run`.
+[development setup](dev.md#setup).
 
 ### 2. Define a playlist
 

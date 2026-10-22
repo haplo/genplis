@@ -25,12 +25,10 @@ installed with `pip` at the moment.
 
 ## Install
 
-Install [uv](https://github.com/astral-sh/uv), then:
+Install [uv](https://github.com/astral-sh/uv), then install genplis from Git:
 
 ```bash
-git clone https://github.com/haplo/genplis.git
-cd genplis
-uv sync
+uv tool install git+https://github.com/haplo/genplis.git
 ```
 
 ## Quick start
@@ -47,7 +45,7 @@ genre ~ "Metal"
 Then scan the collection:
 
 ```bash
-uv run genplis ~/Music
+genplis ~/Music
 ```
 
 Genplis reads the tags of every supported audio file, caches them in SQLite,
@@ -60,20 +58,20 @@ To regenerate just one playlist without processing the other filters in the
 collection, select the filter with `--filter`:
 
 ```bash
-uv run genplis ~/Music --filter ~/Music/Favorites.m3ug
+genplis ~/Music --filter ~/Music/Favorites.m3ug
 ```
 
 To see which tags a file actually has (useful when writing filters):
 
 ```bash
-uv run genplis ~/Music/some-song.mp3
+genplis ~/Music/some-song.mp3
 ```
 
 To inventory every tag in the collection, or every value of one tag:
 
 ```bash
-uv run genplis --tag-stats ~/Music
-uv run genplis -t genre ~/Music
+genplis --tag-stats ~/Music
+genplis -t genre ~/Music
 ```
 
 Filter values are case-insensitive by default; add `@CASE` when case matters.
