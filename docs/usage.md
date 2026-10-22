@@ -292,13 +292,15 @@ for annotated examples.
 
 - A `.m3ug` file named `Favorites.m3ug` produces `Favorites.m3u` in the same
   directory.
-- Files marked `@NO-PLAYLIST` are parsed and may be included, but they never
-  produce an `.m3u` themselves. Any existing playlist is left untouched.
-- Only songs that match the filter expression are included. Plain rules are
-  ANDed; `@OR`, `@NOT`, and sets can express alternatives.
-- Entry order comes from the file's `@sort` directive. Without one,
+- Only songs that match the filter expression are included. Each line applies as
+  a logic `AND`, i.e. they all must pass for a song to match; `@OR`, `@NOT`, and
+  sets can express alternatives.
+- Files marked `@NO-PLAYLIST` are parsed and may be included by other files, but
+  they never produce an `.m3u` themselves. Any existing playlist is left
+  untouched.
+- Entry order comes from the file's `@SORT` directive. Without one,
   `[output] sort` applies; its default is `filename`, the absolute path.
-  Equal keys keep directory-walk order. `@sort random` (optionally with an
+  Equal keys keep directory-walk order. `@SORT random` (optionally with an
   integer seed) shuffles entries. See
   [Ordering](m3ug.md#ordering).
 - `@DEDUPE` keeps the first entry for each key after ordering; entries missing

@@ -1024,7 +1024,7 @@ def test_or_not_and_case_combine_in_any_order() -> None:
 
 
 def test_directives_do_not_end_an_or_group() -> None:
-    parsed = parse_m3ug("genre = Metal\n@sort title\n@OR genre = Rock\nrating >= 4\n")
+    parsed = parse_m3ug("genre = Metal\n@SORT title\n@OR genre = Rock\nrating >= 4\n")
 
     assert parsed.sort == (SortKey("title"),)
     assert parsed.expression is not None
@@ -1220,7 +1220,7 @@ def test_duplicate_dedupe_directive_is_an_error() -> None:
 
 
 def test_sort_directive_is_parsed_with_filters() -> None:
-    parsed = parse_m3ug("@sort artist, album desc\nrating >= 4\n")
+    parsed = parse_m3ug("@SORT artist, album desc\nrating >= 4\n")
 
     assert parsed.sort == (
         SortKey("artist"),
@@ -1230,7 +1230,7 @@ def test_sort_directive_is_parsed_with_filters() -> None:
 
 
 def test_sort_directive_can_appear_after_filters() -> None:
-    parsed = parse_m3ug("rating >= 4\n@sort filename, duration desc\n")
+    parsed = parse_m3ug("rating >= 4\n@SORT filename, duration desc\n")
 
     assert parsed.sort == (
         SortKey("filename"),
@@ -1239,7 +1239,7 @@ def test_sort_directive_can_appear_after_filters() -> None:
 
 
 def test_sort_only_file_has_no_filter_rules() -> None:
-    parsed = parse_m3ug("@sort title\n")
+    parsed = parse_m3ug("@SORT title\n")
 
     assert parsed.rules == ()
     assert parsed.sort == (SortKey("title"),)
@@ -1257,21 +1257,21 @@ def test_sort_directive_is_case_insensitive() -> None:
 def test_duplicate_sort_directive_is_an_error() -> None:
     with pytest.raises(
         GenplisM3UGException,
-        match="Duplicate @sort directive; combine all keys on one line",
+        match="Duplicate @SORT directive; combine all keys on one line",
     ):
-        parse_m3ug("@sort artist\n@sort album\n", "favorites.m3ug")
+        parse_m3ug("@SORT artist\n@SORT album\n", "favorites.m3ug")
 
 
 def test_sort_directive_without_keys_means_walk_order() -> None:
-    parsed = parse_m3ug("@sort\n", "favorites.m3ug")
+    parsed = parse_m3ug("@SORT\n", "favorites.m3ug")
 
     assert parsed.sort == ()
 
 
 def test_sort_random_directive() -> None:
-    assert parse_m3ug("@sort random\n").sort == (SortKey("random"),)
-    assert parse_m3ug("@sort random 42\n").sort == (SortKey("random", seed=42),)
-    assert parse_m3ug("@sort artist, random 7\n").sort == (
+    assert parse_m3ug("@SORT random\n").sort == (SortKey("random"),)
+    assert parse_m3ug("@SORT random 42\n").sort == (SortKey("random", seed=42),)
+    assert parse_m3ug("@SORT artist, random 7\n").sort == (
         SortKey("artist"),
         SortKey("random", seed=7),
     )
@@ -1290,12 +1290,12 @@ def test_sort_random_directive() -> None:
 )
 def test_invalid_random_sort_keys_are_errors(spec: str) -> None:
     with pytest.raises(GenplisM3UGException):
-        parse_m3ug(f"@sort {spec}\n", "favorites.m3ug")
+        parse_m3ug(f"@SORT {spec}\n", "favorites.m3ug")
 
 
 def test_invalid_sort_direction_is_an_error() -> None:
     with pytest.raises(GenplisM3UGException, match="invalid sort direction"):
-        parse_m3ug("@sort artist sideways\n", "favorites.m3ug")
+        parse_m3ug("@SORT artist sideways\n", "favorites.m3ug")
 
 
 def test_unknown_directive_is_an_error() -> None:

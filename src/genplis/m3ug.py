@@ -1474,7 +1474,7 @@ def _parse_m3ug_file(
                     )
                 if not isinstance(own_sort, _Unset):
                     raise GenplisM3UGException(
-                        "Duplicate @sort directive; combine all keys on one line",
+                        "Duplicate @SORT directive; combine all keys on one line",
                         filename,
                         n,
                     )

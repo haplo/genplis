@@ -627,7 +627,7 @@ def test_process_dir_sorts_by_multiple_tags_with_missing_values(
         tmp_path,
         monkeypatch,
         tracks,
-        "@sort artist, album, disc, track, title\n",
+        "@SORT artist, album, disc, track, title\n",
     )
 
     assert entries == ["song-1.mp3", "song-3.mp3", "song-2.mp3", "song-4.mp3"]
@@ -659,7 +659,7 @@ def test_process_dir_sort_keeps_walk_order_for_ties(
         tmp_path,
         monkeypatch,
         tracks,
-        "@sort artist\n",
+        "@SORT artist\n",
     )
 
     assert entries == [path.name for path in walk_order]
@@ -684,7 +684,7 @@ def test_process_dir_random_sort_with_seed_is_reproducible(
         tmp_path,
         monkeypatch,
         tracks,
-        "@sort random 42\nartist = A\n",
+        "@SORT random 42\nartist = A\n",
     )
     walk_order = [
         Path(current) / name
@@ -700,7 +700,7 @@ def test_process_dir_random_sort_with_seed_is_reproducible(
         tmp_path,
         monkeypatch,
         tracks,
-        "@sort random 42\nartist = A\n",
+        "@SORT random 42\nartist = A\n",
     )
 
     assert first == expected
@@ -727,7 +727,7 @@ def test_process_dir_random_shuffles_equal_prefix_runs(
         tmp_path,
         monkeypatch,
         tracks,
-        "@sort artist, random 7\nartist = A\n@OR artist = B\n",
+        "@SORT artist, random 7\nartist = A\n@OR artist = B\n",
     )
 
     assert set(entries[:3]) == {"a1.mp3", "a2.mp3", "a3.mp3"}
@@ -797,7 +797,7 @@ def test_process_dir_sort_without_keys_uses_walk_order(
         tmp_path,
         monkeypatch,
         tracks,
-        "@sort\nartist = A\n",
+        "@SORT\nartist = A\n",
     )
 
     assert entries == [path.name for path in walk_order]
@@ -856,7 +856,7 @@ def test_process_dir_filename_sort_uses_absolute_path(
         tmp_path,
         monkeypatch,
         tracks,
-        "@sort filename\n",
+        "@SORT filename\n",
     )
 
     assert entries == ["a.mp3", "b.mp3"]
@@ -879,7 +879,7 @@ def test_process_dir_sorts_duration_numerically(
         tmp_path,
         monkeypatch,
         tracks,
-        "@sort duration desc\n",
+        "@SORT duration desc\n",
     )
 
     assert entries == ["long.mp3", "short.mp3"]
@@ -1266,7 +1266,7 @@ def test_process_dir_dedupe_keeps_first_after_ordering(
         tmp_path,
         monkeypatch,
         tracks,
-        "@DEDUPE title\n@sort rating desc\nartist = A\n",
+        "@DEDUPE title\n@SORT rating desc\nartist = A\n",
     )
 
     assert entries == ["high.mp3"]
@@ -1362,7 +1362,7 @@ def test_process_dir_sorts_by_derived_rating(
         tmp_path,
         monkeypatch,
         tracks,
-        "@sort rating desc\n",
+        "@SORT rating desc\n",
     )
 
     assert entries == ["high.mp3", "low.mp3"]

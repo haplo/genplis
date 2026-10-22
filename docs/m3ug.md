@@ -23,7 +23,7 @@ genplis and the generated playlist format, see
   filter; a `.m3ug` file cannot be passed as `PATH`.
 - All rules in a file are combined with **AND**. Add `@OR` to a rule to join it
   to the previous rule as an alternative, and `@NOT` to negate one rule.
-- A file may contain directives such as `@sort` to choose the playlist order.
+- A file may contain directives such as `@SORT` to choose the playlist order.
   Without one, the `[output] sort` setting applies (default `filename`).
 - If no song matches, no playlist file is written.
 - An empty `.m3ug` file has no rules and therefore matches every song.
@@ -43,7 +43,7 @@ genre ~ "Heavy Metal"
 rating >= 4
 ```
 
-A file may also contain directives such as `@sort`; they control the playlist
+A file may also contain directives such as `@SORT`; they control the playlist
 and are not filter rules. See [Ordering](#ordering).
 
 Rules about the file itself:
@@ -275,7 +275,7 @@ Directives do not end an OR group. This is still one OR group:
 
 ```text
 genre = Metal
-@sort title
+@SORT title
 @OR genre = Rock
 ```
 
@@ -285,42 +285,42 @@ comparison false. `rating < 4` does not match them.
 ## Ordering
 
 By default, entries are ordered by `[output] sort`, which is `filename` (the
-absolute path) unless configured otherwise. Add one `@sort` line to a `.m3ug`
+absolute path) unless configured otherwise. Add one `@SORT` line to a `.m3ug`
 file to choose a different order for that playlist:
 
 ```text
-@sort tag [asc|desc] [, tag [asc|desc]]...
+@SORT tag [asc|desc] [, tag [asc|desc]]...
 ```
 
 Keys are compared from left to right. The direction applies to the key before
-it and defaults to `asc`. A second `@sort` line is an error; put all keys on
+it and defaults to `asc`. A second `@SORT` line is an error; put all keys on
 one line.
 
 ```text
 # Title, ascending
-@sort title
+@SORT title
 
 # Newest first
-@sort year desc
+@SORT year desc
 
 # Album order
-@sort artist, album, disc, track, title
+@SORT artist, album, disc, track, title
 
 # Highest rated first, then album order
-@sort rating desc, artist, album, disc, track, title
+@SORT rating desc, artist, album, disc, track, title
 ```
 
 `duration` and `filename` are ordinary sort keys too:
 
 ```text
 # Shortest songs first
-@sort duration
+@SORT duration
 
 # Longest songs first
-@sort duration desc
+@SORT duration desc
 
 # Path order, matching the default
-@sort filename
+@SORT filename
 ```
 
 `filename` is the absolute path of the file, not the relative path written
@@ -334,13 +334,13 @@ cannot take `asc` or `desc`:
 
 ```text
 # Shuffle every matching song
-@sort random
+@SORT random
 
 # Reproducible shuffle with a fixed seed
-@sort random 42
+@SORT random 42
 
 # Shuffle within each artist, keeping artists in order
-@sort artist, random 7
+@SORT artist, random 7
 ```
 
 With preceding keys, genplis sorts by those keys and then shuffles equal-key
@@ -348,11 +348,11 @@ runs. With only `random`, it shuffles everything. Without a seed the order
 changes every run; a seed makes it reproducible. Each playlist gets its own
 random generator.
 
-`@sort` with no keys means directory-walk order and overrides both included
+`@SORT` with no keys means directory-walk order and overrides both included
 and configured defaults:
 
 ```text
-@sort
+@SORT
 ```
 
 ### Missing values
@@ -364,7 +364,7 @@ continues to the lower-priority keys. So an entry with a missing `disc` is not
 automatically sent to the bottom of the playlist:
 
 ```text
-@sort artist, album, disc, track, title
+@SORT artist, album, disc, track, title
 ```
 
 | Song | artist | album | disc | track | title |
@@ -797,7 +797,7 @@ uv run genplis --verbose ~/Music
 - No negative or scientific-notation numbers.
 - No inline comments.
 - Numeric comparisons need a numeric rule value; quoted numbers are strings.
-- One `@sort` line per file; combine all keys on that line.
+- One `@SORT` line per file; combine all keys on that line.
 - Missing sort values always go last; there is no nulls-first option.
 - Text sorting is case-insensitive but not locale-aware or natural-number
   aware; numeric-looking values are compared as numbers.

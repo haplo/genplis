@@ -39,9 +39,9 @@ explicitly; `PATH` then remains the directory to scan, and a `.m3ug` file
 cannot be passed as `PATH`. `--exclude` is also special: any `--exclude` option
 replaces the entire configured list rather than adding to it.
 
-`@sort` is also special: a directive in a `.m3ug` file overrides
+`@SORT` is also special: a directive in a `.m3ug` file overrides
 `[output] sort` for that playlist. The configured/built-in value only applies
-to playlists without an `@sort` line.
+to playlists without an `@SORT` line.
 
 ## File format
 
@@ -58,7 +58,7 @@ The file is standard INI syntax with a few strict rules:
 - **Lists are one entry per line.** For `exclude` and `ignore`, each non-empty
   line is one entry. Commas are part of the value, not separators. The
   `[output] sort` option is the exception: it uses the comma-separated key
-  list described below, the same syntax as `@sort`.
+  list described below, the same syntax as `@SORT`.
 - **Paths** may start with `~`. Relative paths are resolved against the config
   file's directory, not the current working directory.
 
@@ -205,7 +205,7 @@ cache behavior and cleaning.
 | `overwrite` | boolean | `true` | `--overwrite` / `--no-overwrite` | Replace playlists that already exist. |
 | `include_source` | boolean | `true` | `--include-source` / `--no-include-source` | Embed the `.m3ug` source as comments at the top of the playlist. |
 | `extended_m3u` | boolean | `true` | `--extended-m3u` / `--no-extended-m3u` | Write an `#EXTM3U` header and `#EXTINF` metadata for every entry. |
-| `sort` | sort keys | `filename` | none | Default entry order. A `.m3ug` file's `@sort` directive overrides it. |
+| `sort` | sort keys | `filename` | none | Default entry order. A `.m3ug` file's `@SORT` directive overrides it. |
 
 With `overwrite = false`, an existing playlist is left untouched and a warning
 is printed.
@@ -226,7 +226,7 @@ extended_m3u = false
 
 ### `sort`
 
-Default entry order for playlists that do not contain an `@sort` directive.
+Default entry order for playlists that do not contain an `@SORT` directive.
 The value is a comma-separated list of tag names, highest-priority key first.
 Each key may be followed by `asc` (the default) or `desc`:
 
@@ -244,16 +244,16 @@ filesystem's directory-walk order.
 sort = rating desc, artist, album, disc, track, title
 ```
 
-An `@sort` line in a `.m3ug` file replaces this setting for that playlist; the
+An `@SORT` line in a `.m3ug` file replaces this setting for that playlist; the
 two are not combined. Set the option to an empty value to preserve
-directory-walk order for playlists without `@sort`:
+directory-walk order for playlists without `@SORT`:
 
 ```ini
 [output]
 sort =
 ```
 
-The `random` key accepts the same syntax as `@sort`: it must be last and may
+The `random` key accepts the same syntax as `@SORT`: it must be last and may
 take an optional integer seed. With preceding keys it shuffles equal-key runs;
 on its own it shuffles the whole playlist.
 

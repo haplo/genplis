@@ -1,4 +1,4 @@
 # long songs
 duration >= 5m
 # longest first
-@sort duration desc
+@SORT duration desc

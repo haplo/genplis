@@ -31,7 +31,7 @@ src/genplis/
     config.py       INI loading and validation
     db.py           SQLite cache
     tags.py         tag extraction and calculated properties
-    m3ug.py         filter, directive and @sort parser, rule nodes
+    m3ug.py         filter, directive and @SORT parser, rule nodes
     diagnostics.py  rule trees, evaluation traces, selection rendering
     output.py       color themes, terminal detection, output streams
     sorting.py      sort specs, value normalization, comparison
@@ -209,7 +209,7 @@ Invariants:
   in the main process.
 - **Playlist order is the effective sort spec, with walk order as the final
   tie-breaker.** Each audio file gets a walk-order index and, for every
-  playlist it matches, the normalized keys for that playlist's `@sort` or the
+  playlist it matches, the normalized keys for that playlist's `@SORT` or the
   configured default (`filename`). Cache hits are evaluated during the walk
   and worker results are evaluated as they arrive; matches are sorted by the
   keys before playlists are written. `all_tags` is only rebuilt in walk order
@@ -399,7 +399,7 @@ and add tests next to the existing `fmps_rating` tests. Document the scale in
 ### Changing ordering
 
 `sorting.py` owns the sort grammar (`parse_sort_spec`), value normalization,
-and comparison. `M3UGFile.sort` is `None` when a file has no `@sort`, so the
+and comparison. `M3UGFile.sort` is `None` when a file has no `@SORT`, so the
 configured `[output] sort` applies; an explicit spec (including an empty one
 for walk order) overrides it. The special `random` key must be last; core
 sorts the preceding keys, then shuffles equal runs with a per-playlist
