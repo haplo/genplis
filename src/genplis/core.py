@@ -67,6 +67,7 @@ class Mode(Enum):
 
     PROCESS = auto()
     TAG_STATS = auto()
+    SHOW_RULES = auto()
 
 
 @dataclass(frozen=True, slots=True)
@@ -227,6 +228,14 @@ def setup_argparse() -> argparse.ArgumentParser:
         action="store_true",
     )
     mode_group.add_argument(
+        "--show-rules",
+        help=(
+            "Parse .m3ug files and print their rule trees without scanning "
+            "audio or writing playlists."
+        ),
+        action="store_true",
+    )
+    mode_group.add_argument(
         "--tag-stats",
         dest="tag_stats",
         help=(
@@ -303,6 +312,8 @@ def resolve_args(args: argparse.Namespace, config: Config) -> Args:
     """
     if args.clean and args.tags:
         raise GenplisConfigError("--tag cannot be combined with --clean")
+    if args.show_rules and args.tags:
+        raise GenplisConfigError("--tag cannot be combined with --show-rules")
 
     requested_tags: list[str] = []
     for raw_tag in args.tags or ():
@@ -311,7 +322,12 @@ def resolve_args(args: argparse.Namespace, config: Config) -> Args:
             raise GenplisConfigError("tag name must not be empty")
         requested_tags.append(name)
     tags = tuple(dict.fromkeys(requested_tags))
-    mode = Mode.TAG_STATS if args.tag_stats or tags else Mode.PROCESS
+    if args.show_rules:
+        mode = Mode.SHOW_RULES
+    elif args.tag_stats or tags:
+        mode = Mode.TAG_STATS
+    else:
+        mode = Mode.PROCESS
 
     if args.path is not None:
         path = args.path
@@ -486,6 +502,53 @@ def process_path(conn: sqlite3.Connection, cursor: sqlite3.Cursor, args: Args) -
             file=sys.stderr,
         )
         sys.exit(1)
+
+
+def show_rules(args: Args) -> None:
+    """Print parsed rule trees without touching the cache or audio files."""
+    if args.path is None:
+        raise GenplisError("Attempted to show rules but no path was given")
+    path = args.path.expanduser()
+
+    if path.is_file():
+        if path.suffix.lower() != ".m3ug":
+            raise GenplisError(f"{path} is not a .m3ug filter")
+        parsed = parse_m3ug(
+            path.read_text(encoding="utf-8-sig"),
+            str(path),
+            args.verbosity,
+        )
+        if args.verbosity is not Verbosity.REALLY_QUIET:
+            print(
+                format_filter_tree(
+                    parsed,
+                    title=str(path),
+                    default_sort=args.config.output.sort,
+                )
+            )
+        return
+
+    if not path.is_dir():
+        raise GenplisError(f"{path} must be a .m3ug file or a directory")
+
+    found = 0
+    for filter_file in _walk_files(path, args, report_skips=False, only_m3ug=True):
+        parsed = parse_m3ug(
+            filter_file.read_text(encoding="utf-8-sig"),
+            str(filter_file),
+            args.verbosity,
+        )
+        if args.verbosity is not Verbosity.REALLY_QUIET:
+            print(
+                format_filter_tree(
+                    parsed,
+                    title=str(filter_file),
+                    default_sort=args.config.output.sort,
+                )
+            )
+        found += 1
+    if found == 0 and args.verbosity is not Verbosity.REALLY_QUIET:
+        print(f"No filters found in {path}")
 
 
 def display_tag_stats(
@@ -1143,7 +1206,12 @@ def _run(args: Args) -> None:
             print(f"Using config file {args.config.source}")
         else:
             print("No config file found; using defaults")
-        print(f"Using {args.db_path} for genplis DB")
+        if args.mode is not Mode.SHOW_RULES:
+            print(f"Using {args.db_path} for genplis DB")
+
+    if args.mode is Mode.SHOW_RULES:
+        show_rules(args)
+        return
 
     if args.path is None and not args.db_path.exists():
         if args.verbosity.shows_normal_output:
