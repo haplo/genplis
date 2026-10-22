@@ -403,9 +403,6 @@ class NameNode:
     def __repr__(self) -> str:
         return f"<Name={self.name}>"
 
-    def __str__(self) -> str:
-        return self.name
-
     @classmethod
     def build(cls, name: object, filename: str, line: int) -> Self:
         if not isinstance(name, str):
@@ -438,11 +435,6 @@ class ValueNode:
 
     def __repr__(self) -> str:
         return f"<Value={self.value}>"
-
-    def __str__(self) -> str:
-        if isinstance(self.value, bool):
-            return "true" if self.value else "false"
-        return str(self.value)
 
     @classmethod
     def build(cls, value: object, filename: str, line: int) -> Self:
@@ -536,9 +528,6 @@ class RuleNode:
 
     def __repr__(self) -> str:
         return f"Rule=<{self.name_node}, {self.OPERATOR}, {self.value_node}>"
-
-    def __str__(self) -> str:
-        return f"{self.name_node} {self.OPERATOR} {self.value_node}"
 
     @classmethod
     def build(
@@ -886,21 +875,6 @@ def _leaf_rules(node: FilterNode | None) -> tuple[RuleNode, ...]:
     if isinstance(node, NotNode):
         return _leaf_rules(node.node)
     return ()
-
-
-def format_expression(node: FilterNode | None) -> str:
-    """Format a filter expression for verbose diagnostics."""
-    if node is None:
-        return "(always)"
-    if isinstance(node, RuleNode):
-        return str(node)
-    if isinstance(node, NotNode):
-        return f"NOT ({format_expression(node.node)})"
-    if isinstance(node, OrNode):
-        return "(" + " OR ".join(format_expression(child) for child in node.nodes) + ")"
-    if isinstance(node, AndNode):
-        return " AND ".join(format_expression(child) for child in node.nodes)
-    return str(node)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1426,11 +1400,6 @@ def _parse_m3ug_file(
         )
     else:
         expression = own_expression
-    if verbosity.is_verbose:
-        print("Parsed rules:")
-        print(format_expression(expression))
-        print()
-
     parsed = M3UGFile(
         filename=filename,
         expression=expression,

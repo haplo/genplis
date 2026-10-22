@@ -14,6 +14,7 @@ import psutil
 
 from . import db
 from .config import Config, load_config
+from .diagnostics import format_filter_tree
 from .exceptions import GenplisConfigError, GenplisError
 from .executors import (
     ParseItem,
@@ -27,7 +28,6 @@ from .m3ug import (
     LimitPerTag,
     M3UGFile,
     NameNode,
-    format_expression,
     get_rating,
     parse_m3ug,
 )
@@ -452,17 +452,14 @@ def process_path(conn: sqlite3.Connection, cursor: sqlite3.Cursor, args: Args) -
         tags, parsed, cache_status = process_file(conn, cursor, path, args)
         if tags is not None and args.verbosity.shows_normal_output:
             display_file_tags(path, tags, cache_status)
-        if (
-            parsed is not None or path.suffix.lower() == ".m3ug"
-        ) and args.verbosity.shows_normal_output:
-            print(f"{path} detected as M3UG file")
-            print("Parsed filters:")
-            if parsed is not None:
-                print(f"    {format_expression(parsed.expression)}")
-                if parsed.sort is not None:
-                    print(f"    sort: {format_sort_spec(parsed.sort)}")
-                if parsed.no_playlist:
-                    print("    no playlist will be generated (@NO-PLAYLIST)")
+        if parsed is not None and args.verbosity.shows_normal_output:
+            print(
+                format_filter_tree(
+                    parsed,
+                    title=f"{path} detected as M3UG file",
+                    default_sort=args.config.output.sort,
+                )
+            )
         if is_excluded(path, args) and args.verbosity.shows_normal_output:
             print("WARNING: This file is excluded by current configuration.")
         if parsed is not None:
@@ -824,11 +821,19 @@ def process_directory(
 
     start_time = timer()
 
-    all_filters = (
-        dict(filters)
-        if filters is not None
-        else _discover_filters(conn, cursor, directory, args)
-    )
+    if filters is None:
+        all_filters = _discover_filters(conn, cursor, directory, args)
+        if args.verbosity.is_verbose:
+            for filter_file, parsed in all_filters.items():
+                print(
+                    format_filter_tree(
+                        parsed,
+                        title=str(filter_file),
+                        default_sort=args.config.output.sort,
+                    )
+                )
+    else:
+        all_filters = dict(filters)
     matches: dict[Path, list[Match]] = {filter_file: [] for filter_file in all_filters}
     retained: dict[int, tuple[Path, Tags]] | None = {} if retain_tags else None
     processed = 0

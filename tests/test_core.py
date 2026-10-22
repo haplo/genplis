@@ -150,8 +150,11 @@ def test_process_path_prints_m3ug_filters(
 
     output = capsys.readouterr().out
     assert f"{filter_file} detected as M3UG file" in output
-    assert "Parsed filters:" in output
-    assert "    rating >= 3 AND genre ~ Metal" in output
+    assert "  AND" in output
+    assert "    rating >= 3 (line 1)" in output
+    assert '    genre ~ "Metal" (line 2)' in output
+    assert "    sort: filename (default)" in output
+    assert "Parsed filters:" not in output
     assert "detected as music file" not in output
     assert "Parsed tags:" not in output
 
@@ -1385,7 +1388,7 @@ def test_process_path_reports_no_playlist(
     process_path(genplis_db, genplis_db.cursor(), make_args(str(filter_file)))
 
     output = capsys.readouterr().out
-    assert "no playlist will be generated (@NO-PLAYLIST)" in output
+    assert "    no playlist: yes (@NO-PLAYLIST)" in output
 
 
 def test_process_dir_does_not_create_playlist_when_no_song_matches(
@@ -1485,6 +1488,33 @@ def test_process_dir_verbose_lists_matching_songs(
     assert f"Files that match the filter {filter_file}:" in output
     assert f"  {ogg}" in output
     assert f"  {mp3}" not in output
+
+
+def test_process_dir_verbose_prints_each_filter_tree_once(
+    genplis_db: sqlite3.Connection,
+    make_args: Callable[..., Args],
+    file_m3ug: Path,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    filter_file = tmp_path / file_m3ug.name
+    shutil.copy2(file_m3ug, filter_file)
+    args = make_args(str(tmp_path), verbosity=Verbosity.VERBOSE)
+
+    _, all_filters = process_directory(genplis_db, genplis_db.cursor(), tmp_path, args)
+    output = capsys.readouterr().out
+    assert output.count(f"{filter_file}\n  AND") == 1
+    assert "Parsed rules:" not in output
+
+    process_directory(
+        genplis_db,
+        genplis_db.cursor(),
+        tmp_path,
+        args,
+        filters=all_filters,
+    )
+    rerun_output = capsys.readouterr().out
+    assert f"{filter_file}\n  AND" not in rerun_output
 
 
 def test_process_dir_generates_playlist_relative_to_nested_filter_file(

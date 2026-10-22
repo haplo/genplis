@@ -22,7 +22,6 @@ from genplis.m3ug import (
     SourceLocation,
     StartsWithRuleNode,
     ValueNode,
-    format_expression,
     get_rating,
     parse_duration_literal,
     parse_m3ug,
@@ -827,19 +826,21 @@ def test_expression_tree_flattens_rules() -> None:
     parsed = parse_m3ug("artist = X\nrating >= 4\n")
 
     assert isinstance(parsed.expression, AndNode)
+    assert isinstance(parsed.own_expression, AndNode)
+    assert len(parsed.own_expression.nodes) == 2
     assert parsed.rules == (
         EqualRuleNode(NameNode("artist"), ValueNode("X")),
         GreaterOrEqualRuleNode(NameNode("rating"), ValueNode(4)),
     )
-    assert format_expression(parsed.expression) == "artist = X AND rating >= 4"
 
 
 def test_empty_expression_matches_everything() -> None:
     parsed = parse_m3ug("\n")
 
     assert parsed.expression is None
+    assert parsed.own_expression is None
+    assert parsed.includes == ()
     assert parsed.rules == ()
-    assert format_expression(parsed.expression) == "(always)"
 
 
 def test_expression_nodes_apply_logic() -> None:
@@ -849,10 +850,7 @@ def test_expression_nodes_apply_logic() -> None:
     assert AndNode((first, second)).apply({"artist": "X", "genre": "Metal"})
     assert OrNode((first, second)).apply({"artist": "X", "genre": "Rock"})
     assert NotNode(first).apply({"artist": "Y"})
-    assert format_expression(OrNode((first, second))) == (
-        "(artist = X OR genre = Metal)"
-    )
-    assert format_expression(NotNode(first)) == "NOT (artist = X)"
+    assert not OrNode((first, second)).apply({"artist": "Y"})
 
 
 def test_or_groups_rules_in_cnf() -> None:
@@ -861,9 +859,7 @@ def test_or_groups_rules_in_cnf() -> None:
     assert isinstance(parsed.expression, AndNode)
     assert len(parsed.expression.nodes) == 2
     assert isinstance(parsed.expression.nodes[0], OrNode)
-    assert format_expression(parsed.expression) == (
-        "(genre = Metal OR genre = Rock) AND rating >= 4"
-    )
+    assert len(parsed.expression.nodes[0].nodes) == 2
     assert parsed.expression.apply({"genre": "Metal", "rating": 5})
     assert parsed.expression.apply({"genre": "Rock", "rating": 4})
     assert not parsed.expression.apply({"genre": "Pop", "rating": 5})
@@ -886,8 +882,8 @@ def test_not_negates_one_rule() -> None:
     parsed = parse_m3ug("@NOT rating >= 4\n")
 
     assert isinstance(parsed.expression, AndNode)
-    assert isinstance(parsed.expression.nodes[0], NotNode)
-    assert format_expression(parsed.expression) == "NOT (rating >= 4)"
+    assert isinstance(parsed.own_expression, AndNode)
+    assert isinstance(parsed.own_expression.nodes[0], NotNode)
     assert parsed.expression.apply({"rating": 3})
     assert not parsed.expression.apply({"rating": 4})
     assert parsed.expression.apply({})
