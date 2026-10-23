@@ -123,6 +123,7 @@ Application modules live under `src/genplis/`:
 | `diagnostics.py` | Rule trees, evaluation traces, selection output |
 | `output.py` | Output streams, palettes, terminal detection, progress |
 | `stats.py` | Tag statistics collection and rendering |
+| `skill.py` | Safe installation of the packaged M3UG authoring skill |
 | `types.py` | Shared types |
 | `files.py` | File helpers |
 | `json.py` | JSON serialization |
@@ -156,6 +157,8 @@ for user-visible behavior.
 `resolve_args` chooses one `core.Mode`: `PROCESS`, `TAG_STATS`, `SHOW_RULES`,
 `TRACE`, or `TRACE_FULL`.
 
+- `--install-skill` is a standalone early exit before loading configuration
+  or resolving collection arguments; it never accesses the database.
 - `SHOW_RULES` branches before database setup.
 - Trace modes load the target through the cache. Full traces use `dry_run`
   and `SelectionTrace` to record selection decisions without writing playlists;
@@ -342,6 +345,25 @@ rather than duplicating settings or language rules.
 - Check incoming links when renaming headings, then run the strict website
   build to validate local links and anchors.
 
+### Packaged agent skill
+
+Edit [agent-instructions.md](agent-instructions.md), not the generated
+`src/genplis/skills/genplis/SKILL.md`. The canonical language, tag, and usage
+guides supply its offline references. After changing those documents or the
+package version, regenerate the checked-in package resources:
+
+```bash
+uv run python scripts/sync_skill.py
+uv run python -m pytest tests/test_skill.py
+```
+
+The generator records the package version, adjusts instruction links to the
+bundled references, and points links to unbundled guides at GitHub. A test
+rejects drift between documentation and packaged resources. Hatch includes
+the resources in the wheel and source distribution without custom build hooks.
+The installed-distribution smoke test also installs both skill targets into
+a temporary home directory.
+
 ## Website development
 
 The [website](https://haplo.github.io/genplis/) uses Zensical. Its dependencies
@@ -444,6 +466,7 @@ repository. PyPI publishing is still pending.
 - [x] Website
 - [ ] Improve Windows support (**help wanted**).
 - [ ] Improve macOS support (**help wanted**).
+- [x] [AI agent skill](agents.md).
 - [ ] Publish to PyPI.
 
 Suggestions and contributions are welcome in

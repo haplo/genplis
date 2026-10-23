@@ -59,6 +59,7 @@ genplis ~/Music/some-song.mp3
 | --- | --- |
 | Understand commands, options, playlists, or the cache | [Usage guide](usage.md) |
 | Write more expressive filters | [M3UG reference](m3ug.md) |
+| Have an AI agent write filters for my library | [AI agents](agents.md) |
 | Copy a ready-made playlist definition | [M3UG Examples](https://github.com/haplo/genplis/tree/main/examples) |
 | Set defaults for my collection | [Configuration](config.md) |
 | Find usable tags or understand rating scales | [Tags](tags.md) |

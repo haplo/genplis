@@ -4,6 +4,11 @@ This guide covers everyday commands and playlist behavior. For installation
 and your first playlist, start with the [Quickstart](index.md#quickstart).
 For writing filters, see the [M3UG reference](m3ug.md).
 
+To have an AI agent write filters tailored to your collection, install the
+bundled skill with `genplis --install-skill` (Codex/OpenCode) or
+`genplis --install-skill claude` (Claude Code). See [AI agents](agents.md)
+for setup, examples, and update behavior.
+
 ## What a run does
 
 When you pass a music directory, genplis:
@@ -39,7 +44,8 @@ genplis ~/Music/some-song.mp3
 ```
 
 Calculated properties such as `*duration` are displayed with a `*` prefix.
-Leave it off in filters: write `duration < 5m`, not `*duration < 5m`.
+Use it in filters to explicitly select a calculated value, as in
+`*duration < 5m`; the unprefixed `duration < 5m` form is also supported.
 
 See [Tags](tags.md#common-tags) for commonly available names.
 

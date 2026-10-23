@@ -19,6 +19,8 @@ nav = [
     { "M3UG Examples" = "docs/examples.md" },
     { "Configuration" = "docs/config.md" },
     { "Tags" = "docs/tags.md" },
+    { "AI agents" = "docs/agents.md" },
+    { "Agent instructions" = "docs/agent-instructions.md" },
     { "Scheduling" = "docs/scheduling.md" },
     { "Development" = "docs/dev.md" },
   ] },

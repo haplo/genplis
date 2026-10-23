@@ -79,6 +79,13 @@ rule. Genplis tries its best to calculate a normalized `*rating`, if it doesn't
 work for you [open an issue asking for
 support](https://github.com/haplo/genplis/issues).
 
+## AI agents
+
+**Using an AI agent?** Run `genplis --install-skill` for Codex/OpenCode or
+`genplis --install-skill claude` for Claude Code. The bundled skill teaches
+your agent to inspect your library and write and validate M3UG filters.
+See the [agent guide](https://github.com/haplo/genplis/blob/main/docs/agents.md).
+
 ## Documentation
 
 Visit the **[Genplis website](https://haplo.github.io/genplis/)** for the
@@ -92,6 +99,7 @@ The guides below are the same Markdown sources used by the website.
 | [Configuration](https://github.com/haplo/genplis/blob/main/docs/config.md) | Config locations, precedence, all settings and defaults, cache invalidation |
 | [M3UG reference](https://github.com/haplo/genplis/blob/main/docs/m3ug.md) | Rule syntax, operators, ordering, dedupe, limits, includes, filter debugging |
 | [Tags](https://github.com/haplo/genplis/blob/main/docs/tags.md) | Tag names and units, multi-value rules, ratings, statistics, missing tags |
+| [AI agents](https://github.com/haplo/genplis/blob/main/docs/agents.md) | Install the portable skill or use the agent instructions directly |
 | [Scheduling](https://github.com/haplo/genplis/blob/main/docs/scheduling.md) | Systemd and cron setup, logs, missed runs, troubleshooting |
 | [Development](https://github.com/haplo/genplis/blob/main/docs/dev.md) | Contributor setup, checks, architecture, website, releases, roadmap |
 | [Examples](https://github.com/haplo/genplis/tree/main/examples) | Ready-to-copy `.m3ug` filters and `config.ini` |

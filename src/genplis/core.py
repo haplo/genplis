@@ -46,6 +46,7 @@ from .m3ug import (
     parse_m3ug,
 )
 from .output import ColorRole, Output, Palette, Progress, Theme
+from .skill import install_skill
 from .sorting import (
     SortSpec,
     SortValue,
@@ -191,6 +192,24 @@ def non_negative_int(arg_value: str) -> int:
 def setup_argparse() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Generate music playlists from your own filters."
+    )
+    parser.add_argument("--version", action="version", version=f"genplis {__version__}")
+    skill_group = parser.add_argument_group("Agent skill installation")
+    skill_group.add_argument(
+        "--install-skill",
+        nargs="?",
+        const="agents",
+        choices=("agents", "claude"),
+        help=(
+            "Install the bundled M3UG authoring skill to ~/.agents/skills "
+            "(default, Codex/OpenCode) or ~/.claude/skills (claude). "
+            "No collection, configuration, or cache is accessed."
+        ),
+    )
+    skill_group.add_argument(
+        "--force",
+        action="store_true",
+        help="With --install-skill, replace differing bundled skill files",
     )
     parser.add_argument(
         "path",
@@ -2009,6 +2028,36 @@ def _run(args: Args) -> None:
         conn.close()
 
 
+def _install_agent_skill(
+    parser: argparse.ArgumentParser, raw_args: argparse.Namespace
+) -> None:
+    """Handle standalone installation before resolving collection configuration."""
+    allowed = {"install_skill", "force", "quiet", "verbose", "color", "theme"}
+    defaults = vars(parser.parse_args([]))
+    if any(
+        value != defaults[name]
+        for name, value in vars(raw_args).items()
+        if name not in allowed
+    ):
+        parser.error(
+            "--install-skill cannot be combined with collection, playlist, "
+            "inspection, or configuration options"
+        )
+    theme = Theme(raw_args.theme) if raw_args.theme is not None else Theme.AUTO
+    try:
+        destination = install_skill(raw_args.install_skill, force=raw_args.force)
+    except GenplisError as exc:
+        error_out = Output.create(sys.stderr, color=raw_args.color, theme=theme)
+        parser.exit(1, f"{error_out.palette.error('genplis: error:')} {exc}\n")
+    if raw_args.quiet < 2:
+        out = Output.create(sys.stdout, color=raw_args.color, theme=theme)
+        out.line(f"Genplis skill installed at {destination}")
+        out.line(
+            "Ask your agent to use the genplis skill to create an M3UG playlist. "
+            "If it is not listed, restart the agent session."
+        )
+
+
 def main() -> None:
     # Set up argparse
     parser = setup_argparse()
@@ -2016,6 +2065,11 @@ def main() -> None:
 
     if raw_args.quiet and raw_args.verbose:
         parser.error("--quiet cannot be combined with --verbose")
+    if raw_args.force and raw_args.install_skill is None:
+        parser.error("--force requires --install-skill")
+    if raw_args.install_skill is not None:
+        _install_agent_skill(parser, raw_args)
+        return
     if raw_args.clean and raw_args.tags:
         parser.error("--tag cannot be combined with --clean")
 
