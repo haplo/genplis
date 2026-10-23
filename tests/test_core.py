@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 from pytest import approx
 
+from genplis import __version__
 from genplis.config import (
     CollectionConfig,
     Config,
@@ -56,6 +57,20 @@ from genplis.m3ug import (
 from genplis.output import Output, Palette, Theme
 from genplis.sorting import parse_sort_spec
 from genplis.types import Tags, TagValue, Verbosity
+
+
+def test_main_version_exits_without_loading_config(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def unexpected_config(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("--version must not load configuration or open the cache")
+
+    monkeypatch.setattr("genplis.core.load_config", unexpected_config)
+    monkeypatch.setattr(sys, "argv", ["genplis", "--version"])
+    with pytest.raises(SystemExit) as exc_info:
+        main()
+    assert exc_info.value.code == 0
+    assert capsys.readouterr().out == f"genplis {__version__}\n"
 
 
 def test_process_audio_file(

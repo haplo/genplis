@@ -57,7 +57,7 @@ uv run pre-commit install
 ### Building
 ```bash
 # Build package
-uv run python -m build
+uv build --no-sources
 
 # Install in development mode
 uv run python -m pip install -e .
@@ -178,6 +178,11 @@ from genplis.exceptions import GenplisError
 - Update README.md and the relevant docs/ page for user-facing changes; keep
   README short and link to docs with absolute GitHub URLs
 - Use TODO comments in code for future improvements
+- Record user-visible changes under `[Unreleased]` in `CHANGELOG.md` in the
+  same change. Internal refactors, tests, and CI-only changes need no entry.
+- Keep the version in `pyproject.toml` (use `uv version`); `__version__` reads
+  installed metadata. Releases use annotated `vX.Y.Z` tags, and GitHub Release
+  notes come from `CHANGELOG.md`. See `docs/dev.md` for the release checklist.
 
 ### Performance Considerations
 - Cache parsed tags in SQLite database
@@ -214,6 +219,7 @@ from genplis.exceptions import GenplisError
 ## Important Files
 
 - `pyproject.toml`: Project configuration, dependencies, tool settings
+- `CHANGELOG.md`: Curated release history and unreleased user-visible changes
 - `.pre-commit-config.yaml`: Pre-commit hooks configuration
 - `src/genplis/`: Main source code directory
 - `src/genplis/types.py`: Shared type aliases (`TagValue`, `Tags`)

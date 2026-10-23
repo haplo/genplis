@@ -13,7 +13,7 @@ from timeit import default_timer as timer
 
 import psutil
 
-from . import db
+from . import __version__, db
 from .config import Config, load_config
 from .diagnostics import (
     FileTrace,

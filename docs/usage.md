@@ -4,6 +4,9 @@ This guide covers everyday commands and playlist behavior. For installation
 and your first playlist, start with the [Quickstart](index.md#quickstart).
 For writing filters, see the [M3UG reference](m3ug.md).
 
+Run `genplis --version` to check the installed version and `genplis --help`
+for the complete command-line reference.
+
 To have an AI agent write filters tailored to your collection, install the
 bundled skill with `genplis --install-skill` (Codex/OpenCode) or
 `genplis --install-skill claude` (Claude Code). See [AI agents](agents.md)

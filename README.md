@@ -1,6 +1,8 @@
 # Genplis: a music playlist generator
 
 [![CI](https://github.com/haplo/genplis/actions/workflows/ci.yml/badge.svg)](https://github.com/haplo/genplis/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/genplis)](https://pypi.org/project/genplis/)
+[![Python](https://img.shields.io/pypi/pyversions/genplis)](https://pypi.org/project/genplis/)
 
 *Genplis* generates M3U playlists from a collection of music files by looking
 at their tags and audio properties, applying user-defined filters, and
@@ -20,16 +22,23 @@ years and I wanted playlists like "my favorite songs", "80s music", or
 Python 3.12 or later. Python 3.10 and 3.11 might work, but they are untested
 and unsupported.
 
-*genplis* is not published to [PyPI](https://pypi.org/) yet, so it cannot be
-installed with `pip` at the moment.
-
 ## Install
 
-Install [uv](https://github.com/astral-sh/uv), then install genplis from Git:
+With [uv](https://github.com/astral-sh/uv):
 
 ```bash
-uv tool install git+https://github.com/haplo/genplis.git
+uv tool install genplis
 ```
+
+With [pipx](https://pipx.pypa.io/stable/):
+
+```bash
+pipx install genplis
+```
+
+You can also `pip install genplis` inside a virtual environment.
+
+Verify the installation with `genplis --version`.
 
 ## Quick start
 
@@ -103,6 +112,7 @@ The guides below are the same Markdown sources used by the website.
 | [Scheduling](https://github.com/haplo/genplis/blob/main/docs/scheduling.md) | Systemd and cron setup, logs, missed runs, troubleshooting |
 | [Development](https://github.com/haplo/genplis/blob/main/docs/dev.md) | Contributor setup, checks, architecture, website, releases, roadmap |
 | [Examples](https://github.com/haplo/genplis/tree/main/examples) | Ready-to-copy `.m3ug` filters and `config.ini` |
+| [Changelog](https://github.com/haplo/genplis/blob/main/CHANGELOG.md) | Notable changes in each release |
 
 ## Acknowledgments
 
@@ -112,4 +122,5 @@ with no additional dependencies.
 
 ## License
 
-[GPL-3.0](https://github.com/haplo/genplis/blob/main/LICENSE).
+[GPL-3.0-or-later](https://github.com/haplo/genplis/blob/main/LICENSE): GNU
+General Public License, either version 3 or (at your option) any later version.

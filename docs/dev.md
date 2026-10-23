@@ -424,14 +424,102 @@ to **GitHub Actions**. No `gh-pages` branch or personal token is needed.
 
 ## Release
 
-Update the version in `pyproject.toml`, then build the distributions:
+Versions live in `pyproject.toml`; `genplis --version` reads the installed
+distribution metadata. Use Semantic Versioning for the CLI, configuration,
+and documented M3UG language, not internal Python APIs or the disposable
+cache format.
+
+Keep notable user-visible changes under `[Unreleased]` in the root
+[CHANGELOG.md](https://github.com/haplo/genplis/blob/main/CHANGELOG.md).
+Use Keep a Changelog categories (`Added`, `Changed`, `Deprecated`, `Removed`,
+`Fixed`, `Security`) only when needed. Internal refactors and CI-only changes
+need no entry. At release time, move entries into a dated version section,
+leave an empty `[Unreleased]`, and update the comparison links. GitHub Release
+notes are extracted from this file, not generated from commit messages.
+
+### One-time publishing setup
+
+1. Enable 2FA on the PyPI account that will own `genplis`.
+2. Before the first upload, add a **pending trusted publisher** on PyPI:
+   project `genplis`, GitHub owner `haplo`, repository `genplis`, workflow
+   filename `release.yml`, environment `pypi`. After the first upload, this
+   becomes the project's trusted publisher. No API token is stored in GitHub.
+3. Create the GitHub repository environment `pypi`. Restrict deployments to
+   release tags and require approval if available for the repository/account.
+4. Protect `v*` tags against deletion or updates. Restrict who can create them.
+
+### Prepare and verify a release
+
+Finish unrelated work first. Prepare release changes on a branch and merge
+them into `main` after checks pass. The first release is **1.0.0**, directly
+to PyPI, without an RC or TestPyPI release.
+
+1. Run `uv version 1.0.0 --no-sync` (substitute the next version for later
+   releases). Review the `pyproject.toml` and `uv.lock` diff; avoid unrelated
+   dependency upgrades.
+2. Date the changelog entry using the intended release day (`YYYY-MM-DD`),
+   and verify installation instructions and links.
+3. Validate the tag/version/changelog combination and run checks:
 
 ```bash
-uv build
+uv run --locked python scripts/release.py v1.0.0
+uv run --locked pre-commit run --all-files
+uv run --locked python -m pytest
 ```
 
-The wheel packages `src/genplis`; documentation and examples remain in the
-repository. PyPI publishing is still pending.
+4. Build into a **new, empty directory** to avoid uploading old artifacts:
+
+```bash
+uv build --no-sources --out-dir /tmp/opencode/genplis-1.0.0-dist
+uvx twine check --strict /tmp/opencode/genplis-1.0.0-dist/*
+uv run --isolated --no-project --with /tmp/opencode/genplis-1.0.0-dist/*.whl python scripts/smoke_release.py 1.0.0
+uv run --isolated --no-project --with /tmp/opencode/genplis-1.0.0-dist/*.tar.gz python scripts/smoke_release.py 1.0.0
+uv publish --dry-run /tmp/opencode/genplis-1.0.0-dist/*
+```
+
+Use an appropriate empty temporary path on other machines. The smoke test
+runs against installed artifacts, not `src/`, and checks both entry points
+plus sequential, multi-process, and warm-cache playlist generation using
+copies of the test media. Inspect the wheel and sdist contents too: the wheel
+must include `py.typed`, the license, entry points, and package modules, not
+local caches or benchmark outputs. The sdist must build without git metadata.
+
+5. Stage only the release changes, run `uv run pre-commit run` **after
+   staging**, fix/re-stage if needed, and commit. Merge and wait for CI and
+   website checks on `main` before creating the annotated tag:
+
+```bash
+git switch main
+git pull --ff-only github main
+git tag -a v1.0.0 -m "genplis 1.0.0"
+git push github v1.0.0
+```
+
+### Automated publishing and verification
+
+`.github/workflows/release.yml` runs on stable `vX.Y.Z` tag pushes. It reuses
+the full CI checks (including Python 3.12–3.15 tests), validates the tag and
+dated changelog entry, builds the wheel and sdist, checks metadata/README,
+and smoke-tests both installed artifacts. Artifacts are built only once.
+
+The separate `publish` job downloads these verified artifacts and uses PyPI
+Trusted Publishing (OIDC), with `id-token: write` restricted to that job and
+the `pypi` environment. Only after publishing succeeds does a separate job
+create the GitHub Release with curated notes and the same wheel/sdist.
+
+Verify the workflow, PyPI README/links, and GitHub Release notes/assets, then
+test an index installation outside the checkout:
+
+```bash
+uv run --isolated --no-project --refresh-package genplis --with genplis==1.0.0 genplis --version
+```
+
+Leave the package version at the released version until preparing the next
+release. If a job fails, prefer **re-running failed jobs** to preserve the
+original build artifacts. PyPI accepts retries of identical files, but does
+not allow replacing an uploaded distribution. Never move a published tag:
+fix a broken release with a new patch version (and yank the bad version on
+PyPI if necessary). The GitHub Release job can be retried independently.
 
 ## Roadmap
 

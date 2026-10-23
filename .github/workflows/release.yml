@@ -1,0 +1,106 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+
+permissions:
+  contents: read
+
+env:
+  UV_EXCLUDE_NEWER: "7 days"
+
+concurrency:
+  # Called CI uses github.workflow ("Release"); keep a distinct group so its
+  # cancel-in-progress setting cannot cancel the publishing workflow itself.
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  checks:
+    name: Release checks
+    uses: ./.github/workflows/ci.yml
+
+  build:
+    name: Build and verify distributions
+    needs: checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v10.3.0
+        with:
+          python-version: "3.12"
+      - name: Validate tag and extract changelog notes
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: python scripts/release.py "$RELEASE_TAG" > release-notes.md
+      - name: Build wheel and source distribution
+        run: uv build --no-sources
+      - name: Check distribution metadata and README
+        run: uvx twine check --strict dist/*
+      - name: Smoke test installed wheel
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: uv run --isolated --no-project --with dist/*.whl python scripts/smoke_release.py "${RELEASE_TAG#v}"
+      - name: Smoke test installed source distribution
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: uv run --isolated --no-project --with dist/*.tar.gz python scripts/smoke_release.py "${RELEASE_TAG#v}"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-dist
+          path: dist/
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-notes
+          path: release-notes.md
+          if-no-files-found: error
+
+  publish:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/genplis/
+    permissions:
+      id-token: write
+    steps:
+      - uses: astral-sh/setup-uv@v10.3.0
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-dist
+          path: dist/
+      - name: Publish verified distributions using Trusted Publishing
+        run: uv publish --trusted-publishing always
+
+  github-release:
+    name: Create GitHub Release
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-dist
+          path: dist/
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-notes
+      - name: Create or update release and attach verified distributions
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release edit "$RELEASE_TAG" --title "genplis $RELEASE_TAG" --notes-file release-notes.md
+            gh release upload "$RELEASE_TAG" dist/* --clobber
+          else
+            gh release create "$RELEASE_TAG" --verify-tag --title "genplis $RELEASE_TAG" --notes-file release-notes.md dist/*
+          fi

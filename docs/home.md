@@ -111,7 +111,7 @@ files, with parallel parsing to help with larger cold scans.
 
 ## Your first mix is a few lines away.
 
-Install from Git with [uv](https://docs.astral.sh/uv/), put a `.m3ug` filter
+Install from PyPI with [uv](https://docs.astral.sh/uv/), put a `.m3ug` filter
 in your music collection, and run Genplis. It writes an `.m3u` next to the
 filter when songs match. Your audio files stay untouched.
 
@@ -122,11 +122,11 @@ filter when songs match. Your audio files stay untouched.
 <div markdown="1">
 
 ```bash
-uv tool install git+https://github.com/haplo/genplis.git
+uv tool install genplis
 genplis ~/Music
 ```
 
-Not on PyPI yet. Requires Python 3.12 or later.
+Requires Python 3.12 or later.
 
 </div>
 

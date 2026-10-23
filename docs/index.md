@@ -12,15 +12,22 @@ writes a matching `.m3u` playlist next to it.
 
 ### 1. Install
 
-You need **Python 3.12 or later** and [uv](https://docs.astral.sh/uv/).
-Genplis is not published to PyPI yet; install it directly from Git:
+You need **Python 3.12 or later**.
+
+Install Genplis with [uv](https://github.com/astral-sh/uv):
 
 ```bash
-uv tool install git+https://github.com/haplo/genplis.git
+uv tool install genplis
+genplis --version
 ```
 
-If you prefer to work from a clone, follow the
-[development setup](dev.md#setup).
+Or with [pipx](https://pipx.pypa.io/stable/):
+
+```bash
+pipx install genplis
+```
+
+If you prefer to work from a clone, follow the [development setup](dev.md#setup).
 
 ### 2. Define a playlist
 
