@@ -92,7 +92,7 @@ The guides below are the same Markdown sources used by the website.
 | [M3UG reference](https://github.com/haplo/genplis/blob/main/docs/m3ug.md) | Rule syntax, operators, ordering, dedupe, limits, includes, filter debugging |
 | [Tags](https://github.com/haplo/genplis/blob/main/docs/tags.md) | Tag names and units, multi-value rules, ratings, statistics, missing tags |
 | [Scheduling](https://github.com/haplo/genplis/blob/main/docs/scheduling.md) | Systemd and cron setup, logs, missed runs, troubleshooting |
-| [Development](https://github.com/haplo/genplis/blob/main/docs/dev.md) | Setup, tests, pre-commit, typing, CI, internals, roadmap |
+| [Development](https://github.com/haplo/genplis/blob/main/docs/dev.md) | Contributor setup, checks, architecture, website, releases, roadmap |
 | [Examples](https://github.com/haplo/genplis/tree/main/examples) | Ready-to-copy `.m3ug` filters and `config.ini` |
 
 ## Acknowledgments
