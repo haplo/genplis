@@ -568,7 +568,7 @@ def get_calculated_tags(tags: Mapping[str, TagValue]) -> Tags:
     tags that are embedded in the original file.
     """
     calculated = get_audio_property_tags(tags)
-    rating = get_rating(tags)
+    rating = get_rating(tags).value
     if rating is not None:
         calculated["*rating"] = rating
     return calculated

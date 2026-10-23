@@ -300,9 +300,15 @@ see [Cleaning the cache](usage.md#cleaning-the-cache).
 
 ### Adding a rating source
 
-Extend `get_rating()` in `m3ug.py`, normalize to 0–5, and add tests alongside
-the `fmps_rating` cases. Check explicit `*rating`, raw-rating precedence,
-unusable values, and diagnostic traces. Update [Tags](tags.md#rating).
+Extend `get_rating()` in `m3ug.py` and return a `CalculatedRating` with the
+normalized 0–5 value, actual source key, and diagnostic note. Keep source-tag
+knowledge inside this function; lookup and trace code consume its result
+without knowing which rating sources are supported. Use a `None` value when
+no usable source is found.
+
+Add rating tests in `tests/test_m3ug.py` and trace tests in
+`tests/test_trace.py`. Check explicit `*rating`, raw-rating precedence, zero
+ratings, unusable values, and source provenance. Update [Tags](tags.md#rating).
 
 ### Changing ordering
 

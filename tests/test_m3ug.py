@@ -850,27 +850,33 @@ def test_contains_rule_list_value() -> None:
 
 
 def test_get_rating_from_fmps_rating() -> None:
-    assert get_rating({"fmps_rating": ["0.8"]}) == pytest.approx(4.0)
+    rating = get_rating({"fmps_rating": ["0.8"]})
+    assert rating.value == pytest.approx(4.0)
+    assert rating.key == "fmps_rating"
+    assert rating.note == "calculated from fmps_rating"
 
 
 def test_get_rating_ignores_non_numeric_fmps_rating(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     with caplog.at_level("WARNING", logger="genplis.m3ug"):
-        assert get_rating({"fmps_rating": ["abc"]}) is None
-        assert get_rating({"fmps_rating": [""]}) is None
-        assert get_rating({"fmps_rating": ["0,8"]}) is None
-        assert get_rating({"fmps_rating": ["abc", "0.8"]}) is None
-        assert get_rating({"fmps_rating": True}) is None
+        assert get_rating({"fmps_rating": ["abc"]}).value is None
+        assert get_rating({"fmps_rating": [""]}).value is None
+        assert get_rating({"fmps_rating": ["0,8"]}).value is None
+        assert get_rating({"fmps_rating": ["abc", "0.8"]}).value is None
+        assert get_rating({"fmps_rating": True}).value is None
     assert "Ignoring non-numeric fmps_rating" in caplog.text
 
 
 def test_get_rating_without_rating_tags() -> None:
-    assert get_rating({"title": ["Test"]}) is None
+    rating = get_rating({"title": ["Test"]})
+    assert rating.value is None
+    assert rating.key is None
+    assert rating.note == "no rating tag"
 
 
 def test_get_rating_ignores_raw_rating_tag() -> None:
-    assert get_rating({"rating": 100, "fmps_rating": ["0.8"]}) == 4
+    assert get_rating({"rating": 100, "fmps_rating": ["0.8"]}).value == 4
 
 
 @pytest.mark.parametrize("cached", [False, True])
@@ -934,8 +940,8 @@ def test_mixed_case_rating_tags_are_case_insensitive() -> None:
         "rating",
         pytest.approx(4.0),
     )
-    assert get_rating({"FMPS_RATING": ["0.8"]}) == pytest.approx(4.0)
-    assert get_rating({"RATING": 4, "FMPS_RATING": ["0.8"]}) == 4
+    assert get_rating({"FMPS_RATING": ["0.8"]}).value == pytest.approx(4.0)
+    assert get_rating({"RATING": 4, "FMPS_RATING": ["0.8"]}).value == 4
 
 
 def test_find_rating_from_single_item_fmps_rating_list() -> None:

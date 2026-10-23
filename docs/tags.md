@@ -151,6 +151,9 @@ standard. Some use 0-1 range, others 0-5, 0-100, 0-255... Genplis calculates
 stars (with decimals). If you have files with ratings that genplis does not
 recognize, please [open an issue](https://github.com/haplo/genplis/issues)!
 
+Filter traces show the actual source tag used for a calculated rating when
+known; they do not assume a source when that information is unavailable.
+
 If you know exactly which rating tag your files use, you can just use it
 instead of `*rating`, just be aware of the range. Use `--tag <tag-name>`
 to see all the values in your collection and infer the range.

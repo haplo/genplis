@@ -593,17 +593,13 @@ def _format_lookup(lookup: TagLookup, palette: Palette) -> str:
             text += f" {palette.source(f'({lookup.note})')}"
         return text
     if lookup.source == "calculated":
-        if lookup.requested not in {"rating", "*rating"}:
-            return (
-                f"calculated {palette.tag(lookup.requested[1:])} = "
-                f"{palette.value(_format_value_or_missing(lookup.normalized))}"
-            )
-        source = lookup.key or "fmps_rating"
-        return (
-            f"calculated rating = "
-            f"{palette.value(_format_value_or_missing(lookup.normalized))} "
-            f"(from {palette.tag(source)})"
+        text = (
+            f"calculated {palette.tag(lookup.requested.removeprefix('*'))} = "
+            f"{palette.value(_format_value_or_missing(lookup.normalized))}"
         )
+        if lookup.requested in {"rating", "*rating"} and lookup.key is not None:
+            text += f" (from {palette.tag(lookup.key)})"
+        return text
     text = (
         f"tag {palette.tag(lookup.key or lookup.requested)} = "
         f"{palette.value(_format_value_or_missing(lookup.raw))}"

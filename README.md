@@ -74,9 +74,10 @@ genplis --tag-stats ~/Music
 genplis -t genre ~/Music
 ```
 
-Filter values are case-insensitive by default; add `@CASE` when case matters.
 Rating scales vary between players, so check a real file before trusting a
-rule. The references below cover the details and the common pitfalls.
+rule. Genplis tries its best to calculate a normalized `*rating`, if it doesn't
+work for you [open an issue asking for
+support](https://github.com/haplo/genplis/issues).
 
 ## Documentation
 

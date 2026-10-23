@@ -9,8 +9,14 @@ from genplis.diagnostics import (
     trace_expression,
     trace_file,
 )
-from genplis.m3ug import parse_m3ug
-from genplis.types import Tags
+from genplis.m3ug import (
+    CalculatedRating,
+    EvaluationTags,
+    NameNode,
+    PredicateCache,
+    parse_m3ug,
+)
+from genplis.types import Tags, TagValue
 
 
 def trace(content: str, tags: Tags, filename: str = "N/A") -> FileTrace:
@@ -84,6 +90,70 @@ def test_calculated_rating_is_reported() -> None:
     assert result.passed is True
     assert "calculated rating = 4.0 (from fmps_rating)" in output
     assert "rating (calculated)" in format_tags_consulted(result.consulted)
+
+
+@pytest.mark.parametrize("name", ["rating", "*rating"])
+def test_calculated_rating_lookup_preserves_source_spelling(name: str) -> None:
+    lookup = NameNode(name).lookup({"FMPS_RATING": ["0.8"]})
+
+    assert lookup.key == "FMPS_RATING"
+    assert lookup.note == "calculated from FMPS_RATING"
+
+
+@pytest.mark.parametrize("name", ["rating", "*rating"])
+@pytest.mark.parametrize("raw", [None, [], ["invalid"], False])
+def test_unusable_rating_source_is_reported(name: str, raw: TagValue) -> None:
+    result = trace(f"{name} >= 0", {"FMPS_RATING": raw})
+
+    assert result.passed is False
+    lookup = result.consulted[0]
+    assert lookup.source == "missing"
+    assert lookup.key is None
+    assert lookup.note == "no usable FMPS_RATING"
+    assert f"missing tag {name} (no usable FMPS_RATING)" in format_file_trace(result)
+
+
+@pytest.mark.parametrize("name", ["rating", "*rating"])
+@pytest.mark.parametrize("cached", [False, True])
+@pytest.mark.parametrize(
+    "rating",
+    [
+        CalculatedRating(4.0, "OtherRating", "calculated from OtherRating"),
+        CalculatedRating(0.0, "OtherRating", "calculated from OtherRating"),
+        CalculatedRating(4.0),
+        CalculatedRating(None, "OtherRating", "no usable OtherRating"),
+        CalculatedRating(None, note="no rating tag"),
+    ],
+)
+def test_rating_evaluation_and_traces_use_resolver_result(
+    monkeypatch: pytest.MonkeyPatch,
+    name: str,
+    cached: bool,
+    rating: CalculatedRating,
+) -> None:
+    monkeypatch.setattr("genplis.m3ug.get_rating", lambda _tags: rating)
+    parsed = parse_m3ug(f"{name} >= 0")
+    raw: Tags = {"OtherRating": ["80"]}
+    tags = EvaluationTags(raw, PredicateCache([parsed.expression])) if cached else raw
+
+    assert NameNode(name).find(tags) == (name, rating.value)
+    assert parsed.expression is not None
+    assert parsed.expression.apply(tags) is (rating.value is not None)
+    result = trace_file(parsed, tags)
+    assert result.passed is (rating.value is not None)
+    lookup = result.consulted[0]
+    assert lookup.key == (rating.key if rating.value is not None else None)
+    assert lookup.note == rating.note
+    output = format_file_trace(result)
+    assert "fmps_rating" not in output
+    if rating.value is None:
+        assert f"missing tag {name} ({rating.note})" in output
+    else:
+        assert f"calculated rating = {rating.value}" in output
+        if rating.key is None:
+            assert "(from " not in output
+        else:
+            assert f"(from {rating.key})" in output
 
 
 def test_explicit_calculated_tags_are_traced() -> None:

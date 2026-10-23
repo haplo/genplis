@@ -57,6 +57,19 @@ class TagLookup:
 
 
 @dataclass(frozen=True, slots=True)
+class CalculatedRating:
+    """A calculated rating with its source key and diagnostic context.
+
+    ``value`` is None when no usable rating source was found. Callers should
+    consume this result without knowing which source tags are supported.
+    """
+
+    value: float | None
+    key: str | None = None
+    note: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class RuleExplanation:
     """A rule evaluation with the tag lookup that produced it."""
 
@@ -126,7 +139,8 @@ def _find_calculated_tag(
     tags: Mapping[str, TagValue], name: str
 ) -> tuple[str | None, TagValue]:
     if name == "*rating":
-        return "fmps_rating", get_rating(tags)
+        rating = get_rating(tags)
+        return rating.key, rating.value
     if name[1:] in AUDIO_PROPERTY_TAGS:
         key, value = _find_tag(tags, name)
         if key is not None:
@@ -143,7 +157,7 @@ def _resolve_tag(tags: Mapping[str, TagValue], name: str) -> TagValue:
         return _find_calculated_tag(tags, name)[1]
     key, value = _find_tag(tags, name)
     if name == "rating" and key is None:
-        return get_rating(tags)
+        return get_rating(tags).value
     return value
 
 
@@ -204,33 +218,37 @@ class EvaluationTags(Mapping[str, TagValue]):
         return found
 
 
-def get_rating(tags: Mapping[str, TagValue]) -> float | None:
-    """Return a rating calculated from known rating alias tags.
+def get_rating(tags: Mapping[str, TagValue]) -> CalculatedRating:
+    """Return a calculated rating and its source-specific diagnostics.
 
-    Returns None when no usable alias tag is present. A raw ``rating`` tag
-    does not affect this calculation; unprefixed lookup handles its precedence.
+    The result's value is None when no usable alias tag is present. A raw
+    ``rating`` tag does not affect this calculation; unprefixed lookup handles
+    its precedence. Source selection and diagnostic notes belong here so
+    callers do not need to know which rating tags are supported.
 
     Ratings are normalized to a 0 to 5 stars range. If you know of a rating
     tag that is missing, feel free to open an issue with a PR to add support
     for it.
     """
     fmps_key, raw_fmps_rating = _find_tag(tags, "fmps_rating")
-    fmps_rating = normalize(raw_fmps_rating) if fmps_key is not None else None
+    if fmps_key is None:
+        return CalculatedRating(None, note="no rating tag")
+    fmps_rating = normalize(raw_fmps_rating)
     if isinstance(fmps_rating, list):
         # normalize() only leaves lists with more than one item
         logger.warning("Unexpected fmps_rating as list: %s", fmps_rating)
         fmps_rating = fmps_rating[0]
-    if fmps_rating is not None:
+    value: float | None = None
+    if isinstance(fmps_rating, bool):
+        logger.warning("Ignoring non-numeric fmps_rating: %r", fmps_rating)
+    elif fmps_rating is not None:
         # fmps_rating goes from 0.0 to 1.0 (5 stars)
-        if isinstance(fmps_rating, bool):
-            logger.warning("Ignoring non-numeric fmps_rating: %r", fmps_rating)
-            return None
         try:
-            return float(fmps_rating) * 5
+            value = float(fmps_rating) * 5
         except (TypeError, ValueError):
             logger.warning("Ignoring non-numeric fmps_rating: %r", fmps_rating)
-            return None
-    return None
+    note = f"no usable {fmps_key}" if value is None else f"calculated from {fmps_key}"
+    return CalculatedRating(value, fmps_key, note)
 
 
 def _unescape_quoted(text: str) -> str:
@@ -539,24 +557,13 @@ class NameNode:
                     source="tag",
                 )
             rating = get_rating(tags)
-            alias_key, _ = _find_tag(tags, "fmps_rating")
-            if rating is not None:
-                return TagLookup(
-                    requested=normalized_name,
-                    key=alias_key,
-                    raw=rating,
-                    normalized=normalize(rating),
-                    source="calculated",
-                    note="calculated from fmps_rating",
-                )
-            note = "no usable fmps_rating" if alias_key is not None else "no rating tag"
             return TagLookup(
                 requested=normalized_name,
-                key=None,
-                raw=None,
-                normalized=None,
-                source="missing",
-                note=note,
+                key=rating.key if rating.value is not None else None,
+                raw=rating.value,
+                normalized=rating.value,
+                source="calculated" if rating.value is not None else "missing",
+                note=rating.note,
             )
         if normalized_name.startswith("*"):
             key, raw = _find_calculated_tag(tags, normalized_name)
